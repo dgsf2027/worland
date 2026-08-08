@@ -8,6 +8,8 @@ const router = createRouter({
     { path: '/quote', name: 'quote', meta: { title: '报价测算器' }, component: () => import('@/views/Quote.vue') },
     { path: '/supplier', name: 'supplier', meta: { title: '供应商 · 上游' }, component: () => import('@/views/Supplier.vue') },
     { path: '/customer', name: 'customer', meta: { title: '客户 · CRM' }, component: () => import('@/views/Customer.vue') },
+    { path: '/asset', name: 'asset', meta: { title: '设备 · 逐件台账' }, component: () => import('@/views/Asset.vue') },
+    { path: '/contract', name: 'contract', meta: { title: '合同 · 签约与租金计划' }, component: () => import('@/views/Contract.vue') },
   ],
 })
 

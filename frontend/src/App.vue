@@ -11,6 +11,8 @@ const route = useRoute()
         <el-menu-item index="/quote">报价测算器</el-menu-item>
         <el-menu-item index="/supplier">供应商 · 上游</el-menu-item>
         <el-menu-item index="/customer">客户 · CRM</el-menu-item>
+        <el-menu-item index="/asset">设备 · 逐件台账</el-menu-item>
+        <el-menu-item index="/contract">合同 · 租金计划</el-menu-item>
         <el-menu-item index="/dashboard">工作台</el-menu-item>
       </el-menu>
     </el-aside>
