@@ -132,3 +132,51 @@ SELECT rule_key,scope_key,rule_value,effective_from,effective_to FROM yc_rent_ru
 - 供应商「账期=回报放大器」表(mockup 有):单台杠杆 IRR 依赖报价引擎+供应商偿付计划(M1-12),本波仅呈现账期/首付,未算单台回报(与冲刺0 leverageNote 口径一致,诚实标注)。
 - 看板卡片拖拽推进阶段:本波只读展示,拖拽改阶段留 M1 后续。
 - RBAC 统一鉴权切面(M1-15)、行级隔离升级为切面:本波在 service 内联强制,切面化待 M1-15。
+
+---
+
+# M1（第二波）· 逐件设备 + 配件树BOM + 合同 + 租金计划 + 单笔P&L（2026-08-08）
+
+## 环境 / 构建
+- `mvn -s settings.xml compile` → **BUILD SUCCESS**；后端重启真 boot（Undertow:8082 · Started RentApplication）。
+- Flyway boot 自动 apply **V5__asset.sql / V6__contract.sql**（flyway_schema_history 到 version=6，success=1）；新表 8 张就位。
+- 前端 `vue-tsc --noEmit` 无错；`vite build` ✓（Asset 13.02kB / Contract 14.20kB chunk）。
+- 报价/供应商/客户回归 curl：quote calc=200、suppliers=200、customers=200，未弄坏 S0/上一波。
+
+## 设备逐件台账（M1-06/07）
+- 表：`yc_rent_asset`（序列号唯一/状态机/价值定价输入/派生 holder+contract）+ `yc_rent_asset_bom`（自引用多级）+ 复用 `yc_rent_asset_event`。
+- curl + 浏览器 E2E：
+  - `GET /rent/assets`（老板）→ 台账列表；`bookValue` 直线折旧即时算（WL-BZQ-0001：基数 18万-2万残值，36月直线，投放11月 → **13.11万**，SQL 手算吻合）；`residualValue`=市场价×transfer_rate（播种墙 20万×0.10=**2万**；货架 6万×0.30=1.8万）。
+  - `GET /rent/assets/1` → 配件树 **2 级递归**（电控系统→PLC/变频器/线束）；成本拆解 Σ=18万=集采价 差 0；残值构成部件合计 3.77万 vs 整机 2万；故障档案按 fault_count 降序（传感2/电控1/变频1）；自购回本=20万/1.5万=**13.3 月**；状态机时间轴 采购→投放→在租（倒序）。
+  - `POST /rent/assets`（供应链）建 WL-BZQ-0003 → 状态机校验：**采购→在租 拒 400**（非法）；**采购→投放 200**；SQL 验 status + asset_event（operator=1006）。
+- 字段级隔离（LP）：purchasePrice/bookValue/costBreakdown/回报率 = null，residual/市场价可见。
+
+## 合同签约 + 自动生成 N 期租金计划（M1-10/11/17/18）
+- 表：`yc_rent_contract` + `yc_rent_contract_asset`（alloc_rent 单台分摊）+ `yc_rent_rent_schedule`（应收计划态）+ `yc_rent_deposit_ledger` + `yc_rent_contract_change`。
+- **核心 curl + SQL 证据（签约 HT-2026-0001：2 台设备/36 期/月租 1.3 万/转让 4 万/起租 2026-02-01）**：
+  - **自动生成 rent_schedule N 期**：SQL `COUNT(*)=36`、`SUM(amount)=468000`、首期 2026-03-01、末期 2029-02-01、已过 6 期。
+  - **勾稽等式成立**：期数×月租 468000 + 转让 40000 = **客户总付 508000**；scheduleSum=468000 → `scheduleBalanced=true`、`balanced=true`；押金 26000（月租×2）**单列不进客户总付**。
+  - **挂设备转在租**：SQL contract_asset 2 行 alloc_rent 各 6500（均摊末台补差）；asset.status→在租（markRented 走 asset_event）。
+  - **押金台账**：deposit_ledger 收 26000。
+  - **每期租金构成**（构成合计恒等月租）：本金摊 10000 + 资金成本 1800 + 残值预留 1111.11 + 差价 88.89 = 13000 ✓。
+  - **单笔 P&L**：收租 468000 + 转让 40000 − 集采 360000 − 资金成本 64800（集采×6%×36/12）− 坏账 9360（收租×2%）= **税后净利 73840**（净利率 15.78%）。
+- **逆向路径**：
+  - **续租**：HT-0001 +12 期 → term 36→48、schedule 48 行、contract_change(续租)。
+  - **提前结清（change）**：settleDate=今天 → 截断未到期 42 期、term→6、status=关闭、押金期末抵、contract_change(提前结清·截断42期)。
+  - **作废（void，限未采购整份红冲）**：HT-0003 → status=已作废、schedule 有效行=0、押金 收+退红字、**设备释放**（status→投放、holder/contract 清空）、contract_change(is_reverse=1)。
+- **禁「融资租赁」**：nature 固定「分期收款销售」；字段/自由文本含「融资租赁」→ 400 校验。
+- 前端 E2E（真浏览器截图）：合同详情抽屉「勾稽对平（绿）/回款进度/每期构成/单笔P&L/挂载设备/租金计划逐期」全渲染；LP 身份 fetch 实测 `pnl:null、rentComposition:null、sensitiveMasked:true`，勾稽/客户总付/alloc 仍可见。
+
+## 修复的坑（本波）
+- **MyBatis-Plus updateById 跳过 null 字段**：作废/状态流转清 `current_holder_customer_id`/`contract_id` 时不生效 → 改用 `LambdaUpdateWrapper.set(col, null)` 显式置空（AssetService.releaseOnVoid / changeStatus）。复测：作废后 holder/contract 真清空。
+
+## 单一真相源 / 口径
+- book_value（经营口径直线折旧占位·注释 M3 asset_depreciation_line 精确化）、residual、self_purchase_payback、单台回报率 —— 全即时算不落库。
+- rent_schedule.plan_status 只计划态（未到期/已生成单）；收款/逾期/红冲态归 M2 rent_bill（未越界写）。
+- alloc_rent 单一真值 Σ=month_rent；rule_config +1 条（contract_bad_debt_rate 0.02）→ 共 31 条。
+
+## 遗留 / 未做（诚实）
+- 「先签约后采购」：本波挂已建档设备（钩子 asset.purchase_in_id + void 限未采购校验就位）；采购模块建单/应付属 **M1-12** 下波。
+- rent_bill 收租/核销/逾期（收款真相源）、折旧表精确 book_value、transfer_order 逐台处置属 **M2/M3/M4**。
+- 单笔 P&L 为经营口径简化（未含税与运维/管理费分摊）、每期构成为简化模型，均已在响应 note 标注，M2 凭证/分配精确化。
+- 设备/合同页身份切换用占位头；RBAC 切面统一鉴权待 M1-15。
