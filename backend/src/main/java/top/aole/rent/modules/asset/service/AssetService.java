@@ -1,6 +1,7 @@
 package top.aole.rent.modules.asset.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -229,15 +230,18 @@ public class AssetService {
             throw new BizException(400, "非法状态流转: " + from + " → " + to
                     + "(允许: " + (allowed.isEmpty() ? "终态" : String.join("/", allowed)) + ")");
         }
-        a.setStatus(to);
-        // 手动流转到"投放/收回待处置/报废"时脱离承租关系(在租/转让由合同事件维护)
+        // 手动流转到"投放/收回待处置/报废"时脱离承租关系(在租/转让由合同事件维护)。
+        // 用 LambdaUpdateWrapper 显式置 null——updateById 默认跳过 null 字段(FieldStrategy.NOT_NULL)。
+        LambdaUpdateWrapper<Asset> uw = new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, id)
+                .set(Asset::getStatus, to);
         if (!"在租".equals(to)) {
-            a.setCurrentHolderCustomerId(null);
+            uw.set(Asset::getCurrentHolderCustomerId, null);
             if (!"待转让".equals(to) && !"已转让".equals(to)) {
-                a.setContractId(null);
+                uw.set(Asset::getContractId, null);
             }
         }
-        assetMapper.updateById(a);
+        assetMapper.update(null, uw);
         writeEvent(id, eventTypeFor(from, to), req.getRefDocType(), req.getRefDocId(), req.getRemark());
         log.info("设备状态流转: assetId={}, {} → {}, by={}", id, from, to, UserContext.getUserId());
     }
@@ -266,10 +270,12 @@ public class AssetService {
         if (a == null) {
             return;
         }
-        a.setStatus("投放");
-        a.setCurrentHolderCustomerId(null);
-        a.setContractId(null);
-        assetMapper.updateById(a);
+        // 显式置 null 清承租关系(updateById 会跳过 null 字段)
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "投放")
+                .set(Asset::getCurrentHolderCustomerId, null)
+                .set(Asset::getContractId, null));
         writeEvent(assetId, "再投放", "contract", contractId, "合同作废释放设备");
     }
 
