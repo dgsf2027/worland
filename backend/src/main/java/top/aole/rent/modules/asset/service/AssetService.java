@@ -6,7 +6,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import top.aole.rent.common.audit.AuditLogService;
 import top.aole.rent.common.auth.DataScope;
+import top.aole.rent.common.auth.RoleGuard;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
@@ -17,6 +19,7 @@ import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
+import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
 import top.aole.rent.modules.asset.mapper.AssetEventMapper;
@@ -71,6 +74,7 @@ public class AssetService {
     private final CustomerMapper customerMapper;
     private final ContractAssetMapper contractAssetMapper;
     private final RentScheduleMapper rentScheduleMapper;
+    private final AuditLogService auditLogService;
 
     /** 状态机:from → 允许的 to 集合。已转让/报废为终态。 */
     private static final Map<String, Set<String>> TRANSITIONS = new HashMap<>();
@@ -230,6 +234,11 @@ public class AssetService {
             throw new BizException(400, "非法状态流转: " + from + " → " + to
                     + "(允许: " + (allowed.isEmpty() ? "终态" : String.join("/", allowed)) + ")");
         }
+        // 投放审批→老板(P0-D):投放是资金投放决策,任意路径(含手动流转/再投放)统一卡老板。
+        // body 依赖(目标状态在入参里),切面无法声明式拦,故在此 service 内联守卫,与 /deploy 端点双保险。
+        if ("投放".equals(to)) {
+            RoleGuard.assertRole("老板");
+        }
         // 手动流转到"投放/收回待处置/报废"时脱离承租关系(在租/转让由合同事件维护)。
         // 用 LambdaUpdateWrapper 显式置 null——updateById 默认跳过 null 字段(FieldStrategy.NOT_NULL)。
         LambdaUpdateWrapper<Asset> uw = new LambdaUpdateWrapper<Asset>()
@@ -277,6 +286,142 @@ public class AssetService {
                 .set(Asset::getCurrentHolderCustomerId, null)
                 .set(Asset::getContractId, null));
         writeEvent(assetId, "再投放", "contract", contractId, "合同作废释放设备");
+    }
+
+    // ============ 采购驱动的资产建档(设备状态机 owner,供 PurchaseService 调用) ============
+
+    /** 入库:逐件生成设备(状态=采购)+ 回填 purchase_in_id,走事件流。序列号唯一。返回 assetId。 */
+    @Transactional
+    public Long createForPurchase(String serialNo, String category, String model,
+                                  BigDecimal marketPrice, BigDecimal purchasePrice, Long supplierId,
+                                  BigDecimal monthlyLaborValue, BigDecimal replaceHeadcount,
+                                  Long purchaseInId, String remark) {
+        Asset dup = assetMapper.selectOne(new LambdaQueryWrapper<Asset>()
+                .eq(Asset::getSerialNo, serialNo.trim()));
+        if (dup != null) {
+            throw new BizException(400, "序列号已存在: " + serialNo);
+        }
+        Asset a = new Asset();
+        a.setSerialNo(serialNo.trim());
+        a.setCategory(category.trim());
+        a.setModel(model);
+        a.setMarketPrice(marketPrice);
+        a.setPurchasePrice(purchasePrice);
+        a.setSupplierId(supplierId);
+        a.setMonthlyLaborValue(monthlyLaborValue);
+        a.setReplaceHeadcount(replaceHeadcount);
+        a.setPurchaseInId(purchaseInId);
+        a.setStatus("采购");
+        a.setRemark(remark);
+        assetMapper.insert(a);
+        writeEvent(a.getId(), "采购", "purchase_in", purchaseInId, "采购入库逐件建档");
+        return a.getId();
+    }
+
+    /** 采购退货红冲:设备报废释放(在租设备禁退货)。走事件流。 */
+    @Transactional
+    public void scrapOnPurchaseReturn(Long assetId, Long purchaseInId) {
+        Asset a = assetMapper.selectById(assetId);
+        if (a == null) {
+            return;
+        }
+        if ("在租".equals(a.getStatus())) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 已在租,不可退货红冲(先处理合同)");
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "报废")
+                .set(Asset::getCurrentHolderCustomerId, null)
+                .set(Asset::getContractId, null));
+        writeEvent(assetId, "报废", "purchase_in", purchaseInId, "采购退货红冲·设备报废释放");
+    }
+
+    // ============ 投放/交付确认(M1-14·投放审批→老板) ============
+
+    /** 投放/交付确认:采购/收回待处置 → 投放。走事件流 + audit(EXECUTED)。切面已卡老板。 */
+    @Transactional
+    public void deliver(Long assetId, String remark) {
+        Asset a = load(assetId);
+        String from = a.getStatus();
+        if (!"采购".equals(from) && !"收回待处置".equals(from)) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 当前 " + from + " 不可投放(需 采购/收回待处置)");
+        }
+        String eventType = "收回待处置".equals(from) ? "再投放" : "投放";
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "投放"));
+        writeEvent(assetId, eventType, null, null, remark == null ? "投放/交付确认" : remark);
+        auditLogService.record("投放审批", "asset", assetId, AuditLogService.EXECUTED,
+                from + "→投放 · " + (remark == null ? "交付确认" : remark));
+        log.info("投放/交付确认: assetId={}, {}→投放, by={}", assetId, from, UserContext.getUserId());
+    }
+
+    // ============ 空置亮灯(M1-14·流程6) ============
+
+    /** 空置亮灯:收回待处置 + 投放超 N 天未起租。老板驾驶舱红点数据源。 */
+    public IdleAlertResponse idleAlert() {
+        int threshold = idleAlertDays();
+        LocalDate today = LocalDate.now();
+        List<Asset> all = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
+                .in(Asset::getStatus, Arrays.asList("投放", "收回待处置"))
+                .orderByAsc(Asset::getId));
+
+        List<IdleAlertResponse.IdleItem> items = new ArrayList<>();
+        for (Asset a : all) {
+            String reason = null;
+            LocalDate since = null;
+            if ("收回待处置".equals(a.getStatus())) {
+                reason = "收回待处置";
+                LocalDateTime t = lastEventTimeIn(a.getId(), new HashSet<>(Arrays.asList("收回待处置")));
+                since = t != null ? t.toLocalDate() : null;
+            } else if ("投放".equals(a.getStatus())) {
+                // 最近一次进入投放态(投放/再投放)起算未起租天数
+                LocalDateTime t = lastEventTimeIn(a.getId(), new HashSet<>(Arrays.asList("投放", "再投放")));
+                if (t != null) {
+                    long days = ChronoUnit.DAYS.between(t.toLocalDate(), today);
+                    if (days > threshold) {
+                        reason = "投放超期未起租";
+                        since = t.toLocalDate();
+                    }
+                }
+            }
+            if (reason == null) {
+                continue;
+            }
+            IdleAlertResponse.IdleItem it = new IdleAlertResponse.IdleItem();
+            it.setAssetId(a.getId());
+            it.setSerialNo(a.getSerialNo());
+            it.setCategory(a.getCategory());
+            it.setModel(a.getModel());
+            it.setStatus(a.getStatus());
+            it.setReason(reason);
+            it.setSinceDate(since);
+            it.setIdleDays(since != null ? (int) Math.max(0, ChronoUnit.DAYS.between(since, today)) : null);
+            it.setResidualValue(residualValue(a));
+            items.add(it);
+        }
+        items.sort(Comparator.comparingInt((IdleAlertResponse.IdleItem i) ->
+                i.getIdleDays() == null ? 0 : i.getIdleDays()).reversed());
+
+        IdleAlertResponse r = new IdleAlertResponse();
+        r.setThresholdDays(threshold);
+        r.setItems(items);
+        r.setAlertCount(items.size());
+        return r;
+    }
+
+    private int idleAlertDays() {
+        BigDecimal v = safeValue("idle_alert_days", "");
+        return v != null && v.intValue() > 0 ? v.intValue() : 30;
+    }
+
+    /** 某设备最近一次指定类型事件的业务时间(无则 null)。 */
+    private LocalDateTime lastEventTimeIn(Long assetId, Set<String> eventTypes) {
+        List<AssetEvent> es = eventMapper.selectList(new LambdaQueryWrapper<AssetEvent>()
+                .eq(AssetEvent::getAssetId, assetId)
+                .in(AssetEvent::getEventType, eventTypes)
+                .orderByDesc(AssetEvent::getBizTime).orderByDesc(AssetEvent::getId));
+        return es.isEmpty() ? null : es.get(0).getBizTime();
     }
 
     // ============ 配件树 BOM 维护 ============

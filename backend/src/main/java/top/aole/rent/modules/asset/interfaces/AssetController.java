@@ -13,12 +13,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import top.aole.rent.common.auth.RequireRole;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
+import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.service.AssetService;
 
@@ -64,10 +66,24 @@ public class AssetController {
         return R.ok();
     }
 
-    @ApiOperation("状态流转(走事件流 + 状态机校验)")
+    @ApiOperation("状态流转(走事件流 + 状态机校验;流转到「投放」需老板)")
     @PostMapping("/{id}/status")
     public R<Void> changeStatus(@PathVariable Long id, @Validated @RequestBody StatusChangeRequest req) {
         assetService.changeStatus(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("空置亮灯:收回待处置 + 投放超N天未起租(老板驾驶舱红点)")
+    @GetMapping("/idle-alert")
+    public R<IdleAlertResponse> idleAlert() {
+        return R.ok(assetService.idleAlert());
+    }
+
+    @ApiOperation("投放/交付确认(敏感·投放审批→老板):采购/收回待处置→投放")
+    @RequireRole(value = {"老板"}, action = "投放审批", targetType = "asset")
+    @PostMapping("/{id}/deploy")
+    public R<Void> deploy(@PathVariable Long id, @RequestParam(required = false) String remark) {
+        assetService.deliver(id, remark);
         return R.ok();
     }
 
