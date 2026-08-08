@@ -6,6 +6,8 @@ const router = createRouter({
     { path: '/', redirect: '/quote' },
     { path: '/dashboard', name: 'dashboard', meta: { title: '工作台' }, component: () => import('@/views/Dashboard.vue') },
     { path: '/quote', name: 'quote', meta: { title: '报价测算器' }, component: () => import('@/views/Quote.vue') },
+    { path: '/supplier', name: 'supplier', meta: { title: '供应商 · 上游' }, component: () => import('@/views/Supplier.vue') },
+    { path: '/customer', name: 'customer', meta: { title: '客户 · CRM' }, component: () => import('@/views/Customer.vue') },
   ],
 })
 

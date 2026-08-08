@@ -92,3 +92,43 @@ SELECT rule_key,scope_key,rule_value,effective_from,effective_to FROM yc_rent_ru
 - M1~M5 业务模块（供应商/客户CRM/逐件设备/合同/收租/双账/转让/BI 等）——按 TODO 分期。
 - 精确月租 0.09% 残差与单台杠杆 IRR 的账期口径：待与用户确认源表假设。
 - 前端 `pnpm build` 脚本包装器策略问题（非代码）：已用直接 vite 构建绕过。
+
+---
+
+# M1 供应商 + 客户CRM 验收(2026-08-08)
+
+## 环境与编译
+- `mvn -s settings.xml compile` 通过;后端真 boot 8082(Undertow),Flyway 自动应用 **V3__supplier / V4__customer** → `Successfully applied 2 migrations, now at version v4`。
+- 前端 `vue-tsc --noEmit` 通过 0 error;vite 5175 起,浏览器 3 页 E2E 无 console error。
+- 回归:`/api/v1/health` alive;报价引擎 `/rent/quote/calc` 播种墙/云山 → 月租6718.06·速算6720·税后IRR25%·三层25/50/65.8(与冲刺0 基线一致,地基未坏)。
+
+## 供应商模块(M1-01/02)
+- 表:`yc_rent_supplier`(6状态) + `yc_rent_supplier_supply`(供货矩阵·履约五维·价格构成)。
+- 接口 curl 证据:
+  - `GET /rent/suppliers` → 4 家,履约加权总分即时算(恒丰88/82/90/85/84 → **86**,权重来自 rule_config,对平 mockup)。
+  - `GET /rent/suppliers?category=播种墙` → 2 家(CJK query 需 URL 编码,axios 自动编码 OK)。
+  - `GET /rent/suppliers/dependency-alert` → 品类「货架」可用 0 家 < 2 亮灯。
+  - `GET /rent/suppliers/1` → 履约雷达/供货矩阵(整机+电控+传感)/价格构成(材料9.4万/加工4.7万/利润3.9万·报价18万 vs BOM17.6万=合理)。
+  - `POST /rent/suppliers` 建 → `POST /{id}/retire` 淘汰 → SQL 验:status=淘汰、retire_reason、retired_by=1006(供应链)留痕。
+- P0-E 字段级:as LP → `costMasked=true`、priceComposition=null、supplyMatrix.quotePrice=null,但履约分仍可见。
+
+## 客户CRM(M1-03/04/05/09)
+- 表:`yc_rent_customer`(信用五维+准入决策+行级隔离键) + `yc_rent_customer_followup` + `yc_rent_opportunity`。
+- 接口 curl + 浏览器 E2E 证据:
+  - `GET /rent/customers`(老板)→ 6 家;评级即时算(阿昌75/55/70/48/65 → 加权62 → **B**,对平 mockup)。
+  - `GET /rent/customers/5` → 信用画像/加权62→B/准入建议 **20万·2月·30%**(rule_config 矩阵)/LTV(合同3·收租18.6万·利润4.1万·续租67%)/敞口11万·逾期5181/集中度4.38%(即时算)/时间线4条。
+  - `GET /rent/customers/pipeline` → 6 列看板 + 加权预测 **101万**(Σ open 商机 est×prob)。
+  - `POST /rent/customers/5/followup` → SQL 验落库 + 客户 next_follow_date 同步。
+  - `POST /rent/customers/2/admission`(rating B)→ SQL 验 credit_limit=200000/deposit=2/target_irr=0.30/note 落定。
+- **P0-E 服务端隔离(浏览器实测三身份切换)**:
+  - 行级:切「业务」(1007)→ 客户池由 6 → **4**(李工名下京东/云山不可见);`GET /customers/3`(李工客户)越权 → **403**。
+  - 字段级:切「投资人」(LP)→ 在租额/逾期/LTV/授信/IRR 全 🔒 打码,评级/阶段/跟进仍可见。
+  - 隔离在 DAO 查询条件(owner OR 公海)+ DTO 投影双层,非仅前端隐藏。
+
+## 派生字段单一真相源(§4.24)
+- 履约加权总分、客户评级/加权信用分、集中度、准入建议 —— 全部 rule_config 权重/阶梯即时算,不落库(防 stale);准入落定值由准入接口唯一写手写入。rule_config 由 25 → **30** 条(+供应商权重/依赖下限 +客户权重/评级阶梯/准入矩阵)。
+
+## 遗留 / 未做
+- 供应商「账期=回报放大器」表(mockup 有):单台杠杆 IRR 依赖报价引擎+供应商偿付计划(M1-12),本波仅呈现账期/首付,未算单台回报(与冲刺0 leverageNote 口径一致,诚实标注)。
+- 看板卡片拖拽推进阶段:本波只读展示,拖拽改阶段留 M1 后续。
+- RBAC 统一鉴权切面(M1-15)、行级隔离升级为切面:本波在 service 内联强制,切面化待 M1-15。

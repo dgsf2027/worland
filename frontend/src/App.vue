@@ -9,6 +9,8 @@ const route = useRoute()
       <div class="brand">沃朗租赁</div>
       <el-menu :default-active="route.path" router>
         <el-menu-item index="/quote">报价测算器</el-menu-item>
+        <el-menu-item index="/supplier">供应商 · 上游</el-menu-item>
+        <el-menu-item index="/customer">客户 · CRM</el-menu-item>
         <el-menu-item index="/dashboard">工作台</el-menu-item>
       </el-menu>
     </el-aside>
