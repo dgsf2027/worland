@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/customer', name: 'customer', meta: { title: '客户 · CRM' }, component: () => import('@/views/Customer.vue') },
     { path: '/asset', name: 'asset', meta: { title: '设备 · 逐件台账' }, component: () => import('@/views/Asset.vue') },
     { path: '/contract', name: 'contract', meta: { title: '合同 · 签约与租金计划' }, component: () => import('@/views/Contract.vue') },
+    { path: '/rent', name: 'rent', meta: { title: '收租 · 收租单与逾期' }, component: () => import('@/views/Rent.vue') },
   ],
 })
 

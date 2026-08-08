@@ -13,6 +13,7 @@ const route = useRoute()
         <el-menu-item index="/customer">客户 · CRM</el-menu-item>
         <el-menu-item index="/asset">设备 · 逐件台账</el-menu-item>
         <el-menu-item index="/contract">合同 · 租金计划</el-menu-item>
+        <el-menu-item index="/rent">收租 · 收租单/逾期</el-menu-item>
         <el-menu-item index="/dashboard">工作台</el-menu-item>
       </el-menu>
     </el-aside>
