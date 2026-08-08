@@ -49,8 +49,9 @@ public class UserContextFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         try {
-            String name = request.getHeader(HEADER_NAME);
-            String role = request.getHeader(HEADER_ROLE);
+            // Undertow/Servlet 默认按 ISO-8859-1 解析请求头,中文名会 mojibake,需转回 UTF-8
+            String name = decodeHeader(request.getHeader(HEADER_NAME));
+            String role = decodeHeader(request.getHeader(HEADER_ROLE));
             if (name != null && !name.trim().isEmpty()) {
                 Long userId = resolveUserId(name.trim());
                 UserContext.set(new CurrentUser(userId, name.trim(), role == null ? "" : role.trim(), null));
@@ -61,6 +62,14 @@ public class UserContextFilter extends OncePerRequestFilter {
             // 线程复用,必须清理,否则身份串号
             UserContext.clear();
         }
+    }
+
+    /** 请求头从 ISO-8859-1 还原为 UTF-8(中文名占位头);已是 ASCII 则无损。 */
+    private String decodeHeader(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        return new String(raw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
     }
 
     /** 姓名 → 稳定非 0 主键:种子表优先,否则名字 hash 落到 [100000, 999999] 区间(确定性、可复现)。 */
