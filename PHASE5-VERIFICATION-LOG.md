@@ -180,3 +180,50 @@ SELECT rule_key,scope_key,rule_value,effective_from,effective_to FROM yc_rent_ru
 - rent_bill 收租/核销/逾期（收款真相源）、折旧表精确 book_value、transfer_order 逐台处置属 **M2/M3/M4**。
 - 单笔 P&L 为经营口径简化（未含税与运维/管理费分摊）、每期构成为简化模型，均已在响应 note 标注，M2 凭证/分配精确化。
 - 设备/合同页身份切换用占位头；RBAC 切面统一鉴权待 M1-15。
+
+---
+
+# M1 收口验收 —— 采购应付+退货 / 投放·空置亮灯 / RBAC 统一切面（2026-08-08）
+
+## 环境 / 编译 / 启动
+- `mvn -s settings.xml compile` → **BUILD SUCCESS**（全量）。
+- 后端 `spring-boot:run` 8082 启动：Flyway `Current version 6 → Migrating to v7 → Successfully applied 1 migration, now at v7`；`Started RentApplication`。
+- 健康：`GET /api/v1/health` → `{code:200,"worland-rent backend alive"}`。
+- **地基回归（没弄坏）**：`/api/v1/health` 200；`rent/suppliers` total=4、`rent/customers` total=6、`rent/contracts` total=3、`rent/assets` total=6 均 200；`quote/calc` 缺 monthlyLaborValue 正确 400（价值定价校验在）。
+- 前端 `vite build` → `✓ built in 2.72s`（Dashboard/Quote/Supplier/Customer/Asset/Contract chunk 正常，无破坏）。
+
+## 采购应付 + 退货（M1-12/13）—— curl + SQL 证据
+- **无合同拒采购**：`POST /rent/purchase`（contractId=999 不存在）→ `404 合同不存在,不允许建采购单(先签约后采购)`；contractId=2（已作废)→ `400 合同已作废,不允许建采购单`。✅ 硬校验
+- **下单**（contract=1·2 件·total 222000）→ `200 data=1`。SQL：`purchase_in(id=1,status=已下单,total=222000)`；`payable` 1 行 `首付 66600 待付`（下单即生成首付·30%）；`purchase_item` 2 件 `asset_id=NULL`。
+- **入库自动生成逐件 asset**：`POST /rent/purchase/1/receive` → 200。SQL：
+  - `yc_rent_asset` 新增 **id=7(WL-T-9001·播种墙)/id=8(WL-T-9002·货架)**，`status=采购`、`purchase_in_id=1`、`purchase_price` 逐件落库。✅ **入库自动逐件建 asset**
+  - `purchase_item.asset_id` 回填 7/8。✅ 回填
+  - `payable` 变 **3 期**：首付 66600 / 验收 133200 / 尾款 22200（due=入库日+账期90天）→ **合计 222000 = 采购总额**。✅ **应付计划 3 期落库**
+  - `asset_event` 逐件 `采购/ref=purchase_in#1`。✅ 事件流留痕
+- **退货红冲**：`POST /rent/purchase/1/return`（供应链）→ 200。SQL：`purchase_in.status=已红冲`；`asset 7,8 status=报废、contract_id=NULL`（释放）；`payable` 3 期全 `红冲` + 新增 `退款红字 -222000`。✅ **红冲+设备释放+应付红字**
+- **GP/LP 成本打码**：`GET /rent/purchase/1`（角色 GP）→ `sensitiveMasked=true`、`totalAmount/purchasePrice/payable.amount` 均 `null`；老板可见全额。✅ 字段级隔离
+
+## 投放 / 空置亮灯（M1-14）
+- **投放/交付确认**：`POST /rent/assets/7/deploy`（老板）→ 200，`采购→投放` 走事件流 + EXECUTED audit。
+- **空置亮灯**：`GET /rent/assets/idle-alert` → asset1 `在租→收回待处置` 后亮灯 `alertCount=1`，`reason=收回待处置、residualValue=20000（市场价×10%转让率）`；阈值 `idle_alert_days=30`（rule_config）。✅ 驾驶舱红点数据源
+  - 注：投放超期分支按「最近投放/再投放事件距今 > 阈值」判定；种子 asset2 投放 19 天未达阈值故不亮（口径正确）。
+
+## RBAC 统一鉴权切面（M1-15 · P0-D）—— 越权 403 + audit
+统一切面 `@RequireRole` + `RoleGuardInterceptor`（HandlerInterceptor·零新增依赖），越权先卡权限不进业务：
+| 敏感操作 | 越权角色 | 结果 | 放行角色 | 结果 |
+|---|---|---|---|---|
+| 投放审批 asset7 | 财务 | **403 DENIED** | 老板 | 200 EXECUTED |
+| 采购退货 purchase1 | 财务 | **403 DENIED** | 供应链 | 200 EXECUTED |
+| 合同作废 contract1 | 业务 | **403 DENIED** | （财务/老板） | — |
+| 供应商淘汰 supplier4 | 业务 | **403 DENIED** | 供应链 | 200 EXECUTED |
+- **状态流转→投放 内联守卫**：`POST /rent/assets/8/status{投放}`（供应链）→ 403（body 依赖，切面拦不了，service 内 `RoleGuard.assertRole(老板)` 兜底·与 /deploy 双保险）。
+- **audit 留痕**：`yc_rent_audit_log` 共 7 行，覆盖 DENIED（越权拦截）+ EXECUTED（放行执行），含 action/target/result/operator_role/detail，`REQUIRES_NEW` 独立事务（DENIED 不随被拦请求回滚）。✅
+
+## 🚨 P0-C 上线红线待办（代码层做不了·部署拓扑）
+**网关剥离客户端 X-User-\* 头再重注入**：占位期后端直接信任请求头 `X-User-Name/X-User-Role` 解析身份（`UserContextFilter`）。**生产上线前，可信网关必须先剥离客户端自带的 X-User-\* 头，再按会话重注入**，否则任意客户端可伪造 `X-User-Role: 老板` 绕过本波所有 RBAC 切面。此为部署配置项（ADR-001 / DESIGN §二 P0-C / §十一 B），**代码层无法自证，列为上线 Gate 阻断项**。切真 SSO（ole 澳乐门户 auth_code 换 token）后由门户下发身份，此红线自然消解。
+
+## 遗留 / 未做（诚实 · 本波）
+- **采购/应付前端页 未建**：本波交付为后端 REST + SQL 验收（交付清单即后端范围）；UI-mockup「采购入库·应付页 / 驾驶舱空置红点」React 落地属下波（可复用 idle-alert / purchase 接口）。
+- 应付「实付/核销」「兑付缺口 T-N 扫描红灯」属 M3（本波已为其留 `payable.due_date/amount/status` 负债字段）。
+- 退货红冲当前为整单红冲（非逐件部分退）；名义价/幂等键（reverses_id 唯一约束）等 P0-F/P1-19 强化属后续。
+- audit 身份取占位头解析（P1-16 网关注入身份指纹待真 SSO）。
