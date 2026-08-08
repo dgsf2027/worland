@@ -227,3 +227,59 @@ SELECT rule_key,scope_key,rule_value,effective_from,effective_to FROM yc_rent_ru
 - 应付「实付/核销」「兑付缺口 T-N 扫描红灯」属 M3（本波已为其留 `payable.due_date/amount/status` 负债字段）。
 - 退货红冲当前为整单红冲（非逐件部分退）；名义价/幂等键（reverses_id 唯一约束）等 P0-F/P1-19 强化属后续。
 - audit 身份取占位头解析（P1-16 网关注入身份指纹待真 SSO）。
+
+---
+
+# M2 收租闭环 验收日志（2026-08-08）
+
+环境:mvn compile + boot 重启(8082 释放后 spring-boot:run)· health `/api/v1/health` 200 · Flyway V7→**V8**(rent_bill/overdue_case/repossess_order + 3 rule seed)自动 apply · 前端 vite build 通过 + 真浏览器测。DB 走 `docker exec vend-mysql mysql`。测试数据:新建生效合同 `HT-M2-TEST-01`(id4·起租 2026-02-01 回溯·6 期·月租 5000·挂 asset3)。
+
+## M2-01 收租单生成 cron（双出口 + 幂等 + 生效守卫）
+- `POST /rent/bills/gen/run`(执行体 = `RentBillGenScheduler.runRentBillGenCron`→`RentBillService.runRentBillGen`;`@Scheduled(0 0 1 * * ?)` startup 注册·非 require.main)→ `generated:6, skipped:6, horizon:2026-08-11`。
+- **SQL 验到期生成**:`yc_rent_rent_bill` contract4 生成 6 张(P01-P06·due 2026-03-01~08-01·amount 5000·status 待收)。
+- **SQL 验回写**:`yc_rent_rent_schedule` contract4 六期 `plan_status=已生成单` + `rent_bill_id` 已回填(1..6)。✅ 单一真相源单向回写
+- **生效守卫**:skipped=6 = 关闭/已作废合同(HT-2026-0001 关闭 等)的到期计划行被跳过(仅生效合同生成)。
+- **幂等**:再跑一次 → `generated:0`(已回填 rent_bill_id 不重复生成)。
+
+## M2-02 到账核销
+- `POST /rent/bills/1/match`(财务·金额缺省=应收)→ 200,bill1 `status=已核销, received_amount=5000, matched_at, account_period=2026-08, voucher_id=NULL`(收入简化流水·凭证 M3 钩子)。
+- 幂等:重复 match 已核销单 → 400「已核销(幂等拒)」。金额不一致 → 400「需人工处理」。
+
+## M2-03 红冲（P0-F 三保险）
+- `POST /rent/bills/1/reverse`(财务)→ 影响清单:`生成红冲行 …-P01-R 金额 -5000 / 原单→红冲 / 租金计划 期1 回退未到期+清关联 / 无凭证无需冲销`。
+  - **SQL 金额反转**:原单 id1 `status=红冲`;红冲行 id7 `amount=-5000, bill_kind=红冲, reverses_id=1`。✅
+  - **SQL 计划回退**:schedule 期1 `plan_status=未到期, rent_bill_id=NULL`。✅
+- **幂等(应用层)**:再 reverse id1 → 400「已是红冲态」。
+- **幂等(DB 硬约束)**:直接 `INSERT … reverses_id=1` → **ERROR 1062 Duplicate for key `uk_bill_reverses`**;确认 DUP-TEST 未落库(dup_rows=0)。✅ reverses_id 唯一约束 = 幂等键
+- **锁账守卫**:`INSERT accounting_period(2026-08,tax,is_locked=1)` 后 match 待收单 → **400「会计期 2026-08(tax)已锁账,禁止写入,请走上期调整」**;解锁后 match → 已核销。✅
+- **RBAC**:reverse 以「业务」角色 → **403 DENIED** +「收租红冲」audit(operator_role=业务, result=DENIED)。
+
+## 退款
+- `POST /rent/bills/2/refund{amount:5000}`(财务)→ 负额退款单 `…-P02-RF amount=-5000, bill_kind=退款, status=已核销, ref_bill_id=2`。✅
+
+## M2-05 逾期检测 + 三步走
+- `POST /rent/overdue/scan/run`(执行体 = `OverdueScanScheduler.runOverdueScanCron`;`@Scheduled(0 0 2 * * ?)`)→ `opened:3, marked:3`(P03/P04/P06 待收过期→逾期+开案)。
+  - **SQL**:3 案 `step=延期, status=开启, owner=财务, deadline=today+7`;对应 bill `status=逾期`。✅ 每案裁决人+期限
+  - **幂等**:再跑 → `opened:0`(uk_overdue_bill 唯一约束 + 已有案跳过)。
+- **三步走(案1/P03)**:`extend`(展期10天·owner 刘总)→ `penalty{days:30}` → **罚息单 `PN-… amount=75.00`(5000×0.0005×30)** + 案 `penalty_amount=75`;→ `lock`(step=锁机) → `repossess`(owner 老板)。
+  - **SQL 收回**:`yc_rent_repossess_order REP-… asset_count=1 disposal_status=待处置`;**asset3 `status=收回待处置`**(接 M1 状态机 在租→收回待处置);案 `step=收回, status=关闭, closed_at`。✅
+
+## M2-06 还款恢复
+- `POST /rent/overdue/2/repay`(案2/P04)→ `caseStatus=关闭, assetsRestored=true`。**SQL**:案2 `step=关闭 status=关闭 closed_at`,bill P04 `status=已核销`。✅
+
+## M2-04 钱该动没动稽核
+- `GET /rent/audit/cash-check` → `到期未生成单 / 已到账未核销 / 已核销缺凭证` 三项计数 + 明细。已核销缺凭证 N>0(M2 未生成凭证·符合预期·待 M3);红冲后该期回「到期未生成单」亮灯 → 再跑 gen 生成 `…-P01-G2` 补单闭环(bill_no 撞车 500 bug 已修:同期重生成追加 -G{n})。✅
+
+## 前端 · 收租页(真浏览器验)
+- `/rent` 路由 + 侧栏「收租 · 收租单/逾期」;vite build 通过(Rent chunk 12.13kB)。
+- **V1 happy path**:勾选待收单 → 批量核销按钮实时显示「1张 · ¥5,000」→ 确认 → 单转已核销(操作列变红冲/退款);顶部稽核带「已核销缺凭证 4→5」联动。✅
+- **两 tab 渲染**:收租单 tab(状态/性质/逾期天数/缺凭证 tag + 核销/红冲/退款)、逾期 tab(三步走按钮·已结案灰显)。**0 console error**。
+
+## 回归(地基未坏 · main 仍 boot)
+health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → 全 `code:200`;设备/合同/采购模块逻辑未改(仅 AssetService 新增 `repossess` 方法,不动既有流转)。
+
+## 遗留 / 未做（诚实 · 本波）
+- **锁机**为记步 + 留痕(step=锁机 + audit),真远程锁机由 IoT 侧执行(留钩子);收回后设备 `收回待处置`,再投放/二手/报废属 M4。
+- **收入凭证**M2 为简化流水(rent_bill 已核销 + received_amount),完整双账凭证 + `voucher_id` 回填属 M3(稽核「已核销缺凭证」恒亮以提示)。
+- 核销金额一致才自动核销;**部分收款/超额/多笔拆分**属 M3;罚息为按次手动计(自动罚息 cron 可后续加)。
+- audit/operator 身份仍取占位头(P1-16 网关注入指纹待真 SSO);P0-C 网关剥离 X-User-* 红线同前波未消解。
