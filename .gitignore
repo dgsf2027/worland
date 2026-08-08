@@ -1,0 +1,10 @@
+target/
+node_modules/
+dist/
+*.class
+.env
+.env.*
+*.log
+.DS_Store
+.idea/
+storage/

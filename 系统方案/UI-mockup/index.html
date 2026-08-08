@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>沃朗科技租赁板块 · UI Mockup V1</title>
+<style>
+  :root{
+    --paper:#f7f3ea; --paper2:#fffdf8; --ink:#2b2620; --ink2:#6b6355; --line:#e2d9c8;
+    --brand:#1f4e79; --brand2:#2e6da4; --gold:#b8862f;
+    --up:#2e7d32; --up-bg:#eaf3e6; --down:#c0392b; --down-bg:#fbe9e7; --warn:#b8862f; --warn-bg:#fcf3e0;
+    --shadow:0 1px 3px rgba(60,50,30,.08),0 6px 20px rgba(60,50,30,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--paper);color:var(--ink);font-size:14px;line-height:1.6}
+  .app{display:flex;min-height:100vh}
+  /* sidebar */
+  .side{width:210px;background:#20242c;color:#cdd3dc;flex-shrink:0;padding:0 0 30px}
+  .brand{padding:18px 20px;border-bottom:1px solid #2c3138}
+  .brand b{color:#fff;font-size:16px;letter-spacing:1px}
+  .brand span{display:block;color:#8b93a0;font-size:11px;margin-top:3px}
+  .plat{font-size:10px;color:#6b7280;padding:8px 20px 4px;letter-spacing:1px}
+  .nav a{display:flex;align-items:center;gap:9px;padding:9px 20px;color:#cdd3dc;text-decoration:none;font-size:13px;cursor:pointer;border-left:3px solid transparent}
+  .nav a:hover{background:#282d35}
+  .nav a.on{background:#2c3a4d;color:#fff;border-left-color:var(--gold)}
+  .nav a .ic{width:18px;text-align:center}
+  .nav .grp{font-size:10px;color:#5a6270;padding:12px 20px 4px;letter-spacing:1px}
+  /* main */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{background:var(--paper2);border-bottom:1px solid var(--line);padding:12px 26px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5}
+  .top .crumb{font-size:12px;color:var(--ink2)}
+  .top .crumb b{color:var(--ink);font-size:15px;display:block;margin-top:2px}
+  .top .right{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--ink2)}
+  .watermark{background:var(--warn-bg);color:var(--warn);padding:3px 10px;border-radius:20px;font-size:11px;border:1px solid #edd9a8}
+  .u{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px}
+  .wrap{padding:22px 26px;max-width:1180px}
+  .page{display:none}.page.on{display:block}
+  /* generic */
+  h2.pt{font-size:19px;margin-bottom:3px}
+  .sub{color:var(--ink2);font-size:12px;margin-bottom:18px}
+  .flow{display:flex;gap:6px;align-items:center;background:#eef4f9;border:1px solid #d5e3f0;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:12px;flex-wrap:wrap}
+  .flow .st{padding:3px 10px;border-radius:14px;color:var(--ink2)}
+  .flow .st.cur{background:var(--brand);color:#fff}
+  .flow .ar{color:#b9c6d4}
+  .src{background:#eef4f9;border-left:3px solid var(--brand2);padding:7px 12px;border-radius:0 6px 6px 0;font-size:12px;color:var(--brand);margin-bottom:16px}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  .card{background:var(--paper2);border:1px solid var(--line);border-radius:12px;padding:15px 16px;box-shadow:var(--shadow)}
+  .card .k{font-size:12px;color:var(--ink2)}
+  .card .v{font-size:24px;font-weight:700;margin:5px 0 2px;font-variant-numeric:tabular-nums}
+  .card .t{font-size:11px;color:var(--ink2)}
+  .card .badge{font-size:11px;padding:1px 7px;border-radius:10px}
+  .up{color:var(--up)}.down{color:var(--down)}
+  .b-up{background:var(--up-bg);color:var(--up)}.b-down{background:var(--down-bg);color:var(--down)}.b-warn{background:var(--warn-bg);color:var(--warn)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+  .panel{background:var(--paper2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);margin-bottom:16px}
+  .panel h3{font-size:14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+  .panel h3 .more{font-size:12px;color:var(--brand2);font-weight:400;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--ink2);font-weight:600;font-size:12px}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr:hover td{background:#faf7f0}
+  .lnk{color:var(--brand2);cursor:pointer;border-bottom:1px dashed #b9c6d4}
+  .pill{font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+  .p-rent{background:#e7f0f9;color:var(--brand2)}.p-ok{background:var(--up-bg);color:var(--up)}
+  .p-over{background:var(--down-bg);color:var(--down)}.p-warn{background:var(--warn-bg);color:var(--warn)}.p-idle{background:#eee;color:#777}
+  .btn{background:var(--brand);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+  .aibadge{display:inline-flex;align-items:center;gap:4px;font-size:11px;background:#f0ecfa;color:#6c47c4;padding:2px 8px;border-radius:10px;cursor:pointer}
+  .note{font-size:12px;color:var(--ink2)}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .kv .kk{color:var(--ink2)}
+  .bar{height:8px;background:#eee;border-radius:5px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:5px}
+  /* calc */
+  .calc{display:grid;grid-template-columns:340px 1fr;gap:18px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12px;color:var(--ink2);margin-bottom:4px}
+  .field input,.field select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:14px}
+  .seg{display:flex;gap:6px}.seg button{flex:1;padding:8px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:12px}
+  .seg button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .result{background:linear-gradient(135deg,#1f4e79,#2e6da4);color:#fff;border-radius:12px;padding:20px}
+  .result .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums}
+  .result .rr{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+  .result .rr div{background:rgba(255,255,255,.12);border-radius:9px;padding:10px}
+  .result .rr .n{font-size:20px;font-weight:700}
+  .result .rr .l{font-size:11px;opacity:.85}
+  .gate{margin-top:14px;background:var(--up-bg);color:var(--up);border-radius:8px;padding:9px 12px;font-size:13px;display:flex;align-items:center;gap:8px}
+  .tl{position:relative;padding-left:22px}
+  .tl::before{content:'';position:absolute;left:6px;top:4px;bottom:4px;width:2px;background:var(--line)}
+  .tl .ev{position:relative;padding:7px 0}
+  .tl .ev::before{content:'';position:absolute;left:-19px;top:11px;width:9px;height:9px;border-radius:50%;background:var(--brand)}
+  .tl .ev b{font-size:13px}.tl .ev span{font-size:12px;color:var(--ink2)}
+  .mini{font-size:11px;color:var(--ink2)}
+  @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.calc,.grid2,.grid3{grid-template-columns:1fr}}
+  /* home */
+  .platbar{background:#20242c;color:#cdd3dc;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px}
+  .platbar .pl{font-size:12px;color:#9aa3b0}
+  .boards{display:flex;gap:8px;flex-wrap:wrap}
+  .board{font-size:13px;padding:6px 14px;border-radius:20px;background:#2c3138;color:#cdd3dc}
+  .board.cur{background:var(--gold);color:#fff;font-weight:600}
+  .board.ghost{background:transparent;border:1px dashed #4a515c;color:#8b93a0}
+  .pipe{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 2px}
+  .node{min-width:104px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 8px;text-align:center;cursor:pointer;transition:.15s}
+  .node:hover{border-color:var(--brand2);box-shadow:var(--shadow);transform:translateY(-2px)}
+  .node .ico{font-size:20px}
+  .node .nm{font-size:12.5px;font-weight:600;margin-top:3px}
+  .node .ds{font-size:10.5px;color:var(--ink2);margin-top:1px}
+  .parr{display:flex;align-items:center;color:#c3b58f;font-size:16px;padding:0 3px;flex-shrink:0}
+  .entry-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .entry{background:var(--paper2);border:1px solid var(--line);border-radius:11px;padding:13px 14px;cursor:pointer;transition:.15s;box-shadow:var(--shadow)}
+  .entry:hover{border-color:var(--brand2);transform:translateY(-2px)}
+  .entry .ei{font-size:19px}
+  .entry .en{font-size:14px;font-weight:600;margin:5px 0 2px;display:flex;align-items:center;gap:6px}
+  .entry .ed{font-size:11.5px;color:var(--ink2)}
+  .dimtag{font-size:10px;padding:1px 6px;border-radius:8px;background:#eef4f9;color:var(--brand2)}
+  @media(max-width:900px){.entry-grid{grid-template-columns:repeat(2,1fr)}}
+  /* tabs within a page */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+  .tab{padding:8px 16px;cursor:pointer;font-size:13px;color:var(--ink2);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+  .tabpane{display:none}.tabpane.on{display:block}
+  /* filter bar */
+  .filterbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .fsearch{padding:7px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:190px;background:#fff}
+  .fchip{font-size:12px;padding:5px 11px;border-radius:16px;background:#fff;border:1px solid var(--line);cursor:pointer;color:var(--ink2)}
+  .fchip.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .cnt{font-size:12px;color:var(--ink2);margin-left:auto}
+  /* kanban */
+  .kanban{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;overflow-x:auto}
+  .kcol{background:#f2ede2;border-radius:10px;padding:8px;min-width:150px}
+  .kcol h4{font-size:12px;color:var(--ink2);margin-bottom:8px;display:flex;justify-content:space-between}
+  .kcard{background:var(--paper2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:7px;cursor:pointer;font-size:12px;box-shadow:var(--shadow)}
+  .kcard b{font-size:13px;display:block}
+  .kcard .km{color:var(--ink2);font-size:11px;margin-top:3px}
+  .kcard .kt{display:inline-block;margin-top:4px;font-size:10px;padding:1px 6px;border-radius:8px}
+  /* multi-dim score bars (画像/雷达替代) */
+  .scores{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
+  .scr{font-size:12px}
+  .scr .sl{display:flex;justify-content:space-between;margin-bottom:3px}
+  .scr .sl b{color:var(--ink)}
+  /* BOM tree */
+  .tree{font-size:13px;list-style:none}
+  .tree ul{list-style:none;margin-left:16px;border-left:1px dashed var(--line);padding-left:12px}
+  .tree li{padding:4px 0}
+  .tree .tn{display:flex;justify-content:space-between;gap:10px}
+  .tree .tn .tsub{color:var(--ink2);font-size:11.5px}
+  .caret{color:var(--brand2);cursor:pointer;font-weight:600}
+  /* waterfall/cost split */
+  .wf{display:flex;height:26px;border-radius:6px;overflow:hidden;margin:8px 0}
+  .wf i{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><b>沃朗科技</b><span>WORLAND · 仓储设备租赁</span></div>
+    <div class="plat">智慧园区平台 · 板块</div>
+    <nav class="nav" id="nav">
+      <a data-p="home" class="on"><span class="ic">🏠</span>板块首页</a>
+      <a data-p="dash"><span class="ic">📊</span>老板驾驶舱</a>
+      <div class="grp">业务主线</div>
+      <a data-p="calc"><span class="ic">🧮</span>报价测算器</a>
+      <a data-p="contract"><span class="ic">📄</span>合同 · 租金计划</a>
+      <a data-p="supplier"><span class="ic">🏭</span>供应商 · 上游</a>
+      <a data-p="customer"><span class="ic">🤝</span>客户 · CRM</a>
+      <a data-p="asset"><span class="ic">📦</span>设备资产</a>
+      <div class="grp">收支单据</div>
+      <a data-p="rentbill"><span class="ic">🧾</span>收租 · 批量核销</a>
+      <a data-p="purchase"><span class="ic">🛒</span>采购入库 · 应付</a>
+      <a data-p="transfer"><span class="ic">🔁</span>到期转让 · 处置</a>
+      <a data-p="maint"><span class="ic">🔧</span>维保 · 扫码盘点</a>
+      <div class="grp">财务 · 钱 · 报表</div>
+      <a data-p="voucher"><span class="ic">📚</span>凭证中心 · 双账</a>
+      <a data-p="cash"><span class="ic">💰</span>现金流/分配</a>
+      <a data-p="report"><span class="ic">📑</span>月度报表</a>
+      <div class="grp">管理</div>
+      <a data-p="task"><span class="ic">✅</span>任务 · 审批</a>
+      <a data-p="hr"><span class="ic">🧑‍💼</span>花名册 · 提成</a>
+      <a data-p="bi"><span class="ic">📈</span>BI · PDCA · AI</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="top">
+      <div class="crumb" id="crumb">工作台<b>板块首页</b></div>
+      <div class="right">
+        <span class="watermark">数据截至 2026-08-06 · 昨日</span>
+        <span>李工 · 供应链</span><div class="u">李</div>
+      </div>
+    </div>
+    <div class="wrap">
+
+      <!-- ========== 0 板块首页 ========== -->
+      <section class="page on" id="home">
+        <div class="platbar">
+          <span class="pl">🔐 智慧园区平台 · 同一账号登录 · 按权限进入各板块</span>
+          <div class="boards">
+            <span class="board">🏪 园区小卖账房</span>
+            <span class="board cur">📦 租赁板块（当前）</span>
+            <span class="board ghost">＋ 更多板块</span>
+          </div>
+        </div>
+        <h2 class="pt">沃朗科技 · 租赁板块工作台</h2>
+        <div class="sub">一台设备、一份合同的"一生"都在这条主线上。点任意环节直达对应功能。</div>
+
+        <div class="panel">
+          <h3>业务主线飞轮 · 选品 → 收租 → 转让 → 复盘 ↺ <span class="pill p-rent">全量规划·分里程碑交付</span></h3>
+          <div class="pipe">
+            <div class="node" data-goto="customer"><div class="ico">🎯</div><div class="nm">获客跟进</div><div class="ds">潜客→商机(CRM)</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="supplier"><div class="ico">🏭</div><div class="nm">选品/供应商</div><div class="ds">四维比价·谈账期</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="calc"><div class="ico">🧮</div><div class="nm">报价测算</div><div class="ds">达标才能签</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="contract"><div class="ico">📄</div><div class="nm">签约</div><div class="ds">生成租金计划</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="purchase"><div class="ico">🛒</div><div class="nm">采购投放</div><div class="ds">先签约后采购</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="rentbill"><div class="ico">🧾</div><div class="nm">收租</div><div class="ds">自动生成核销</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="customer"><div class="ico">⚠️</div><div class="nm">逾期风控</div><div class="ds">延期→罚息→收回</div></div>
+            <div class="parr">→</div>
+            <div class="node" data-goto="transfer"><div class="ico">🔁</div><div class="nm">到期转让</div><div class="ds">残值·账务切换</div></div>
+            <div class="parr">↺</div>
+            <div class="node" data-goto="bi"><div class="ico">📈</div><div class="nm">复盘</div><div class="ds">BI·PDCA</div></div>
+          </div>
+        </div>
+
+        <div class="grid3">
+          <div class="panel">
+            <h3>今日关键数字 <span class="more" data-goto="dash">进老板驾驶舱 ›</span></h3>
+            <div class="cards" style="grid-template-columns:1fr 1fr;margin:0">
+              <div class="card"><div class="k">在租率</div><div class="v up" style="font-size:20px">91%</div><div class="t">14 台闲置</div></div>
+              <div class="card"><div class="k">本月应收</div><div class="v" style="font-size:20px">¥86,400</div><div class="t">已收 78%</div></div>
+              <div class="card"><div class="k">5 号可分配</div><div class="v" style="font-size:20px">¥45,000</div><div class="t">现金¥22,500</div></div>
+              <div class="card"><div class="k">加权回报</div><div class="v" style="font-size:20px">25.0%</div><div class="t">目标 25% 达标</div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>该处理的事</h3>
+            <table>
+              <tr><td><span class="pill p-over">逾期</span></td><td>阿昌仓储 逾期6天</td><td class="num"><span class="lnk" data-goto="customer">去处理→</span></td></tr>
+              <tr><td><span class="pill p-warn">空置</span></td><td>3台阁楼货架闲置22天</td><td class="num"><span class="lnk" data-goto="asset">看设备→</span></td></tr>
+              <tr><td><span class="pill p-warn">到期</span></td><td>2份合同30天内到期</td><td class="num"><span class="lnk" data-goto="transfer">谈转让→</span></td></tr>
+              <tr><td><span class="pill p-warn">尾款</span></td><td>供应商尾款待付</td><td class="num"><span class="lnk" data-goto="purchase">看应付→</span></td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>全部模块 · 按「业·财·人·事·物 ＋ 时·钱·风·关系·保密」十维</h3>
+          <div class="entry-grid">
+            <div class="entry" data-goto="calc"><div class="ei">🧮</div><div class="en">报价测算器 <span class="dimtag">业</span></div><div class="ed">市场价→月租+三层回报</div></div>
+            <div class="entry" data-goto="contract"><div class="ei">📄</div><div class="en">合同·租金计划 <span class="dimtag">业·时</span></div><div class="ed">逐期计划表+期末转让</div></div>
+            <div class="entry" data-goto="supplier"><div class="ei">🏭</div><div class="en">供应商·上游 <span class="dimtag">业·物</span></div><div class="ed">供应商池·供货矩阵·履约评分</div></div>
+            <div class="entry" data-goto="customer"><div class="ei">🤝</div><div class="en">客户·CRM <span class="dimtag">业·风</span></div><div class="ed">潜客跟进·管道·风控·画像</div></div>
+            <div class="entry" data-goto="asset"><div class="ei">📦</div><div class="en">设备资产 <span class="dimtag">物·时</span></div><div class="ed">逐件台账·状态机·BOM</div></div>
+            <div class="entry" data-goto="purchase"><div class="ei">🛒</div><div class="en">采购入库·应付 <span class="dimtag">物·财</span></div><div class="ed">集采·首付账期</div></div>
+            <div class="entry" data-goto="maint"><div class="ei">🔧</div><div class="en">维保·扫码盘点 <span class="dimtag">物·事</span></div><div class="ed">工单·移动端盘点</div></div>
+            <div class="entry" data-goto="transfer"><div class="ei">🔁</div><div class="en">到期转让·处置 <span class="dimtag">物·时</span></div><div class="ed">残值·账务切换</div></div>
+            <div class="entry" data-goto="rentbill"><div class="ei">🧾</div><div class="en">收租·批量核销 <span class="dimtag">财</span></div><div class="ed">自动生成·到账匹配</div></div>
+            <div class="entry" data-goto="voucher"><div class="ei">📚</div><div class="en">凭证中心·双账 <span class="dimtag">财·保密</span></div><div class="ed">业财一体·两套账</div></div>
+            <div class="entry" data-goto="cash"><div class="ei">💰</div><div class="en">现金流/分配 <span class="dimtag">钱</span></div><div class="ed">到期分层·每月分配</div></div>
+            <div class="entry" data-goto="report"><div class="ei">📑</div><div class="en">月度报表 <span class="dimtag">财·决策</span></div><div class="ed">报表包+经营分析报告</div></div>
+            <div class="entry" data-goto="task"><div class="ei">✅</div><div class="en">任务·审批 <span class="dimtag">事</span></div><div class="ed">绑角色·投放审批</div></div>
+            <div class="entry" data-goto="hr"><div class="ei">🧑‍💼</div><div class="en">花名册·提成 <span class="dimtag">人</span></div><div class="ed">权限·保密·激励</div></div>
+            <div class="entry" data-goto="bi"><div class="ei">📈</div><div class="en">BI·PDCA·AI <span class="dimtag">风</span></div><div class="ed">红绿灯·改进·月报</div></div>
+            <div class="entry" data-goto="dash"><div class="ei">📊</div><div class="en">老板驾驶舱 <span class="dimtag">全局</span></div><div class="ed">一页看清钱/险/分配</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 1 老板驾驶舱 ========== -->
+      <section class="page" id="dash">
+        <h2 class="pt">老板驾驶舱</h2>
+        <div class="sub">一眼看清：钱在哪、险在哪、这个月分多少。数字下面都配一句人话。</div>
+        <div class="cards">
+          <div class="card"><div class="k">在租设备 / 在租率</div><div class="v">142 台 · <span class="up">91%</span></div><div class="t">14 台闲置——闲着就是亏，见下方预警</div></div>
+          <div class="card"><div class="k">本月应收租金</div><div class="v">¥86,400</div><div class="t"><span class="b-up">已收 78%</span> 剩 ¥19,000 待收</div></div>
+          <div class="card"><div class="k">本月 5 号可分配</div><div class="v">¥45,000</div><div class="t">50%现金¥22,500 / 50%滚存 · 留存后 ¥28万</div></div>
+          <div class="card"><div class="k">加权税后回报率</div><div class="v up">25.0%</div><div class="t">目标 25% · <span class="b-up">达标 ✅</span></div></div>
+        </div>
+        <div class="grid3">
+          <div class="panel">
+            <h3>⚠️ 该处理的事（风险红点）<span class="more">全部 5 条 ›</span></h3>
+            <table>
+              <tr><td><span class="pill p-over">逾期</span></td><td>客户「阿昌仓储」8 号货架租金逾期 6 天</td><td class="num"><span class="lnk">催收三步走 →</span></td></tr>
+              <tr><td><span class="pill p-warn">空置</span></td><td>3 台阁楼货架回收后闲置 22 天</td><td class="num"><span class="lnk">找配租 →</span></td></tr>
+              <tr><td><span class="pill p-warn">税务</span></td><td>年营收 ¥312万 / 500万红线（62%）</td><td class="num"><span class="lnk">看测算 →</span></td></tr>
+              <tr><td><span class="pill p-warn">到期</span></td><td>2 份合同（播种墙×5 / 货架1批）30 天内到期，需谈转让</td><td class="num"><span class="lnk" data-goto="transfer">转让 →</span></td></tr>
+            </table>
+          </div>
+          <div class="panel">
+            <h3>钱的去向（本月）</h3>
+            <div class="kv"><span class="kk">收租入账</span><b class="up">+¥67,400</b></div>
+            <div class="kv"><span class="kk">付供应商账期</span><b class="down">−¥120,000</b></div>
+            <div class="kv"><span class="kk">运维/保险</span><b class="down">−¥3,800</b></div>
+            <div class="kv"><span class="kk">= 本月净现金流</span><b class="down">−¥56,400</b></div>
+            <div class="kv"><span class="kk">（另）可分配利润</span><b class="up">¥45,000 · <span class="lnk" data-goto="cash">见分配</span></b></div>
+            <div class="src" style="margin-top:12px">投放高峰现金净流出，靠供应商账期+滚存覆盖；利润≠现金，可分配走利润口径 · <span class="aibadge">🔬 AI 过程</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 2 报价测算器 ========== -->
+      <section class="page" id="calc">
+        <h2 class="pt">报价测算器 <span class="pill p-rent" style="vertical-align:middle">招牌功能</span></h2>
+        <div class="sub">输入设备市场价 + 客户类型 → 自动算月租、三层回报、现金流。不达目标 IRR 不允许签约。</div>
+        <div class="flow"><span class="st cur">1 输入设备</span><span class="ar">→</span><span class="st">2 选客户/租期</span><span class="ar">→</span><span class="st">3 看回报</span><span class="ar">→</span><span class="st">4 生成合同</span></div>
+        <div class="calc">
+          <div class="panel" style="margin:0">
+            <div class="field"><label>品类</label>
+              <div class="seg"><button class="on">播种墙 3年/转10%</button><button>货架 5年/转30%</button></div></div>
+            <div class="field"><label>设备市场价（元）</label><input value="200,000"></div>
+            <div class="field"><label>集采成本（元）· 供应链填</label><input value="180,000"></div>
+            <div class="field"><label>客户类型 → 目标税后 IRR</label>
+              <select><option>云山快仓 · 25%</option><option>园区/其他 · 30%</option><option>其他 · 35%</option></select></div>
+            <div class="field"><label>供应商首付比例（决定我方资金占用）</label>
+              <div class="seg"><button>50%</button><button>40%</button><button class="on">30%</button></div></div>
+            <div class="note">首付越低→我方垫资越少→回报率越高（层级②供应商杠杆）</div>
+          </div>
+          <div>
+            <div class="result">
+              <div style="font-size:12px;opacity:.85">建议月租金（云山快仓 25%）</div>
+              <div class="big">¥6,720 <span style="font-size:14px;opacity:.8">/ 月 × 36 期</span></div>
+              <div style="font-size:12px;opacity:.85;margin-top:6px">速算系数 市场价 × 3.36% · 期末转让价 ¥20,000 · 客户总付 ¥261,907</div>
+              <div class="rr">
+                <div><div class="n">25.0%</div><div class="l">①本金回报（底线·审批看它）</div></div>
+                <div><div class="n">70.1%</div><div class="l">②供应商杠杆（首付30%）</div></div>
+                <div><div class="n">65.8%</div><div class="l">③融资杠杆</div></div>
+              </div>
+            </div>
+            <div class="gate">✅ 本金回报 25.0% ≥ 目标 25% —— 允许生成合同 <button class="btn" style="margin-left:auto">生成合同草稿 →</button></div>
+            <div class="gate" style="background:var(--down-bg);color:var(--down);margin-top:8px">✕ 反例：若首付/让价过头致本金回报 22% ＜ 目标 —— 「生成合同」自动置灰，退回调集采价/首付/租期重算</div>
+            <div class="panel" style="margin-top:14px">
+              <h3>这单赚在哪 <span class="aibadge">🔬 AI 过程</span></h3>
+              <div class="kv"><span class="kk">① 集采差价 20万→18万</span><b class="up">差价2万 · 净利约1.9万 · 贡献8.2个点</b></div>
+              <div class="kv"><span class="kk">② 资金时间价值（分期）</span><b class="up">含在租金</b></div>
+              <div class="kv"><span class="kk">③ 税后净利</span><b class="up">¥75,053</b></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 3 合同+租金计划 ========== -->
+      <section class="page" id="contract">
+        <h2 class="pt">合同详情 · HT-2026-018</h2>
+        <div class="sub">客户 云山快仓 · 标准播种墙（市场价 20万/台）· 3 年 · 期末按市场价 10% 转让</div>
+        <div class="flow"><span class="st">报价</span><span class="ar">→</span><span class="st">签约</span><span class="ar">→</span><span class="st cur">收租中(第 6/36 期)</span><span class="ar">→</span><span class="st">到期转让</span><span class="ar">→</span><span class="st">关闭</span></div>
+        <div class="filterbar" style="margin-bottom:14px">
+          <span class="btn ghost">变更（提前结清 / 续租 → 重算剩余期）</span>
+          <span class="btn ghost">作废（限未采购 · 整份红冲）</span>
+          <span class="cnt">逆向：作废 / 变更 / 提前结清 / 续租</span>
+        </div>
+        <div class="grid2">
+          <div class="panel">
+            <h3>合同要点</h3>
+            <div class="kv"><span class="kk">客户 / 类型</span><b><span class="lnk">云山快仓</span> · 25%目标</b></div>
+            <div class="kv"><span class="kk">设备</span><b><span class="lnk" data-goto="asset">播种墙 ×1（市场价20万）</span></b></div>
+            <div class="kv"><span class="kk">月租 / 期数</span><b>¥6,720 × 36</b></div>
+            <div class="kv"><span class="kk">押金</span><b>¥13,440（2 个月）</b></div>
+            <div class="kv"><span class="kk">期末转让价</span><b>¥20,000（市场价10%）</b></div>
+            <div class="kv"><span class="kk">合同性质（税务）</span><b>分期收款销售货物 ✅ 非"融资租赁"</b></div>
+            <div class="kv"><span class="kk">勾稽校验</span><b class="up">36×6,720 + 转让20,000 ≈ 客户总付 261,907 ✅</b></div>
+          </div>
+          <div class="panel">
+            <h3>回款进度</h3>
+            <div style="text-align:center;margin:6px 0 14px"><span style="font-size:30px;font-weight:800">6 / 36</span> <span class="mini">期已收</span></div>
+            <div class="bar"><i style="width:16.7%;background:var(--up)"></i></div>
+            <div class="kv" style="margin-top:12px"><span class="kk">已收租金</span><b class="up">¥40,320</b></div>
+            <div class="kv"><span class="kk">剩余应收</span><b>¥201,600</b></div>
+            <div class="kv"><span class="kk">下期到期</span><b class="b-warn">2026-09-05</b></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>租金计划表（逐期）· 每期到点自动生成收租单→凭证 <span class="mini">数据模型：抄 Odoo account.asset.line</span></h3>
+          <table>
+            <tr><th>期</th><th>到期日</th><th class="num">应收</th><th class="num">已收/核销</th><th>状态</th><th>凭证</th></tr>
+            <tr><td>5</td><td>2026-07-05</td><td class="num">6,720</td><td class="num">6,720</td><td><span class="pill p-ok">已核销</span></td><td><span class="lnk">记-0712</span></td></tr>
+            <tr><td>6</td><td>2026-08-05</td><td class="num">6,720</td><td class="num">6,720</td><td><span class="pill p-ok">已核销</span></td><td><span class="lnk">记-0801</span></td></tr>
+            <tr><td>7</td><td>2026-09-05</td><td class="num">6,720</td><td class="num">—</td><td><span class="pill p-warn">待收</span></td><td>—</td></tr>
+            <tr><td>8</td><td>2026-10-05</td><td class="num">6,720</td><td class="num">—</td><td><span class="pill p-idle">未到期</span></td><td>—</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:var(--ink2)">… 共 36 期 …</td></tr>
+            <tr><td>36</td><td>2029-08-05</td><td class="num">6,720</td><td class="num">—</td><td><span class="pill p-idle">未到期</span></td><td>—</td></tr>
+          </table>
+        </div>
+        <div class="grid2">
+          <div class="panel"><h3>每期租金构成（这份合同每期赚在哪）<span class="aibadge">🔬 AI 过程</span></h3>
+            <div class="wf">
+              <i style="width:55%;background:#2e6da4">本金摊 ¥3,696</i><i style="width:22%;background:#5a8fbf">资金成本 ¥1,478</i><i style="width:15%;background:#2e7d32">差价分摊 ¥1,008</i><i style="width:8%;background:#b8862f">残值预留</i>
+            </div>
+            <div class="mini">规则引擎按租金计划拆分，非 AI 估算；差价+资金成本即我方毛利来源</div>
+          </div>
+          <div class="panel"><h3>单笔 P&amp;L（这份合同的真实盈亏）</h3>
+            <div class="kv"><span class="kk">收租总额 + 期末转让</span><b class="up">¥241,920 + ¥20,000</b></div>
+            <div class="kv"><span class="kk">− 集采成本</span><b class="down">¥180,000</b></div>
+            <div class="kv"><span class="kk">− 资金成本 / 运维 / 坏账拨备</span><b class="down">¥6,867</b></div>
+            <div class="kv"><span class="kk">− 管理费分摊</span><b class="down">— </b></div>
+            <div class="kv"><span class="kk">税后净利</span><b class="up">¥75,053 · 回报 25.0%</b></div>
+            <div class="mini" style="margin-top:4px">成本按合同归集，一眼看单笔盈亏（抄 Baseplan 项目级核算）</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 4 供应商 ========== -->
+      <section class="page" id="supplier">
+        <h2 class="pt">供应商 · 上游管理</h2>
+        <div class="sub">接触 → 试样 → 入库 → 主供/备供 →（淘汰）全生命周期；按配件供货、价格构成、履约多维评分。支撑 N 家比价。</div>
+        <div class="tabs">
+          <div class="tab on" data-tab="sup-pool">供应商池（列表）</div>
+          <div class="tab" data-tab="sup-detail">供应商详情</div>
+        </div>
+
+        <div class="tabpane on" id="sup-pool">
+          <div class="filterbar">
+            <input class="fsearch" placeholder="🔍 搜供应商/配件">
+            <span class="fchip on">全部</span><span class="fchip">播种墙</span><span class="fchip">货架/阁楼</span><span class="fchip">配件</span>
+            <span class="fchip">主供</span><span class="fchip">评分≥80</span>
+            <span class="cnt">共 23 家 · 主供 6 / 备供 9 / 谈判中 5 / 淘汰 3</span>
+          </div>
+          <div class="src" style="background:var(--warn-bg);color:var(--warn);border-color:#edd9a8;margin-bottom:12px">⚠️ 单一依赖预警：品类「货架/阁楼」当前仅 1 家可用（广达·谈判中）→ 需再开发 ≥1 家备选</div>
+          <div class="panel" style="margin:0">
+            <table>
+              <tr><th>状态</th><th>供应商</th><th>品类/配件</th><th class="num">集采价</th><th class="num">首付</th><th class="num">履约分</th></tr>
+              <tr><td><span class="pill p-ok">主供</span></td><td><span class="lnk" data-tab="sup-detail">恒丰自动化</span></td><td>播种墙(整机)</td><td class="num">18.0万</td><td class="num">30%</td><td class="num up">86</td></tr>
+              <tr><td><span class="pill p-rent">备供</span></td><td><span class="lnk">睿捷设备</span></td><td>播种墙(整机)</td><td class="num">18.6万</td><td class="num">40%</td><td class="num">78</td></tr>
+              <tr><td><span class="pill p-warn">谈判中</span></td><td><span class="lnk">广达货架</span></td><td>货架/阁楼</td><td class="num">按图报价</td><td class="num">50%</td><td class="num">—</td></tr>
+              <tr><td><span class="pill p-rent">备供</span></td><td><span class="lnk">科瑞电控</span></td><td>电控系统(配件)</td><td class="num">2.6万</td><td class="num">40%</td><td class="num">81</td></tr>
+              <tr><td colspan="6" style="text-align:center;color:var(--ink2)">… 共 23 家 …</td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">配件级可比价；供应商行可「淘汰/停用（留痕）」；每品类需 ≥2 家防单一依赖</div>
+          </div>
+        </div>
+
+        <div class="tabpane" id="sup-detail">
+          <h3 style="font-size:16px;margin-bottom:8px">恒丰自动化（播种墙） <span class="pill p-ok">主供</span> <span class="pill p-rent">履约分 86</span></h3>
+          <div class="grid2">
+            <div class="panel"><h3>履约评分（多维）</h3>
+              <div class="scores">
+                <div class="scr"><div class="sl"><span>品质(故障率)</span><b>88</b></div><div class="bar"><i style="width:88%;background:var(--up)"></i></div></div>
+                <div class="scr"><div class="sl"><span>交期(准时率)</span><b>82</b></div><div class="bar"><i style="width:82%;background:var(--brand2)"></i></div></div>
+                <div class="scr"><div class="sl"><span>服务(响应)</span><b>90</b></div><div class="bar"><i style="width:90%;background:var(--up)"></i></div></div>
+                <div class="scr"><div class="sl"><span>价格(vs市场)</span><b>85</b></div><div class="bar"><i style="width:85%;background:var(--up)"></i></div></div>
+                <div class="scr"><div class="sl"><span>账期(首付低)</span><b>84</b></div><div class="bar"><i style="width:84%;background:var(--brand2)"></i></div></div>
+                <div class="scr"><div class="sl"><span>加权总分</span><b class="up">86</b></div><div class="bar"><i style="width:86%;background:var(--up)"></i></div></div>
+              </div>
+            </div>
+            <div class="panel"><h3>账期 = 回报放大器 <span class="aibadge">🔬 AI 过程</span></h3>
+              <table>
+                <tr><th>首付</th><th class="num">资金占用</th><th class="num">单台回报</th></tr>
+                <tr><td>全额</td><td class="num">18万</td><td class="num">25.0%</td></tr>
+                <tr><td>40%</td><td class="num">5.86万</td><td class="num">50.9%</td></tr>
+                <tr style="background:var(--up-bg)"><td><b>30% ✅已谈成</b></td><td class="num">4.06万</td><td class="num up"><b>70.1%</b></td></tr>
+              </table>
+              <div class="mini" style="margin-top:6px">现金折扣2% / 阶梯返利 / 维保费返点 另计</div>
+            </div>
+          </div>
+          <div class="grid2">
+            <div class="panel"><h3>供货矩阵（整机 + 配件）</h3>
+              <table>
+                <tr><th>供何物</th><th class="num">报价</th><th>可否单采</th></tr>
+                <tr><td>播种墙 整机</td><td class="num">18.0万</td><td><span class="pill p-ok">是</span></td></tr>
+                <tr><td>┗ 电控系统</td><td class="num">2.6万</td><td><span class="pill p-ok">是</span></td></tr>
+                <tr><td>┗ 传感模组</td><td class="num">1.1万</td><td><span class="pill p-warn">否</span></td></tr>
+              </table>
+            </div>
+            <div class="panel"><h3>价格构成（vs BOM 识别虚高）</h3>
+              <div class="wf">
+                <i style="width:52%;background:#2e6da4">材料 9.4万</i>
+                <i style="width:26%;background:#5a8fbf">加工 4.7万</i>
+                <i style="width:22%;background:#b8862f">利润 3.9万</i>
+              </div>
+              <div class="kv"><span class="kk">报价 18万 vs 我方BOM估算</span><b class="up">17.6万 · 合理</b></div>
+              <div class="mini" style="margin-top:4px">下场泡工厂做出 BOM，识别有没有虚高</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 5 客户 · CRM ========== -->
+      <section class="page" id="customer">
+        <h2 class="pt">客户 · CRM</h2>
+        <div class="sub">潜在客户 → 长期跟进 → 商机 → 成交 → 在租 → 续租/流失 全生命周期。业务(BD)养客、运营接单。支撑 100+ 客户。</div>
+        <div class="tabs">
+          <div class="tab on" data-tab="cust-pool">客户池（列表）</div>
+          <div class="tab" data-tab="cust-pipe">销售管道（看板）</div>
+          <div class="tab" data-tab="cust-detail">客户详情</div>
+        </div>
+
+        <!-- 客户池 -->
+        <div class="tabpane on" id="cust-pool">
+          <div class="filterbar">
+            <input class="fsearch" placeholder="🔍 搜客户名/联系人/电话">
+            <span class="fchip on">全部阶段</span><span class="fchip">潜客</span><span class="fchip">商机</span><span class="fchip">在租</span>
+            <span class="fchip">评级A</span><span class="fchip">我负责的</span><span class="fchip">30天未跟进</span>
+            <span class="cnt">共 115 家 · 潜客 58 / 在租 42 / 流失 15</span>
+          </div>
+          <div class="panel" style="margin:0">
+            <table>
+              <tr><th>阶段</th><th>客户</th><th>负责业务</th><th>评级</th><th class="num">在租/商机额</th><th class="num">应收</th><th>下次跟进</th></tr>
+              <tr><td><span class="pill p-idle">线索</span></td><td><span class="lnk" data-tab="cust-detail">德邦仓配</span></td><td>王业务</td><td>—</td><td class="num">~30万</td><td class="num">—</td><td><span class="pill p-warn">明天</span></td></tr>
+              <tr><td><span class="pill p-rent">跟进中</span></td><td><span class="lnk">顺丰园区仓</span></td><td>王业务</td><td>预B</td><td class="num">~50万</td><td class="num">—</td><td>08-12</td></tr>
+              <tr><td><span class="pill p-warn">商机</span></td><td><span class="lnk">京东云仓(华南)</span></td><td>李工</td><td>预A</td><td class="num">~120万</td><td class="num">—</td><td><span class="pill p-over">已逾期3天</span></td></tr>
+              <tr><td><span class="pill p-ok">在租</span></td><td><span class="lnk">云山快仓</span></td><td>李工</td><td>A</td><td class="num">240万</td><td class="num">6,720</td><td>—</td></tr>
+              <tr><td><span class="pill p-ok">在租</span></td><td><span class="lnk" data-tab="cust-detail">阿昌仓储</span></td><td>王业务</td><td>B</td><td class="num">11万</td><td class="num down">逾期5,181</td><td>—</td></tr>
+              <tr><td><span class="pill p-idle">流失</span></td><td><span class="lnk">微仓科技</span></td><td>王业务</td><td>C</td><td class="num">—</td><td class="num">—</td><td>复盘归档</td></tr>
+              <tr><td colspan="7" style="text-align:center;color:var(--ink2)">… 共 115 家 · 分页 1/12 …</td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">🔒 客户池含"公海"(未分配)可认领；业务只看自己名下+公海，成本价/别人客户隔离</div>
+          </div>
+        </div>
+
+        <!-- 销售管道 -->
+        <div class="tabpane" id="cust-pipe">
+          <div class="mini" style="margin-bottom:10px">加权预测本季新签 ≈ <b>¥86万</b>（商机额×成交概率）· 卡片可拖动推进阶段</div>
+          <div class="kanban">
+            <div class="kcol"><h4>线索 <span>18</span></h4>
+              <div class="kcard"><b>德邦仓配</b><div class="km">王业务 · 首次接触</div><span class="kt p-idle">待约现场</span></div>
+              <div class="kcard"><b>中通电商仓</b><div class="km">王业务</div><span class="kt p-idle">待跟进</span></div>
+            </div>
+            <div class="kcol"><h4>跟进中 <span>29</span></h4>
+              <div class="kcard"><b>顺丰园区仓</b><div class="km">已拜访2次 · ~50万</div><span class="kt p-rent">看设备</span></div>
+              <div class="kcard"><b>普洛斯租户</b><div class="km">~40万</div><span class="kt p-rent">待方案</span></div>
+            </div>
+            <div class="kcol"><h4>商机 <span>11</span></h4>
+              <div class="kcard"><b>京东云仓(华南)</b><div class="km">~120万 · 概率60%</div><span class="kt p-warn">出测算</span></div>
+            </div>
+            <div class="kcol"><h4>已成交 <span>42</span></h4>
+              <div class="kcard"><b>云山快仓</b><div class="km">240万 · 在租</div><span class="kt p-ok">已签</span></div>
+            </div>
+            <div class="kcol"><h4>流失 <span>15</span></h4>
+              <div class="kcard"><b>微仓科技</b><div class="km">价格未谈拢</div><span class="kt p-idle">复盘</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 客户详情 -->
+        <div class="tabpane" id="cust-detail">
+          <h3 style="font-size:16px;margin-bottom:4px">阿昌仓储（园区租户） <span class="pill p-ok">在租</span> <span class="pill p-warn">评级B</span> <span class="pill p-rent">普通价值</span></h3>
+          <div class="flow"><span class="st">线索</span><span class="ar">→</span><span class="st">跟进</span><span class="ar">→</span><span class="st">商机</span><span class="ar">→</span><span class="st">成交</span><span class="ar">→</span><span class="st cur">在租(逾期跟进)</span><span class="ar">→</span><span class="st">续租/流失</span></div>
+          <div class="grid2">
+            <div class="panel"><h3>信用画像（多维）</h3>
+              <div class="scores">
+                <div class="scr"><div class="sl"><span>盈利能力</span><b>75</b></div><div class="bar"><i style="width:75%;background:var(--up)"></i></div></div>
+                <div class="scr"><div class="sl"><span>现金流</span><b class="warn">55</b></div><div class="bar"><i style="width:55%;background:var(--warn)"></i></div></div>
+                <div class="scr"><div class="sl"><span>经营稳定</span><b>70</b></div><div class="bar"><i style="width:70%;background:var(--brand2)"></i></div></div>
+                <div class="scr"><div class="sl"><span>历史履约</span><b class="down">48</b></div><div class="bar"><i style="width:48%;background:var(--down)"></i></div></div>
+                <div class="scr"><div class="sl"><span>行业风险</span><b>65</b></div><div class="bar"><i style="width:65%;background:var(--brand2)"></i></div></div>
+                <div class="scr"><div class="sl"><span>综合评级</span><b class="warn">B</b></div><div class="bar"><i style="width:62%;background:var(--warn)"></i></div></div>
+              </div>
+              <div class="kv" style="margin-top:10px"><span class="kk">授信额度 / 押金 / 目标IRR</span><b>20万 / 2月 / 30%</b></div>
+              <div class="kv"><span class="kk">评级下调预警</span><b class="b-warn">B→C 时名下在租合同亮"存量风险"</b></div>
+              <div class="kv"><span class="kk">准入不过</span><b>拒绝留痕（不合作也存档）</b></div>
+            </div>
+            <div class="panel"><h3>客户价值 & 风险敞口</h3>
+              <div class="kv"><span class="kk">累计合同 / 累计收租</span><b>3 份 / ¥18.6万</b></div>
+              <div class="kv"><span class="kk">累计利润(LTV)</span><b class="up">¥4.1万</b></div>
+              <div class="kv"><span class="kk">续租率</span><b>67%</b></div>
+              <div class="kv"><span class="kk">在租敞口 / 应收</span><b>11万 / <span class="down">逾期5,181</span></b></div>
+              <div class="kv"><span class="kk">占总应收集中度</span><b class="b-warn">6%</b></div>
+            </div>
+          </div>
+          <div class="grid2">
+            <div class="panel"><h3>跟进时间线（业务长期跟进）<span class="more">＋ 记一次跟进</span></h3>
+              <div class="tl">
+                <div class="ev"><b>逾期催收电话</b> <span>2026-08-06 · 王业务 · 承诺3天内付 · 下次 08-09</span></div>
+                <div class="ev"><b>续租意向沟通</b> <span>2026-07-20 · 有扩租3台意向</span></div>
+                <div class="ev"><b>首次成交签约</b> <span>2025-09 · 阁楼货架2年</span></div>
+                <div class="ev"><b>现场看设备</b> <span>2025-08 · 潜客转商机</span></div>
+              </div>
+            </div>
+            <div class="panel"><h3>逾期案 · 三步走 <span class="pill p-over">进行中</span></h3>
+              <div class="flow" style="margin:0"><span class="st cur">1 延期</span><span class="ar">→</span><span class="st">2 罚息</span><span class="ar">→</span><span class="st">3 锁机/收回</span></div>
+              <div class="kv" style="margin-top:12px"><span class="kk">逾期</span><b class="down">6 天 · ¥5,181</b></div>
+              <div class="kv"><span class="kk">名下合同/设备</span><b><span class="lnk">HT-015</span> · 阁楼货架×1批 <span class="lnk" data-goto="asset">下钻</span></b></div>
+              <div class="mini" style="margin-top:6px">内外一视同仁，物权在我方可锁机</div>
+              <div style="margin-top:8px"><button class="btn">升级到罚息 →</button> <button class="btn ghost">已还款 · 关闭恢复</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 6 设备资产 ========== -->
+      <section class="page" id="asset">
+        <h2 class="pt">设备详情 · SB-0142（标准播种墙）</h2>
+        <div class="sub">体检报告式：状态机时间轴 + 成本 + 当前在谁手上 + 维保。任何名词可点进去。</div>
+        <div class="grid3">
+          <div>
+            <div class="panel"><h3>设备一生（状态机时间轴）</h3>
+              <div class="tl">
+                <div class="ev"><b>采购入库</b> <span>2026-02-10 · 集采 ¥18万/台 · <span class="lnk">恒丰自动化</span></span></div>
+                <div class="ev"><b>投放起租</b> <span>2026-03-01 · 合同 <span class="lnk" data-goto="contract">HT-2026-018</span> · <span class="lnk" data-goto="customer">云山快仓</span></span></div>
+                <div class="ev"><b>在租中</b> <span>第 6/36 期 · 月租 ¥6,720</span></div>
+                <div class="ev" style="opacity:.5"><b>到期转让</b> <span>2029-03 · 预计残值 ¥20,000（市场价10%）</span></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="panel"><h3>当前状态</h3>
+              <div class="kv"><span class="kk">状态</span><b><span class="pill p-rent">在租</span></b></div>
+              <div class="kv"><span class="kk">在谁手上</span><b><span class="lnk">云山快仓</span></b></div>
+              <div class="kv"><span class="kk">账面净值</span><b>¥162,000</b></div>
+              <div class="kv"><span class="kk">维保</span><b class="up">正常 · 质保内</b></div>
+            </div>
+            <div class="panel"><h3>单台收益</h3>
+              <div class="kv"><span class="kk">累计收租 / 月租</span><b class="up">¥40,320 / ¥6,720</b></div>
+              <div class="kv"><span class="kk">在租 / 空置天数</span><b>158 天 / 0 天</b></div>
+              <div class="kv"><span class="kk">单台税后回报</span><b class="up">25.0%</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="panel"><h3>配件树 BOM（可拆解 · 点▸展开）</h3>
+            <ul class="tree">
+              <li><div class="tn"><span><span class="caret">▾</span> 标准播种墙（整机）</span><span class="tsub">集采成本 ¥18万 · 市场价20万</span></div>
+                <ul>
+                  <li><div class="tn"><span><span class="caret">▸</span> 钢构框架</span><span class="tsub">¥14.0万 · 寿命10年 · 保值</span></div></li>
+                  <li><div class="tn"><span><span class="caret">▾</span> 电控系统 <span class="lnk">科瑞电控</span></span><span class="tsub">¥2.6万 · 质保内</span></div>
+                    <ul>
+                      <li><div class="tn"><span>PLC 主板</span><span class="tsub">¥1.4万 · 高故障</span></div></li>
+                      <li><div class="tn"><span>驱动/继电</span><span class="tsub">¥1.2万</span></div></li>
+                    </ul>
+                  </li>
+                  <li><div class="tn"><span><span class="caret">▸</span> 传感模组</span><span class="tsub">¥1.1万 · 贬值快</span></div></li>
+                  <li><div class="tn"><span>传动/其他</span><span class="tsub">¥0.3万</span></div></li>
+                </ul>
+              </li>
+            </ul>
+            <div class="mini">配件可下钻、可挂供应商——支持配件级比价与备件管理</div>
+          </div>
+          <div class="panel"><h3>成本拆解 & 残值构成</h3>
+            <div class="mini" style="margin-bottom:4px">采购成本拆解（含运输安装）</div>
+            <div class="wf">
+              <i style="width:78%;background:#2e6da4">钢构78%</i><i style="width:14%;background:#5a8fbf">电控14%</i><i style="width:6%;background:#b8862f">传感</i><i style="width:2%;background:#999">其他</i>
+            </div>
+            <div class="mini" style="margin:10px 0 4px">残值构成（钢构保值·电控贬值快→影响期末转让/收回决策）</div>
+            <div class="scr"><div class="sl"><span>钢构残值</span><b>¥1.7万</b></div><div class="bar"><i style="width:85%;background:var(--up)"></i></div></div>
+            <div class="scr" style="margin-top:6px"><div class="sl"><span>电控残值</span><b class="down">¥0.3万</b></div><div class="bar"><i style="width:15%;background:var(--down)"></i></div></div>
+            <div class="kv" style="margin-top:8px"><span class="kk">整机预计残值(市场价10%)</span><b>¥20,000</b></div>
+          </div>
+        </div>
+        <div class="panel"><h3>故障档案（按配件统计 → 备件常备 → 质保归属）</h3>
+          <table>
+            <tr><th>日期</th><th>配件</th><th>故障</th><th>责任/质保</th><th>处理</th></tr>
+            <tr><td>2026-07-12</td><td>PLC 主板</td><td>偶发死机</td><td><span class="pill p-ok">科瑞电控·质保内</span></td><td>供应商换新</td></tr>
+            <tr><td colspan="5" class="mini" style="text-align:center">该型号 PLC 主板近3月故障 4 次 → 建议列入常备备件 ⚠️</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <!-- ========== 7 现金流/分配 ========== -->
+      <section class="page" id="cash">
+        <h2 class="pt">现金流 / 分配驾驶舱 <span class="pill p-ok" style="vertical-align:middle">差异化亮点</span></h2>
+        <div class="sub">应收 × 账期到期分层 × 每月 5 号分配 × 留存下限 × 三层杠杆。市面产品都没专门做这块。</div>
+        <div class="cards">
+          <div class="card"><div class="k">自有资金</div><div class="v">¥200万</div><div class="t">首期规模</div></div>
+          <div class="card"><div class="k">已投放设备</div><div class="v">¥402万</div><div class="t"><span class="b-up">杠杆 2.0×</span> 供应商账期放大</div></div>
+          <div class="card"><div class="k">应收(未来12月)</div><div class="v">¥98.6万</div><div class="t">按到期分层见下</div></div>
+          <div class="card"><div class="k">账面留存</div><div class="v up">¥28万</div><div class="t">≥20万 下限 ✅</div></div>
+        </div>
+        <div class="grid2">
+          <div class="panel"><h3>应收按到期分层（税务口径：1年内/外）</h3>
+            <div style="margin:8px 0"><div class="mini">1 年内到期 ¥61.2万</div><div class="bar"><i style="width:62%;background:var(--brand)"></i></div></div>
+            <div style="margin:8px 0"><div class="mini">1 年以上到期 ¥37.4万</div><div class="bar"><i style="width:38%;background:var(--brand2)"></i></div></div>
+            <div class="mini" style="margin-top:8px">摊余成本表按到期分层——对应账期错配 + 每月分配</div>
+          </div>
+          <div class="panel"><h3>每月 5 号分配（本月）</h3>
+            <div class="kv"><span class="kk">提取前净利</span><b>¥50,000</b></div>
+            <div class="kv"><span class="kk">− 管理费(10%档)</span><b class="down">¥5,000</b></div>
+            <div class="kv"><span class="kk">可分配</span><b class="up">¥45,000</b></div>
+            <div class="kv"><span class="kk">现金分配(50%)</span><b class="up">¥22,500</b></div>
+            <div class="kv"><span class="kk">滚存(50%)</span><b>¥22,500</b></div>
+            <button class="btn" style="margin-top:10px" data-goto="report">生成分配单 → 月度报表·分配表</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 8 月度报表 ========== -->
+      <section class="page" id="report">
+        <h2 class="pt">月度报表 · 2026-08 <span class="pill p-rent" style="vertical-align:middle">学园区小卖账房</span></h2>
+        <div class="sub">每月自动生成报表包（一键导出 Excel/Word），5 号和老板过《经营分析报告》、定下月改进。数字由规则引擎出、带数据溯源，AI 只起草综述。</div>
+        <div class="src">⚡ 任务来源：系统按财务日历自动跑月结与报表包，第七件《经营分析报告》由 AI 起草综述，派给 财务 于 5 日复核</div>
+        <div class="panel">
+          <h3>财务日历（本月结账节奏）</h3>
+          <div class="flow" style="margin:0">
+            <span class="st">1 日 · 待人工结账</span><span class="ar">→</span>
+            <span class="st">2 日 · 报表包自动生成</span><span class="ar">→</span>
+            <span class="st">3 日 · 核对待办</span><span class="ar">→</span>
+            <span class="st cur">5 日 · 过报告+定改进+分配</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>报表包 · 六件套（自动生成 · <span class="lnk">一键导出 Excel</span>）</h3>
+          <div class="flow" style="margin:0 0 12px;background:#f7f3ea;border-color:var(--line)">
+            <span class="st cur">收租台账</span><span class="st">利润表</span><span class="st">现金流水</span><span class="st">往来(应收/应付)</span><span class="st">资产快照</span><span class="st">分配表 🔒</span>
+          </div>
+          <table>
+            <tr><th>客户/合同</th><th>设备</th><th class="num">本月应收</th><th class="num">已收</th><th class="num">逾期</th><th class="num">累计已收</th></tr>
+            <tr><td>云山快仓 · HT-018</td><td>播种墙×1</td><td class="num">6,720</td><td class="num">6,720</td><td class="num">0</td><td class="num">40,320</td></tr>
+            <tr><td>微星电商 · HT-021</td><td>货架×1批</td><td class="num">5,181</td><td class="num">5,181</td><td class="num">0</td><td class="num">25,905</td></tr>
+            <tr><td>阿昌仓储 · HT-015</td><td>阁楼货架</td><td class="num">5,181</td><td class="num">0</td><td class="num down">5,181</td><td class="num">31,086</td></tr>
+            <tr style="font-weight:600"><td>合计（全月42单）</td><td>—</td><td class="num">86,400</td><td class="num">67,400</td><td class="num down">5,181</td><td class="num">—</td></tr>
+          </table>
+          <div class="mini" style="margin-top:8px">🔒 「分配表」sheet 含合伙人分配明细，按角色可见——普通员工导出的包里不含此表</div>
+        </div>
+        <div class="panel">
+          <h3>第七件 ·《月度经营分析报告》七节 <span class="aibadge">🔬 AI 过程</span> <span class="more"><span class="lnk">导出 Word</span> ›</span></h3>
+          <div class="grid2" style="margin-bottom:12px">
+            <div>
+              <div class="kv"><span class="kk">① 经营概况</span><b>在租率 91% · 新签 2 单</b></div>
+              <div class="kv"><span class="kk">② 收租与回款</span><b>应收8.64万 / 已收78%</b></div>
+              <div class="kv"><span class="kk">③ 利润分析</span><b class="up">净利 5.0万 · 集采差价贡献</b></div>
+              <div class="kv"><span class="kk">④ 资产与在租</span><b>142台在租 · 14台闲置</b></div>
+            </div>
+            <div>
+              <div class="kv"><span class="kk">⑤ 钱账健康</span><b>留存28万(≥20万✅) · 杠杆2.0×</b></div>
+              <div class="kv"><span class="kk">⑥ 异常与风险</span><b class="b-warn">逾期1户 · 营收62%红线</b></div>
+              <div class="kv"><span class="kk">⑦ 下月改进建议</span><b>3台空置找配租 · 压集采价</b></div>
+              <div class="kv"><span class="kk">合伙人分配(按权限)</span><b>可分配4.5万 · <span class="lnk">见分配表</span></b></div>
+            </div>
+          </div>
+          <div class="src">🤖 AI 综述（可换模型 · 带 🔬 过程）：本月在租率环比 +1pt 达 91%，回款健康，唯阿昌仓储逾期需跟进；建议下月对 3 台闲置阁楼货架在园区内配租，并在新单中继续把集采价压 1–2 个点、稳固 25% 回报。<span class="mini">每节数字均由规则引擎填、带数据溯源；AI 不算数字只起草叙述</span></div>
+        </div>
+      </section>
+
+      <!-- ========== 9 收租·批量核销 ========== -->
+      <section class="page" id="rentbill">
+        <h2 class="pt">收租 · 批量核销</h2>
+        <div class="sub">系统每月自动生成到期收租单，到账自动匹配核销，逾期自动进三步走。能不选就不选、能不打字就不打字。</div>
+        <div class="src">⚡ 任务来源：系统按各合同租金计划表，于每期到期日 T-3 自动生成本月收租单 42 张，派给 财务·收款</div>
+        <div class="flow"><span class="st">生成</span><span class="ar">→</span><span class="st cur">到账匹配/核销</span><span class="ar">→</span><span class="st">逾期分流</span><span class="ar">→</span><span class="st">生成收入凭证</span></div>
+        <div class="cards">
+          <div class="card"><div class="k">本月应收</div><div class="v">¥86,400</div><div class="t">42 张收租单</div></div>
+          <div class="card"><div class="k">已核销</div><div class="v up">¥67,400</div><div class="t"><span class="b-up">33 张自动匹配</span></div></div>
+          <div class="card"><div class="k">待收</div><div class="v">¥13,819</div><div class="t">8 张未到账</div></div>
+          <div class="card"><div class="k">逾期</div><div class="v down">¥5,181</div><div class="t"><span class="b-down">1 户 → 三步走</span></div></div>
+        </div>
+        <div class="panel">
+          <h3>本月收租单 <span class="more">批量核销选中 3 张 ›</span></h3>
+          <table>
+            <tr><th style="width:24px"><input type="checkbox"></th><th>收租单</th><th>客户</th><th>合同</th><th class="num">应收</th><th class="num">到账</th><th>状态</th></tr>
+            <tr><td><input type="checkbox" checked></td><td>SR-0807-01</td><td><span class="lnk">云山快仓</span></td><td><span class="lnk">HT-2026-018</span></td><td class="num">6,720</td><td class="num">6,720</td><td><span class="pill p-ok">自动核销</span></td></tr>
+            <tr><td><input type="checkbox" checked></td><td>SR-0807-02</td><td>微星电商</td><td>HT-2026-021</td><td class="num">5,181</td><td class="num">5,181</td><td><span class="pill p-ok">自动核销</span></td></tr>
+            <tr><td><input type="checkbox"></td><td>SR-0807-07</td><td>阿昌仓储</td><td>HT-2026-015</td><td class="num">5,181</td><td class="num">—</td><td><span class="pill p-over">逾期6天</span></td></tr>
+            <tr><td><input type="checkbox"></td><td>SR-0807-09</td><td>广发物流</td><td>HT-2026-024</td><td class="num">5,181</td><td class="num">—</td><td><span class="pill p-warn">待收</span></td></tr>
+          </table>
+          <div class="mini" style="margin-top:8px">🔬 到账数据接微信/银行流水自动匹配；金额一致即自动核销并生成收入凭证，钱只被单据改</div>
+        </div>
+        <div class="grid2">
+          <div class="panel"><h3>「钱该动没动」稽核 <span class="pill p-warn">系统自检</span></h3>
+            <div class="kv"><span class="kk">到期未生成收租单</span><b class="up">0 张 ✅</b></div>
+            <div class="kv"><span class="kk">已到账未核销</span><b class="b-warn">1 笔 · 待处理</b></div>
+            <div class="kv"><span class="kk">已核销缺凭证</span><b class="up">0 笔 ✅</b></div>
+            <div class="mini" style="margin-top:6px">不靠人记，系统每日自检"该动的钱动了没"</div>
+          </div>
+          <div class="panel"><h3>逆向：红冲 / 退款 / 协商延期</h3>
+            <div class="kv"><span class="kk">收错 / 多收</span><b><span class="lnk" data-goto="voucher">红冲(过影响清单)</span></b></div>
+            <div class="kv"><span class="kk">已收需退</span><b><span class="lnk">生成退款单</span></b></div>
+            <div class="kv"><span class="kk">逾期 SR-0807-07</span><b><span class="lnk">协商延期</span> / <span class="lnk" data-goto="customer">进逾期案</span></b></div>
+            <div class="mini" style="margin-top:6px">钱只被单据改；红冲连锁反转凭证+应收，走影响清单确认</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 10 采购入库·应付 ========== -->
+      <section class="page" id="purchase">
+        <h2 class="pt">采购入库 · 应付</h2>
+        <div class="sub">集采下单→入库→按首付/账期生成应付。铁律：先签约后采购，无合同不允许下采购单（防设备空置）。</div>
+        <div class="flow"><span class="st">合同签约</span><span class="ar">→</span><span class="st cur">采购下单</span><span class="ar">→</span><span class="st">入库编号建档</span><span class="ar">→</span><span class="st">应付凭证</span></div>
+        <div class="src">🔒 校验：本采购单已绑定合同 <span class="lnk" data-goto="contract">HT-2026-018</span>（云山快仓·1台播种墙）——满足"先签约后采购" ✅</div>
+        <div class="grid2">
+          <div class="panel"><h3>采购单 CG-2026-031</h3>
+            <div class="kv"><span class="kk">供应商</span><b><span class="lnk">恒丰自动化</span></b></div>
+            <div class="kv"><span class="kk">设备 / 数量</span><b>播种墙 ×1（市场价20万）</b></div>
+            <div class="kv"><span class="kk">集采单价 / 总额</span><b>¥18万 · ¥180,000</b></div>
+            <div class="kv"><span class="kk">首付 30%</span><b class="down">¥54,000（已付）</b></div>
+            <div class="kv"><span class="kk">验收 40% + 尾款 30%</span><b>90 天内无息账期</b></div>
+          </div>
+          <div class="panel"><h3>应付计划（供应商账期=层级②杠杆）</h3>
+            <table>
+              <tr><th>期</th><th>到期日</th><th class="num">应付</th><th>状态</th></tr>
+              <tr><td>首付</td><td>2026-05-10</td><td class="num">54,000</td><td><span class="pill p-ok">已付</span></td></tr>
+              <tr><td>验收款</td><td>2026-05-25</td><td class="num">72,000</td><td><span class="pill p-ok">已付</span></td></tr>
+              <tr><td>尾款</td><td>2026-08-10</td><td class="num">54,000</td><td><span class="pill p-warn">待付</span></td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">应付=负债，计入资产负债率，现金流驾驶舱同步监控</div>
+            <div style="margin-top:8px"><span class="lnk" data-goto="voucher">退货 → 采购红冲 + 应付红字</span> · <span class="lnk">到货不符 → 拒收留痕</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 11 到期转让·处置 ========== -->
+      <section class="page" id="transfer">
+        <h2 class="pt">到期转让 · 处置</h2>
+        <div class="sub">租满即转让——沃朗的独特点。资产状态机切换 + 残值收入凭证 + 资产出账，一单办完。</div>
+        <div class="flow"><span class="st cur">到期提醒(30天)</span><span class="ar">→</span><span class="st">转让报价</span><span class="ar">→</span><span class="st">客户签署</span><span class="ar">→</span><span class="st">账务切换/资产出账</span></div>
+        <div class="grid2">
+          <div class="panel"><h3>资产状态机</h3>
+            <div class="flow" style="margin:0;background:#f7f3ea;border-color:var(--line)">
+              <span class="st">采购</span><span class="ar">→</span><span class="st">投放</span><span class="ar">→</span><span class="st cur">在租</span><span class="ar">→</span><span class="st">待转让</span><span class="ar">→</span><span class="st">已转让</span></div>
+            <div class="flow" style="margin:8px 0 0;background:var(--down-bg);border-color:#f0c9c2">
+              <span class="st" style="color:var(--down)">逆向</span><span class="ar">↳</span><span class="st">收回待处置</span><span class="ar">→</span><span class="st">再投放</span><span class="ar">/</span><span class="st">二手处置</span><span class="ar">/</span><span class="st">报废</span></div>
+            <div class="mini" style="margin-top:10px">最接近沃朗"租满即转让"的现成做法：Rentle 同资产多处置模式 + NETSOL/Alfa 期末独立阶段——本状态机自建</div>
+          </div>
+          <div class="panel"><h3>到期待转让清单</h3>
+            <table>
+              <tr><th>合同</th><th>设备</th><th class="num">转让价</th><th>到期</th></tr>
+              <tr><td><span class="lnk">HT-2025-006</span></td><td>播种墙×5</td><td class="num">100,000</td><td><span class="p-warn pill">28天</span></td></tr>
+              <tr><td><span class="lnk">HT-2025-009</span></td><td>货架×1批</td><td class="num">18,000</td><td><span class="p-warn pill">30天</span></td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="panel"><h3>转让单 ZR-2026-004（播种墙 3年到期）</h3>
+          <div class="kv"><span class="kk">转让价（市场价10%）</span><b>¥20,000</b></div>
+          <div class="kv"><span class="kk">账面净值</span><b>¥16,200</b></div>
+          <div class="kv"><span class="kk">转让收益</span><b class="up">+¥3,800</b></div>
+          <div class="kv"><span class="kk">账务</span><b>残值收入凭证 <span class="lnk">记-0806</span> + 资产出账</b></div>
+          <div class="kv"><span class="kk">计税</span><b>并入分期收款销售价款（非名义价）</b></div>
+          <div style="margin-top:10px"><button class="btn">确认转让</button> <button class="btn ghost">客户放弃 → 转「收回待处置」</button></div>
+        </div>
+      </section>
+
+      <!-- ========== 12 维保·扫码盘点 ========== -->
+      <section class="page" id="maint">
+        <h2 class="pt">维保 · 扫码盘点 <span class="pill p-rent" style="vertical-align:middle">移动端</span></h2>
+        <div class="sub">现场作业为主：扫码定位设备、拍照留痕、账面带出只录差异。手机版一期必做。</div>
+        <div class="flow"><span class="st cur">工单/巡检</span><span class="ar">→</span><span class="st">扫码定位</span><span class="ar">→</span><span class="st">拍照留痕</span><span class="ar">→</span><span class="st">回传更新台账</span></div>
+        <div class="grid2">
+          <div class="panel"><h3>维保工单</h3>
+            <table>
+              <tr><th>工单</th><th>设备</th><th>类型</th><th>状态</th></tr>
+              <tr><td>WX-0806-1</td><td><span class="lnk">SB-0137</span></td><td>故障报修</td><td><span class="pill p-warn">待派工</span></td></tr>
+              <tr><td>WX-0805-3</td><td><span class="lnk">GJ-0088</span></td><td>预防维保</td><td><span class="pill p-rent">进行中</span></td></tr>
+              <tr><td>WX-0803-2</td><td><span class="lnk">SB-0142</span></td><td>季度巡检</td><td><span class="pill p-ok">已完成</span></td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">质保内工单转供应商（4h响应/24h到场），费用不计我方</div>
+          </div>
+          <div class="panel"><h3>扫码盘点（本月）</h3>
+            <div class="kv"><span class="kk">应盘设备</span><b>156 台</b></div>
+            <div class="kv"><span class="kk">已扫</span><b class="up">156 台 ✅</b></div>
+            <div class="kv"><span class="kk">账实差异</span><b class="b-warn">2 台（位置不符）· <span class="lnk">生成盘盈亏调整单</span></b></div>
+            <div class="mini" style="margin-top:8px">账面带出、只录差异；扫码即定位"这台货架现在在哪个客户"</div>
+            <button class="btn" style="margin-top:10px">📷 打开扫码盘点</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 13 凭证中心·双账 ========== -->
+      <section class="page" id="voucher">
+        <h2 class="pt">凭证中心 · 双套账</h2>
+        <div class="sub">业财一体：单据自动生成凭证。两套账并行——税务口径（分期收款销售）与经营口径（三层回报），互不打架。</div>
+        <div class="src">数据模型：抄 ERPNext 多 Finance Book——同一笔业务、两套账各记各的</div>
+        <div class="grid2">
+          <div class="panel"><h3>单据 → 凭证 链</h3>
+            <table>
+              <tr><th>来源单据</th><th>凭证</th><th class="num">金额</th><th>口径</th></tr>
+              <tr><td>收租单 SR-0807-01</td><td><span class="lnk">记-0801</span></td><td class="num">6,720</td><td>两套同记</td></tr>
+              <tr><td>采购入库 CG-031</td><td><span class="lnk">记-0511</span></td><td class="num">180,000</td><td>两套同记</td></tr>
+              <tr><td>转让单 ZR-004</td><td><span class="lnk">记-0806</span></td><td class="num">20,000</td><td>税务并价款</td></tr>
+              <tr><td>分配单 FP-08</td><td><span class="lnk">记-0805</span></td><td class="num">22,500</td><td>经营口径</td></tr>
+            </table>
+          </div>
+          <div class="panel"><h3>双套账对照（本月）</h3>
+            <div class="flow" style="margin:0 0 12px"><span class="st cur">税务口径</span><span class="st">经营口径</span></div>
+            <div class="kv"><span class="kk">收入（分期收款销售）</span><b>¥67,400</b></div>
+            <div class="kv"><span class="kk">增值税(3%减按1%)</span><b>¥674</b></div>
+            <div class="kv"><span class="kk">企业所得税(小微5%·按净利50,000)</span><b>¥2,500</b></div>
+            <div class="kv"><span class="kk">年营收/500万红线</span><b class="b-warn">312万 (62%)</b></div>
+          </div>
+        </div>
+        <div class="panel"><h3>逆向总枢纽：红冲连锁 · 锁账补导 <span class="pill p-over">ERP 死穴</span></h3>
+          <table>
+            <tr><th>凭证</th><th>来源</th><th class="num">金额</th><th>红冲规则</th><th>操作</th></tr>
+            <tr><td>记-0801</td><td>收租 SR-01</td><td class="num">6,720</td><td>整单红冲(限无下游)</td><td><span class="lnk">红冲 → 影响清单</span></td></tr>
+            <tr><td>记-0511</td><td>采购 CG-031</td><td class="num">180,000</td><td>已付 → 应付红字冲下单</td><td><span class="lnk">红冲 → 影响清单</span></td></tr>
+            <tr><td>记-0806</td><td>转让 ZR-004</td><td class="num">20,000</td><td>单价错 → 成本调整单</td><td><span class="lnk">调整 → 影响清单</span></td></tr>
+          </table>
+          <div class="src" style="margin-top:8px">红冲必过「影响清单」确认（列出连带反转的应收/应付/资产）；本月已锁账 → 更正走「上期调整」行承接，已归档报表永不重算</div>
+        </div>
+      </section>
+
+      <!-- ========== 14 任务·审批 ========== -->
+      <section class="page" id="task">
+        <h2 class="pt">任务 · 审批</h2>
+        <div class="sub">任务绑角色、角色绑人，转派留痕，完成必有系统校验（不是打勾就算）。投放审批 300 万内自主。</div>
+        <div class="src">⚡ 任务来源：系统 + 派单混合。逾期案自动派"财务·催收"；供应商谈判由 运营·小洪 手动派"供应链·李工"</div>
+        <div class="grid2">
+          <div class="panel"><h3>我的任务（供应链·李工）</h3>
+            <table>
+              <tr><th>任务</th><th>来源</th><th>状态</th></tr>
+              <tr><td>广达货架 集采比价</td><td>派单</td><td><span class="pill p-warn">进行中</span></td></tr>
+              <tr><td>下场泡工厂做 BOM</td><td>派单</td><td><span class="pill p-idle">待开始</span></td></tr>
+              <tr><td>阿昌仓储逾期跟进</td><td>系统</td><td><span class="pill p-over">超时</span></td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">完成校验：BOM 任务需真上传泵表文件才算完成</div>
+          </div>
+          <div class="panel"><h3>投放审批</h3>
+            <div class="kv"><span class="kk">CG-2026-031 采购</span><b>¥18万</b></div>
+            <div class="kv"><span class="kk">本金回报率</span><b class="up">25.0% ≥ 目标 ✅</b></div>
+            <div class="kv"><span class="kk">额度判定</span><b class="up">＜300万 · 运营自主</b></div>
+            <div class="src" style="margin-top:10px">超 300 万自动转"与合伙人协商"审批流</div>
+            <button class="btn" style="margin-top:6px">自主通过 →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 15 花名册·提成 ========== -->
+      <section class="page" id="hr">
+        <h2 class="pt">花名册 · 权限 · 提成</h2>
+        <div class="sub">人事从简起步：花名册 + 角色权限 + 提成（供应链谈成单的贡献）。复用平台账号，不自建登录。</div>
+        <div class="grid2">
+          <div class="panel"><h3>花名册 · 角色权限</h3>
+            <table>
+              <tr><th>成员</th><th>角色</th><th>数据权限</th></tr>
+              <tr><td>小洪</td><td>运营执行/GP股东</td><td><span class="pill p-ok">全部</span></td></tr>
+              <tr><td>李工</td><td>供应链管理</td><td>供应商/客户/合同/设备</td></tr>
+              <tr><td>王业务</td><td>业务(BD·获客跟进)</td><td>我的客户/公海/跟进</td></tr>
+              <tr><td>财务</td><td>财务</td><td>凭证/账/分配/报表</td></tr>
+              <tr><td>刘总</td><td>LP出资人(不操作系统)</td><td><span class="pill p-warn">仅收月度报表·不见成本</span></td></tr>
+            </table>
+            <div class="mini" style="margin-top:8px">🔒 保密隔离：成本价/账期字段级权限，LP 看不到上下游价</div>
+          </div>
+          <div class="panel"><h3>提成（供应链·李工）</h3>
+            <div class="kv"><span class="kk">本月谈成集采降本</span><b class="up">3 单 · 省 ¥5.7万</b></div>
+            <div class="kv"><span class="kk">新增供应商入库</span><b>2 家</b></div>
+            <div class="kv"><span class="kk">提成（从管理费列支）</span><b class="up">¥2,850</b></div>
+            <div class="mini" style="margin-top:8px">激励与"降本/拓客"挂钩，拒当被动执行的文员</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 16 BI·PDCA·AI ========== -->
+      <section class="page" id="bi">
+        <h2 class="pt">BI · PDCA · AI</h2>
+        <div class="sub">台账是记录，PDCA 才是管理。每指标红绿灯，改进落 action_item 到期回查；AI 只起草不算数。</div>
+        <div class="cards">
+          <div class="card"><div class="k">在租率</div><div class="v up">91%</div><div class="t">目标 ≥90% <span class="b-up">达标</span></div></div>
+          <div class="card"><div class="k">加权回报率</div><div class="v">25.0%</div><div class="t">目标 25% <span class="b-up">达标</span></div></div>
+          <div class="card"><div class="k">应收账龄>30天</div><div class="v down">¥5,181</div><div class="t"><span class="b-down">1 户逾期</span></div></div>
+          <div class="card"><div class="k">资产周转</div><div class="v">2.0×</div><div class="t">供应商杠杆</div></div>
+        </div>
+        <div class="grid2">
+          <div class="panel"><h3>在租率趋势（近6月）</h3>
+            <div style="display:flex;align-items:flex-end;gap:10px;height:120px;padding:8px 0">
+              <div style="flex:1;text-align:center"><div class="bar" style="height:80px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--brand2)"></i></div><div class="mini">3月 82%</div></div>
+              <div style="flex:1;text-align:center"><div class="bar" style="height:88px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--brand2)"></i></div><div class="mini">4月 86%</div></div>
+              <div style="flex:1;text-align:center"><div class="bar" style="height:86px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--brand2)"></i></div><div class="mini">5月 85%</div></div>
+              <div style="flex:1;text-align:center"><div class="bar" style="height:92px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--brand)"></i></div><div class="mini">6月 88%</div></div>
+              <div style="flex:1;text-align:center"><div class="bar" style="height:96px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--brand)"></i></div><div class="mini">7月 90%</div></div>
+              <div style="flex:1;text-align:center"><div class="bar" style="height:98px;width:60%;margin:0 auto"><i style="height:100%;width:100%;background:var(--up)"></i></div><div class="mini">8月 91%</div></div>
+            </div>
+          </div>
+          <div class="panel"><h3>PDCA 改进项（action_item）</h3>
+            <table>
+              <tr><th>问题</th><th>措施</th><th>回查</th></tr>
+              <tr><td>阁楼货架空置22天</td><td>找园区配租</td><td><span class="pill p-warn">8-15到期</span></td></tr>
+              <tr><td>回报刚达标25%</td><td>新单继续压集采价固优势</td><td><span class="pill p-idle">8-31</span></td></tr>
+            </table>
+            <div class="src" style="margin-top:10px"><span class="aibadge">🔬 AI 过程</span> AI 起草本月经营月报（在租率↑/逾期1户/建议）——数字由规则引擎出，AI 只解释</div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+<script>
+  const crumbs={home:['工作台','板块首页'],dash:['工作台','老板驾驶舱'],calc:['业务主线','报价测算器'],contract:['业务主线','合同 · 租金计划'],
+    supplier:['业务主线','供应商(上游)'],customer:['业务主线','客户(下游)'],asset:['业务主线','设备资产'],
+    rentbill:['收支单据','收租 · 批量核销'],purchase:['收支单据','采购入库 · 应付'],transfer:['收支单据','到期转让 · 处置'],
+    maint:['收支单据','维保 · 扫码盘点'],voucher:['财务','凭证中心 · 双套账'],
+    cash:['财务·钱·报表','现金流/分配驾驶舱'],report:['财务·钱·报表','月度报表'],
+    task:['管理','任务 · 审批'],hr:['管理','花名册 · 提成'],bi:['管理','BI · PDCA · AI']};
+  function go(p){
+    document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on',x.dataset.p===p));
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
+    const pg=document.getElementById(p); if(pg)pg.classList.add('on');
+    const c=crumbs[p]; if(c)document.getElementById('crumb').innerHTML=c[0]+'<b>'+c[1]+'</b>';
+    window.scrollTo(0,0);
+  }
+  document.getElementById('nav').addEventListener('click',e=>{
+    const a=e.target.closest('a[data-p]'); if(!a)return; go(a.dataset.p);
+  });
+  document.addEventListener('click',e=>{
+    const g=e.target.closest('[data-goto]'); if(!g)return; go(g.dataset.goto);
+  });
+  // in-page tabs
+  document.addEventListener('click',e=>{
+    const t=e.target.closest('.tab[data-tab]'); if(!t)return;
+    const bar=t.closest('.tabs'); bar.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+    const scope=t.closest('.page');
+    scope.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('on'));
+    const pane=scope.querySelector('#'+t.dataset.tab); if(pane)pane.classList.add('on');
+  });
+  // filter chips (visual)
+  document.addEventListener('click',e=>{
+    const f=e.target.closest('.fchip'); if(!f)return; f.classList.toggle('on');
+  });
+  // seg toggles (visual only)
+  document.querySelectorAll('.seg').forEach(s=>s.addEventListener('click',e=>{
+    if(e.target.tagName==='BUTTON'){s.querySelectorAll('button').forEach(b=>b.classList.remove('on'));e.target.classList.add('on');}
+  }));
+</script>
+</body>
+</html>
