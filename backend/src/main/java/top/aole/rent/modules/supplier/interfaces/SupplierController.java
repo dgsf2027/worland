@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import top.aole.rent.common.auth.RequireRole;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.supplier.dto.DependencyAlert;
@@ -69,7 +70,8 @@ public class SupplierController {
         return R.ok();
     }
 
-    @ApiOperation("淘汰/停用供应商(留痕)")
+    @ApiOperation("淘汰/停用供应商(敏感·供应链+老板·留痕)")
+    @RequireRole(value = {"供应链", "老板"}, action = "供应商淘汰", targetType = "supplier")
     @PostMapping("/{id}/retire")
     public R<Void> retire(@PathVariable Long id, @Validated @RequestBody RetireRequest req) {
         supplierService.retire(id, req);

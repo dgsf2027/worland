@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import top.aole.rent.common.audit.AuditLogService;
 import top.aole.rent.common.auth.DataScope;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
@@ -66,6 +67,7 @@ public class ContractService {
     private final AssetService assetService;
     private final CustomerMapper customerMapper;
     private final RuleConfigService rules;
+    private final AuditLogService auditLogService;
 
     private static final String NATURE = "分期收款销售";
     private static final String FORBIDDEN = "融资租赁";
@@ -423,8 +425,9 @@ public class ContractService {
         }
         c.setStatus("已作废");
         contractMapper.updateById(c);
-        recordChange(id, "作废", true, before, "status=已作废",
-                req == null ? "整份红冲作废" : (req.getDetail() != null ? req.getDetail() : "整份红冲作废"));
+        String detail = req == null ? "整份红冲作废" : (req.getDetail() != null ? req.getDetail() : "整份红冲作废");
+        recordChange(id, "作废", true, before, "status=已作废", detail);
+        auditLogService.record("合同作废", "contract", id, AuditLogService.EXECUTED, "整份红冲 · " + detail);
         log.info("合同作废: id={}, by={}", id, UserContext.getUserId());
     }
 

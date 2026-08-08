@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import top.aole.rent.common.auth.RequireRole;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.contract.dto.ContractChangeRequest;
@@ -53,7 +54,8 @@ public class ContractController {
         return R.ok(contractService.detail(id));
     }
 
-    @ApiOperation("作废(限未采购·整份红冲:计划删/押金退/设备释放)")
+    @ApiOperation("作废(敏感·财务+老板·限未采购·整份红冲:计划删/押金退/设备释放)")
+    @RequireRole(value = {"财务", "老板"}, action = "合同作废", targetType = "contract")
     @PostMapping("/{id}/void")
     public R<Void> voidContract(@PathVariable Long id, @RequestBody(required = false) ContractChangeRequest req) {
         contractService.voidContract(id, req);

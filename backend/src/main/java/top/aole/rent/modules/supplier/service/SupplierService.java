@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import top.aole.rent.common.audit.AuditLogService;
 import top.aole.rent.common.auth.DataScope;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
@@ -48,6 +49,7 @@ public class SupplierService {
     private final SupplierMapper supplierMapper;
     private final SupplierSupplyMapper supplyMapper;
     private final RuleConfigService rules;
+    private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 可用状态(计入单一依赖统计) */
@@ -276,6 +278,7 @@ public class SupplierService {
         s.setRetiredBy(UserContext.getUserId());
         s.setRetiredAt(LocalDateTime.now());
         supplierMapper.updateById(s);
+        auditLogService.record("供应商淘汰", "supplier", id, AuditLogService.EXECUTED, req.getReason());
         log.info("供应商淘汰留痕: id={}, by={}, reason={}", id, s.getRetiredBy(), req.getReason());
     }
 
