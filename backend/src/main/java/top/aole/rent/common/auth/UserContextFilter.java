@@ -64,12 +64,24 @@ public class UserContextFilter extends OncePerRequestFilter {
         }
     }
 
-    /** 请求头从 ISO-8859-1 还原为 UTF-8(中文名占位头);已是 ASCII 则无损。 */
+    /**
+     * 占位头解码。兼容两种客户端:
+     *  - curl 直传原始 UTF-8 字节:Undertow 按 ISO-8859-1 读入 → 转回 UTF-8;
+     *  - 浏览器 XHR 不允许非 Latin1 头值,前端 encodeURIComponent → 此处 URL 解码。
+     */
     private String decodeHeader(String raw) {
         if (raw == null) {
             return null;
         }
-        return new String(raw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        String utf8 = new String(raw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        if (utf8.indexOf('%') >= 0) {
+            try {
+                return java.net.URLDecoder.decode(utf8, "UTF-8");
+            } catch (Exception ignore) {
+                return utf8;
+            }
+        }
+        return utf8;
     }
 
     /** 姓名 → 稳定非 0 主键:种子表优先,否则名字 hash 落到 [100000, 999999] 区间(确定性、可复现)。 */
