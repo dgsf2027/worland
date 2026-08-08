@@ -336,6 +336,25 @@ public class AssetService {
         writeEvent(assetId, "报废", "purchase_in", purchaseInId, "采购退货红冲·设备报废释放");
     }
 
+    /** 逾期收回:在租设备 → 收回待处置(物权在我方·清承租关系)。走事件流。供 OverdueService 调用(M2-06)。 */
+    @Transactional
+    public void repossess(Long assetId, Long contractId, Long repossessOrderId) {
+        Asset a = assetMapper.selectById(assetId);
+        if (a == null) {
+            return;
+        }
+        // 仅在租/待转让可收回;已收回待处置/已转让/报废则跳过(幂等)
+        if (!"在租".equals(a.getStatus()) && !"待转让".equals(a.getStatus())) {
+            return;
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "收回待处置")
+                .set(Asset::getCurrentHolderCustomerId, null)
+                .set(Asset::getContractId, null));
+        writeEvent(assetId, "收回待处置", "repossess_order", repossessOrderId, "逾期收回·转收回待处置");
+    }
+
     // ============ 投放/交付确认(M1-14·投放审批→老板) ============
 
     /** 投放/交付确认:采购/收回待处置 → 投放。走事件流 + audit(EXECUTED)。切面已卡老板。 */
