@@ -512,3 +512,55 @@ M5-01 任务中心 / M5-02 投放审批 / M5-03 花名册提成 / WT-01 工作�
 
 ### 剩余(M5 Wave B)
 BI 多维矩阵(M5-04)/PDCA action_item+AI 综述(M5-05)/audit 强化只追加(M5-06)/导入中心(M5-07)/对象存储签名URL(M5-08)。
+
+---
+
+## M5 Wave B 验收 — BI多维矩阵 + PDCA + 审计只追加强化 + 导入中心 + 对象存储签名URL(2026-08-10)
+
+环境:main 直建 · mvn compile 通过 · boot `Started RentApplication` · Flyway **V14** success=1 · 前端 vite 5175 浏览器 happy path 通过。
+
+### V14 迁移(schema 走 Flyway·§4.16)
+- 新表:`yc_rent_action_item`(PDCA)、`yc_rent_import_job`(导入)、`yc_rent_file_object`(文件);audit_log 补列 `client_ip/request_uri/request_id`;触发器 `trg_audit_log_no_update/no_delete`;rule_config 追加 pdca_threshold×5 + import_limit×2 + file_sign_ttl。
+- `SELECT version,success FROM flyway_schema_history WHERE version='14'` → success=1。
+
+### M5-04 BI 多维矩阵(只读聚合·curl vs SQL 逐维对齐一致)
+- 在租率 overall **12.50%**(1在租/8可投放·报废不入分母);SQL `SUM(status='在租')/SUM(status<>'报废')` = 12.50。下钻:货架 0/6、播种墙 1/2 — 与 `GROUP BY category` 一致。
+- 加权回报 overall **0.00%**(唯一生效合同 target_irr=NULL→0·权重月租5000);SQL Σ(irr×rent)/Σrent 一致。
+- 应收账龄 total **¥5000** 全落 90+ 桶 1 笔;SQL 正常单 amount-received>0 = 单笔 RB-...-P03 due 2026-05-01(≈101天)一致。
+- 资产周转(投放率)overall **50.00%**(4已投放/8家底);SQL `SUM(status IN('在租','已转让'))/SUM(status<>'报废')` = 50.00 一致。
+- 趋势(近6月回款):2026-08 = **30000**(matched 已收);其余月 0。
+
+### M5-05 PDCA(红绿灯+回查三分支+AI脱敏)
+- 看板:红4绿1 — occupancy 0.125<0.8 红 / weighted_return 0<0.15 红 / receivable_aging 101>30 红 / asset_turnover 0.5<0.9 红 / collect_rate 0.857≥0.85 **绿**;阈值全来自 rule_config[pdca_threshold]。
+- AI 综述:`model=mock(kimi-k2)` · **AI含数字?False**(脱敏·不出数字·仅喂指标名+红/绿)。
+- 改进项回查三分支(SQL 核对状态):
+  - ID1 occupancy 目标0.8 → verify_value 0.125 → **未达 → 未见效升级**
+  - ID2 collect_rate 目标0.85 → verify_value 0.857 → **通过 → 验证通过(自动关闭)**
+  - ID3 无 metric_key → **需人工判定(保持进行中)**;baseline 登记时自动取(0.125/0.857)。
+  - 批量到期回查(=cron 执行体):total 2 passed 1 manual 1。
+
+### M5-06 审计只追加强化(P1-16)
+- 越权触发(X-User:王业务/业务 淘汰供应商)→ audit 行 #44 `result=DENIED` 且 **client_ip=0:0:0:0:0:0:0:1 · request_uri=/api/rent/suppliers/1/retire**(请求指纹落库)。
+- `UPDATE yc_rent_audit_log SET detail='TAMPER'` → **ERROR 1644 (45000):审计日志只追加不可编辑(P1-16):UPDATE 被拒绝**。
+- `DELETE FROM yc_rent_audit_log` → **ERROR 1644 (45000):…DELETE 被拒绝**。占位期注:法律级抗抵赖(哈希链/WORM)待真SSO补。
+
+### M5-07 导入中心(走同一校验+事件流·公式转义·越权拒·限流)
+- 供应商(string-typed 注入):预览 escapedCells=**3**;行3 `+8613...`、`@HYPERLINK(x)`、行4 `=1+1恶意名` 均标 escaped;确认入库后 SQL 查库落值 **均带单引号前缀**(`'+8613...`/`'@HYPERLINK(x)`/`'=1+1恶意名`)公式被中和;入库经 `supplierService.create`(事件流)。
+- 去重:重复供应商名(恒丰自动化)→ **dup 跳过**;commit imported 2 / skippedDup 1。
+- 设备:行`项目ID=999`(导入目标项目=无)→ **err 越权:跨项目导入被拒**;缺序列号 → err;正常行 ok。
+- 客户(X-User:业务→uid1007·行级隔离):归属人=1007 → **ok**;归属人=9999 → **err 越权:只能导入自己名下客户**。
+- 限流:rule import_limit max_file_bytes=5MB / max_rows=2000;multipart 上调 10MB。
+
+### M5-08 对象存储签名URL(P1-20·短时效+服务端鉴权代理)
+- 上传合同(ownerRole=财务)→ storage_key=UUID(不可枚举)。
+- ①有效签名下载(财务)→ **http=200** 返回文件内容。
+- ②篡改 token(尾加XX)→ **code 403 签名 token 非法**。
+- ③越权(供应链带同一有效token)→ **code 403 越权:该文件限「财务」角色可见**。
+- ④过期(TTL临时改1s·等3s)→ **code 403 签名URL已过期(短时效失效)**;测后恢复300s。
+
+### 回归(main 仍可 boot)
+- 各模块 curl 200:suppliers/pool · customers/pool · assets · cashflow · tasks · pdca/board · bi/occupancy · imports。
+
+### 前端浏览器 happy path
+- /bi-pdca:四指标矩阵卡(品类/供应商/客户/性质下钻切换)+回款趋势柱 + PDCA红绿灯(红4绿1)+ AI综述透明标签(🔬mock(kimi-k2)/缓存命中·[MOCK]无数字)+ 改进项清单(回查/关闭)。
+- /import:目标切换(供应商/客户/设备)+字段模板(去重键高亮)+作业历史(IMP-001~005 逐行统计)。
