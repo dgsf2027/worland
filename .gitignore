@@ -4,6 +4,9 @@ dist/
 *.class
 .env
 .env.*
+# 例外:各目录的 .env.example 模板(占位·无真值)须入库,供上线复制
+!.env.example
+!**/.env.example
 *.log
 .DS_Store
 .idea/

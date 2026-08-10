@@ -1,0 +1,15 @@
+# 减小 docker build 上下文(context: 仓库根)。构建所需源码由 Dockerfile 显式 COPY。
+**/node_modules
+**/target
+**/dist
+**/.git
+**/*.log
+**/.DS_Store
+**/.idea
+backend/storage
+deploy/storage
+# 文档/运营资料不进镜像上下文
+新租赁科技有限公司/
+系统方案/
+运营手册/
+*.docx

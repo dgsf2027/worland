@@ -1,0 +1,71 @@
+# 沃朗租赁板块 生产编排(自带 MySQL·数据物理隔离)
+# 敏感值全从 .env 注入(chmod 600·不进 Git)。前端经外部网络 worland-edge 由中央网关反代。
+# 用法:cp deploy/.env.example deploy/.env && 改真值 && docker compose -f deploy/docker-compose.prod.yml up -d --build
+services:
+  worland-mysql:
+    image: mysql:8.0
+    container_name: worland-mysql
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?must set in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-worland_prod}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - worland_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [worlandnet]
+
+  worland-server:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    container_name: worland-server
+    restart: unless-stopped
+    depends_on:
+      worland-mysql:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      # 连编排内 mysql 容器(内部 3306)。Flyway 随 boot 自动 apply V1→V14
+      DB_URL: jdbc:mysql://worland-mysql:3306/${MYSQL_DATABASE:-worland_prod}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:?must set in .env}
+      # 附件/导入/现场照落盘(挂宿主卷持久化)
+      RENT_STORAGE_DIR: /app/storage
+      # LLM 留空=全 mock 不外呼;SSO 暂关(占位头)。真值由 .env 覆盖
+      SSO_ENABLED: ${SSO_ENABLED:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    volumes:
+      - ./storage:/app/storage
+    expose:
+      - "8082"          # 仅容器网络内暴露
+    networks: [worlandnet]
+
+  worland-web:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    container_name: worland-web
+    restart: unless-stopped
+    depends_on: [worland-server]
+    networks: [worlandnet, worland-edge]   # worland-edge = 与中央网关共享,供反代
+
+networks:
+  worlandnet:
+    driver: bridge
+  worland-edge:
+    external: true    # 先 docker network create worland-edge,再把中央网关 connect 进来
+
+volumes:
+  worland_mysql_data:

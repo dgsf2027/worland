@@ -564,3 +564,87 @@ BI 多维矩阵(M5-04)/PDCA action_item+AI 综述(M5-05)/audit 强化只追加(M
 ### 前端浏览器 happy path
 - /bi-pdca:四指标矩阵卡(品类/供应商/客户/性质下钻切换)+回款趋势柱 + PDCA红绿灯(红4绿1)+ AI综述透明标签(🔬mock(kimi-k2)/缓存命中·[MOCK]无数字)+ 改进项清单(回查/关闭)。
 - /import:目标切换(供应商/客户/设备)+字段模板(去重键高亮)+作业历史(IMP-001~005 逐行统计)。
+
+---
+
+# 整合验收(收尾波 · 2026-08-10)
+
+> 目标:全系统整合 smoke + 浏览器 E2E,确认冲刺0+M1-M5 全量业务在 main 上可整体交付(deploy-ready)。**不做真 prod 部署**(无服务器目标、SSO 凭据未就绪 — 见 部署runbook 上线红线清单)。
+
+## A.1 全新 boot · Flyway V1→V14 干净 apply(空库证明)
+
+**做法(非破坏性):** `pkill -f spring-boot:run` 后,新建**空**库 `worland_verify`,以 `DB_URL` 指向空库全新 boot,证明从零建库 14 迁移全绿(dev 库 M1-M5 数据不动,留给 smoke/E2E)。
+
+- 启动日志关键行:
+  - `Flyway Community Edition 8.5.13` → `Successfully validated 14 migrations`
+  - `Current version of schema worland_verify: << Empty Schema >>`(确证空库起步)
+  - 逐版本 `Migrating schema to version "1 - init" … "14 - pdca import file audit append"`
+  - `Successfully applied 14 migrations to schema worland_verify, now at version v14 (execution time 00:00.897s)`
+  - `Undertow started on port(s) 8082 (http) with context path '/api'`
+  - `Started RentApplication in 2.732 seconds`
+- `SELECT version,description,success FROM flyway_schema_history`(worland_verify):**V1→V14 全 success=1**,execution_time 9~75ms/条。
+- 建表数:`information_schema.tables where schema=worland_verify` = **44**(43 业务表 + flyway_schema_history)。
+- 验证后 `DROP DATABASE worland_verify`;dev 库 `flyway_schema_history` 同样 V1→V14 全 success=1(历史留痕),44 表。
+
+## A.2 全模块 smoke(worland_dev · 每模块 1 代表接口 · HTTP 码表)
+
+**全新 boot worland_dev**(有 M1-M5 种子)→ `Started RentApplication in 1.843s` → `/api/v1/health` = 200。逐模块 curl(base `http://127.0.0.1:8082/api`):
+
+| # | 模块 | 代表接口 | HTTP |
+|---|---|---|---|
+| 1 | health | GET /v1/health | 200 |
+| 2 | crons(定时任务集) | GET /rent/crons | 200 |
+| 3 | quote(报价) | POST /rent/quote/calc | 200 |
+| 4 | supplier(供应商) | GET /rent/suppliers | 200 |
+| 5 | supplier 依赖预警 | GET /rent/suppliers/dependency-alert | 200 |
+| 6 | customer(客户) | GET /rent/customers | 200 |
+| 7 | customer 管道 | GET /rent/customers/pipeline | 200 |
+| 8 | asset(设备) | GET /rent/assets/idle-alert | 200 |
+| 9 | contract(合同) | GET /rent/contracts | 200 |
+| 10 | billing(收租) | GET /rent/bills | 200 |
+| 11 | voucher(凭证) | GET /rent/vouchers | 200 |
+| 12 | depreciation(折旧) | GET /rent/assets/1/depreciation | 200 |
+| 13 | tax-threshold(500万红线) | GET /rent/tax/threshold | 200 |
+| 14 | distribution(分配) | GET /rent/distribution | 200 |
+| 15 | investors(投资人) | GET /rent/investors | 200 |
+| 16 | cashflow(现金流) | GET /rent/cashflow | 200 |
+| 17 | coverage-gap(兑付缺口) | GET /rent/cashflow/coverage-gap | 200 |
+| 18 | return-attribution(回报归因) | GET /rent/analytics/return-attribution | 200 |
+| 19 | monthly-report(月度报表) | GET /rent/monthly-report | 200 |
+| 20 | transfer(转让处置) | GET /rent/transfer | 200 |
+| 21 | maintenance(维保) | GET /rent/maintenance/spare-alert | 200 |
+| 22 | stocktake(盘点) | GET /rent/stocktake | 200 |
+| 23 | task(任务) | GET /rent/tasks | 200 |
+| 24 | approval(审批) | GET /rent/approvals | 200 |
+| 25 | roster(花名册) | GET /rent/roster | 200 |
+| 26 | commission(提成) | GET /rent/commission | 200 |
+| 27 | bi(BI矩阵·在租率) | GET /rent/bi/occupancy | 200 |
+| 28 | bi 加权回报 | GET /rent/bi/weighted-return | 200 |
+| 29 | pdca(改进循环) | GET /rent/pdca/board | 200 |
+| 30 | imports(导入中心) | GET /rent/imports?target=supplier | 200 |
+| 31 | import 模板 | GET /rent/imports/template?target=supplier | 200 |
+| 32 | files(对象存储签名) | GET /rent/files/1/signed-url | 200 |
+| 33 | workbench(工作台) | GET /rent/workbench | 200 |
+| 34 | reminders(到期提醒) | GET /rent/reminders | 200 |
+
+**结论:34/34 接口 200**,覆盖全部 25 后端模块 + health/cron。0 报错。
+
+## A.3 浏览器 E2E(内置 Browser pane · 5 页 happy path · 0 console error)
+
+前端 `vite` dev(5176,代理 /api→8082)。全程 `read_console_messages onlyErrors` = **No console logs(0 error)**,仅 vite HMR debug。
+
+1. **报价测算 `/quote`** — 填 市场价20万/集采18万/播种墙/云山快仓/IRR0.25/月替代人工12000 → 「测算报价」→ 结果面板:**精确月租 ¥6,718.06**、速算 ¥6,720、税后IRR **25.0%**、三层回报 **25.0 / 50.0 / 65.8%**、价值定价两校验(回本16.7月≤18达标、月净收益>0达标)「可解锁生成合同」、单台首付杠杆。与冲刺0/M1 基线逐字一致。
+2. **工作台 `/workbench` 角色投影** — 顶部「当前角色」下拉 5 角色。
+   - **老板**:全量视图,在租率20.0%(1/5)、应收合计¥106,000、本月分配¥450,000、加权回报30.0%、红点「空置待处置」。
+   - **切 刘总(LP)**:头部变「LP 视图 · 仅加权回报(字段级保密:不见成本/应收明细)」,在租率/应收/分配 三卡全打 **—**,仅加权回报30.0% 可见,红点「当前无红点」。→ 角色投影 + 字段级保密验证通过。
+3. **月度报表 `/monthly`** — 财务日历(1/2/3/5日 SOP,PENDING 4项待人工)+ **六件套 Tab 全在**(①收租台账 ②利润表ops ③现金流水 ④往来 ⑤资产快照 ⑥分配表🔒)+ **第七件《月度经营分析报告》七节全渲染**(一经营概况…七下月改进建议),每节挂**数据溯源 chip**(利润表ops/收租台账/资产快照/往来表/现金流水/500万红线/缺口扫描),🔬AI过程 徽标(MOCK占位·无数字),导出 Excel(六件套)/ Word(七节)按钮在。
+4. **供应商池 `/supplier`** — 共9家;**单一依赖预警**横幅(配件仅1家、货架0家)；全生命周期状态(主供/备供/试样/淘汰/接触)、履约分(恒丰86/睿捷78/科瑞81)、逐行「淘汰」留痕。
+5. **客户 CRM `/customer`** — 共6家;全生命周期(线索→跟进→商机→在租→流失)、评级、责任业务、下次跟进/逾期标；LP 身份下 在租/商机额 与 逾期应收 打 🔒(字段级隔离);身份切换(老板/财务/业务/投资人)横幅在。
+
+## A.4 数据清理(task E)
+
+导入中心测试样本(供应商 id 6-10:`新导入供应商A`/`0`/`新导入供应商B`/`新供应商C`/`'=1+1恶意名`,create_time 2026-08-10)→ **软标注 `remark='导入测试样本'`**(不硬删,不影响他人验证)。客户表(6 行全 08-08 种子)、设备表 08-10 的 3 行经查为 **M4 复投「再投放测试」/ M5 采购入库 M5SN-001/002 合法验证流水**(挂 purchase_in_id / transfer 链),非导入脏数据,**保留不动**。
+
+## A.5 deploy-ready 套件构建验证
+
+见 `deploy/`(backend.Dockerfile / frontend.Dockerfile / frontend-nginx.conf / docker-compose.prod.yml / .env.example)与 `部署runbook.md`。docker 镜像本地构建结果记录于 `整合验收报告-全系统.md`「B. deploy-ready」节。
