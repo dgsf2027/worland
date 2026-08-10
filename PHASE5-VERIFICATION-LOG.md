@@ -327,3 +327,56 @@ health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → �
 - 折旧口径为**直线法**(base=集采价−残值,末期结平尾差);加速折旧/税会差异(税务账折旧)属后续。
 - 折旧 cron 记账期取执行当月;跨月补提用 `?bizDate=` 手动入口(运维/测试)。
 - M3 Wave B 待做:分配(管理费阶梯/50-50)/现金流/账期兑付缺口红灯/月度报表六件套。
+
+---
+
+# M3 Wave B 验收 — 结账分配/现金流驾驶舱/账期兑付缺口(P0-H)/回报四源
+
+环境:main·Flyway V10·mvn compile+boot OK(`Started RentApplication`)·8082/api·全 curl 走占位头 `X-User-*`。
+
+## M3-03/04 结账分配(管理费阶梯 / 50-50 / 留存校验 / 幂等冲销)
+- **出资人 seed**:`GET /rent/investors` → 数智云仓 GP 20万/10% · 小洪 LP 60万/30% · 刘总 LP 70万/35% · 其他 LP 50万/25%(合计 200万)。✅
+- **核心链路(权威例·方案书§11/§13.2)**:`POST /rent/distribution/run {"period":"2026-06","profitBefore":500000,"returnRate":0.25}` →
+  - 净利 50万 → 回报率 25% → **管理费 10% 档**(§13.1:25-30%→10%)→ 管理费 **5万** → 可分配 **45万** → 现金 **22.5万** / 滚存 **22.5万**(50/50)。
+  - 留存下限 = max(20万, 未来3月供应商净应付) = **20万**;分配后留存 22.5万 → `reserveSufficient=true`。
+  - **按比例分 4 方**:GP 数智云仓 现金2.25万+滚存2.25万+**管理费5万**=**9.5万**;小洪 13.5万;刘总 15.75万;其他 11.25万。份额加总 = 现金22.5万+滚存22.5万+管理费5万 ✓。✅
+- **auto 回报率**:不传 returnRate → `returnRate=profitBefore/totalCapital=500000/2000000=0.25` → 10% 档(与显式一致)。✅
+- **阶梯换档**:`profitBefore=600000 returnRate=0.32` → 落 30-35% 档 → **管理费率 15%** → 可分配 51万。✅
+- **period 幂等**:同期 2026-06 无 force 重跑 → `code=400 已存在生效分配单 FP-202606;重算请带 force=true`。✅
+- **force 冲销重算**:`force=true` → 旧单置 `reversed` + 生成负额镜像冲销单(reverses_id=原id)+ 新 active 单。SQL 验:
+  `SELECT ... FROM yc_rent_rent_distribution` → id1 reversed / id2 FP-202606-R(profit -50万·reverses_id=1)/ id3 active;`period='2026-06' GROUP BY status` → active=1 reversed=2(**同期恒一条 active**)。✅
+- **手动冲销 + 幂等拒**:`POST /rent/distribution/3/reverse` → 原单 reversed + 冲销单 FP-202606-R-2;重复冲销 → `code=400 该分配已冲销`;`uk_distribution_reverses` 唯一约束在库(SHOW INDEX 确认)。✅
+- **RBAC(P0-D)**:业务角色跑分配 → `code=403 需要角色 [财务, 老板]`。✅
+- **P0-E 角色投影**:财务(canSeeCost)见全量 4 人份额;LP(无匹配 user_id)见 0 人(仅见自己那份)。✅
+- **单一真相源**:阶梯(mgmt_fee_ladder v2 §13.1 五档)/分配比(distribution_cash_ratio 0.5)/留存下限(reserve_floor)全走 rule_config(V10 seed·禁硬编码)。每人份额 = 分配快照 × investor.ratio 即时算(不落冗余表)。
+
+## M3-05 现金流驾驶舱
+- `GET /rent/cashflow?months=6` → 应收(未收)分层 1年内 88000/1年以上 0/合计 88000(8 笔);应付(待付)-222000(1 笔·退款红字);净头寸 310000;
+  三层杠杆:①自有 200万(=Σ investor.amount)②供应商账期 max(0,Σ待付)=0 ③融资 0(未启用)合计 200万;预测曲线逐月 inflow/outflow/net/cumulative。✅
+- **口径**:应收未收态取 rent_bill(status≠已核销 计入),应付取 payable status='待付'(§4.24 单一真相源)。
+
+## M3-06 账期兑付缺口预警(P0-H)
+- **现金头寸模型**:待付 payable 按到期升序,逐 checkpoint 计 `预计现金 = 可动用留存 + Σ收款(≤到期) − Σ应付(≤到期)`;<0 → 红灯。
+- **红灯实证(造一笔到期应付80万>回款+留存)**:插入 payable 尾款 80万 due 2026-08-20 待付 → `GET /rent/cashflow/coverage-gap?tMinusDays=7` →
+  `hasRedAlert=true redCount=1`;🔴 应付#7 尾款 应付80万 累计回款8.8万 累计应付57.8万(含-22.2万退款净额)→ **预计现金 -21万 → 缺口 -21万**;
+  **裁决人**=老板(合伙事务执行人/GP 数智云仓);**补款来源**=启用层级③融资/GP·LP 股东借款/延后分配抬滚存/加速收回处置回款。删除临时行后复查 `hasRedAlert=false`。✅
+- **可动用留存** = Σ active 分配 reserve_after − 20万下限。
+
+## M3-09 回报四源(四源之和=总IRR·可勾稽)
+- `GET /rent/analytics/return-attribution`(默认其他客户·总IRR 0.30)→ 集采差价 12%(权重40%)+ 资金时间价值 7.5%(25%)+ 价值定价 6%(20%)+ 残值回收 4.5%(15%)= **sumCheck 0.30 = totalIrr → reconciled=true**。✅
+- `?customerType=云山快仓`(总IRR 0.25)→ 四源和 0.25 勾稽平。✅
+- **末源兜尾差**保证 ∑ 精确=总 IRR;权重走 rule_config `return_attribution_weights`。术语区分:四源=利润来源 vs 三层杠杆=资金结构。
+
+## 前端(真浏览器验 · /cashflow · 0 console error)
+- 顶部账期兑付缺口预警条(🟢兑付安全/🔴红点·可动留存 2.5万·T-N 天可调);现金流 KPI 四卡(应收8.80万/应付-22.20万/净头寸31万/三层杠杆自有200万);净现金流预测柱;
+- 结账分配区(运行表单·幂等 force·列表 现金/滚存/留存达标 tag/生效·冲销)+ **详情弹窗见计算链路 8 步 + 每人份额**(GP 9.5万含管理费·勾稽);回报四源堆叠条(12%+7.5%+6%+4.5%=30%·✓勾稽平)。✅
+
+## 回归(main 仍 boot · 已过模块未坏)
+- `GET /rent/vouchers`(total 27)/`/rent/tax/threshold`(正常)/`/rent/purchase`(200) 全 code:200。新增 distribution/analytics 模块 @Mapper 自动纳入(无 @MapperScan 限制),不改凭证/收租/采购对外行为。
+
+## 遗留 / 未做(诚实 · 本波)
+- **回报四源权重**为 rule_config 业务口径分解(§8.4·可校准),非逐单 IRR 蒙特卡洛;逐合同四源拆解属 M4/BI。
+- **三层杠杆③融资** = 0(融资模块未启用);供应商账期占用取待付 payable 净额。
+- **可动用留存**按 Σ active 分配 reserve_after 累计口径(无独立留存余额台账);完整留存滚动台账属 Wave C。
+- 分配「每人份额」现场按快照×ratio 算(investor.user_id 现为空 → LP 门户投影待真 user 表就绪)。
+- **M3 Wave C 待做**:月度报表六件套 + 经营分析七节 + 财务日历 + 定时任务集补齐(折旧/分配/缺口扫描 cron 已就位,报表/日历 cron 待接)。
