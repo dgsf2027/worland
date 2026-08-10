@@ -23,6 +23,8 @@ import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.mapper.RentScheduleMapper;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
+import top.aole.rent.modules.finance.dto.VoucherDtos;
+import top.aole.rent.modules.finance.service.VoucherService;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 
 import java.math.BigDecimal;
@@ -56,6 +58,7 @@ public class RentBillService {
     private final OverdueCaseMapper overdueCaseMapper;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    private final VoucherService voucherService;
 
     private static final DateTimeFormatter YM = DateTimeFormatter.ofPattern("yyyy-MM");
     /** 收入记账账套(分期收款销售);锁账守卫按此账套判期。 */
@@ -184,10 +187,13 @@ public class RentBillService {
         b.setStatus("已核销");
         b.setMatchedAt(LocalDateTime.now());
         b.setAccountPeriod(period);
-        // voucher_id 留空 = M3 凭证钩子(稽核据此亮"已核销缺凭证")
         if (req != null && req.getRemark() != null) {
             b.setRemark(appendRemark(b.getRemark(), req.getRemark()));
         }
+        // M3-01:核销即生成收入凭证(税务账+经营账各一·借贷平衡),回填 voucher_id(稽核 matchedNoVoucher 归 0)
+        Long voucherId = voucherService.postRentIncome(id, b.getAmount(), LocalDate.now(),
+                contractNo(b.getContractId()), b.getPeriodNo() != null ? b.getPeriodNo() : 0);
+        b.setVoucherId(voucherId);
         rentBillMapper.updateById(b);
 
         // 还款恢复:核销逾期单 → 关闭其开启中的逾期案
@@ -295,10 +301,14 @@ public class RentBillService {
                 impact.add("租金计划 期" + s.getPeriodNo() + " 回退未到期 + 清收租单关联");
             }
         }
-        if (b.getVoucherId() != null) {
-            impact.add("凭证 #" + b.getVoucherId() + " 待 M3 反向冲销");
+        // M3-01:联动红冲收入凭证(税务账+经营账·ledger_book 同步写负额冲销·营收红线回退)
+        int revVouchers = voucherService.reverseBySource("rent_bill", id, "收租单红冲联动: " + reason);
+        if (revVouchers > 0) {
+            impact.add("联动红冲收入凭证 " + revVouchers + " 张(税务账+经营账·ledger_book 同步冲销·营收红线回退)");
+        } else if (b.getVoucherId() != null) {
+            impact.add("凭证 #" + b.getVoucherId() + " 已红冲,无需重复冲销");
         } else {
-            impact.add("原单无凭证(M2 未生成),无需冲销凭证");
+            impact.add("原单无凭证,无需冲销凭证");
         }
 
         auditLogService.record("收租红冲", "rent_bill", id, AuditLogService.EXECUTED,
@@ -356,6 +366,39 @@ public class RentBillService {
                 "退款 " + amt + " 追溯 " + b.getBillNo() + " · " + reason);
         log.info("[退款] 原单 {} 退 {} 期 {} by {}", b.getBillNo(), amt, period, currentUserId());
         return toItem(rf);
+    }
+
+    // ============ M3-01 回填历史已核销单收入凭证(消稽核 matchedNoVoucher) ============
+
+    /**
+     * 为历史"已核销缺凭证"单补生成收入凭证(税务账+经营账)+ 回填 voucher_id。
+     * M2 遗留的已核销单(voucher_id=NULL)一次性入账,钱该动没动稽核 matchedNoVoucher → 0。幂等(已过账跳过)。
+     */
+    @Transactional
+    public VoucherDtos.BackfillResult backfillRentIncomeVouchers() {
+        List<RentBill> matched = rentBillMapper.selectList(new LambdaQueryWrapper<RentBill>()
+                .eq(RentBill::getStatus, "已核销")
+                .isNull(RentBill::getVoucherId));
+        VoucherDtos.BackfillResult r = new VoucherDtos.BackfillResult();
+        List<String> details = new ArrayList<>();
+        int posted = 0, voucherCount = 0;
+        for (RentBill b : matched) {
+            LocalDate bizDate = b.getAccountPeriod() != null
+                    ? LocalDate.parse(b.getAccountPeriod() + "-01") : LocalDate.now();
+            Long taxId = voucherService.postRentIncome(b.getId(), b.getAmount(), bizDate,
+                    contractNo(b.getContractId()), b.getPeriodNo() != null ? b.getPeriodNo() : 0);
+            b.setVoucherId(taxId);
+            rentBillMapper.updateById(b);
+            posted++;
+            voucherCount += 2;   // 税务账 + 经营账
+            details.add(b.getBillNo() + "(" + b.getBillKind() + ") → tax凭证#" + taxId + " +ops");
+        }
+        r.setScanned(matched.size());
+        r.setPosted(posted);
+        r.setVoucherCount(voucherCount);
+        r.setDetails(details);
+        log.info("[凭证回填] 已核销缺凭证 {} 单入账,生成凭证 {} 张", posted, voucherCount);
+        return r;
     }
 
     // ============ M2-04 钱该动没动稽核 ============
