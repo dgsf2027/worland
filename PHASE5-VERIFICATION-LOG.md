@@ -380,3 +380,53 @@ health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → �
 - **可动用留存**按 Σ active 分配 reserve_after 累计口径(无独立留存余额台账);完整留存滚动台账属 Wave C。
 - 分配「每人份额」现场按快照×ratio 算(investor.user_id 现为空 → LP 门户投影待真 user 表就绪)。
 - **M3 Wave C 待做**:月度报表六件套 + 经营分析七节 + 财务日历 + 定时任务集补齐(折旧/分配/缺口扫描 cron 已就位,报表/日历 cron 待接)。
+
+---
+
+## M3 Wave C · 月度报表六件套 + 经营分析七节 + 财务日历 + 定时任务集(2026-08-10)
+
+环境:main·Flyway **V11**(yc_rent_monthly_report / yc_rent_llm_call_log / yc_rent_reminder)·mvn compile BUILD SUCCESS·boot `Started RentApplication`·各源模块回归 curl 200(bills/distribution/cashflow/vouchers)。
+
+### 六件套与源模块一致(curl API vs SQL 源)· period=2026-08
+| 件套 | API | 源 SQL | 一致 |
+|---|---|---|---|
+| ②利润表(ops) | 经营利润 466.68(收入15000−折旧14533.32) | ledger_book ops revenue 15000 / cost 14533.32 | ✅ |
+| ③现金流水 | 流入25000 流出10000 净15000 | ops 1002 银行存款 dr 25000(5)/cr 10000(2) | ✅ |
+| ⑤资产快照 | 8台·市场价家底1040000·账面净值858933.36 | asset 8台 SUM(market)=1040000·Σ最新折旧行book_value=858933.36 | ✅ |
+| ①收租台账 | 应收15000·已收15000·回款率100% | rent_bill account_period=2026-08 Σamount/received=15000/15000 | ✅ |
+| ④往来 | 应收未收88000·应付待付(CashflowService 分层) | CashflowService 复用不重算 | ✅ |
+
+### 分配表按角色(P0-E · §4.5)
+- 财务:`distributionVisible=true` shares=4(全表·scope「全表可见(老板/财务)」)
+- 业务(普通角色):`distributionVisible=false` distribution=null · maskNote「当前角色『业务』无分配明细可见权限,本件套已隐藏」✅ 普通角色不出现
+- LP:`distributionVisible=true` shares=0(仅本人·investor.user_id 现空→本人份额空)· scope「仅本人那份可见(GP/LP 只读)」
+
+### 七节数字引 package_json + AI mock + idempotent
+- `/monthly-report/analysis` 返回 7 节,每 dataPoint 带 `source`(利润表(ops)/收租台账/资产快照…);数字与六件套逐一一致(经营利润466.68·账面净值858933.36·在租率25%)。
+- AI 综述 = `[MOCK] …`·model=`mock(kimi-k2)`·confidence=0.90 computed·llmCallId=1。
+- **幂等**:二次调 `cacheHit=true` 复用 call#1;`force=true` → `cacheHit=false` 新建 call#2。`yc_rent_llm_call_log` 落 2 行(reasoning 含「喂入前已剔除成本/分配/身份§十一 脱敏」)。
+
+### 财务日历状态机
+- period=2026-08 → status **REPORTED**;日1 待人工(ops 未锁账)/日2 自动完成(报表包快照已生成)/日3 待人工核对/日5 自动完成(分配单已生成)。
+
+### 导出(POI)
+- Excel:`export=xlsx` http200 · **7894 字节** · `Microsoft OOXML`(六 sheet:收租台账/利润表/现金流水/往来/资产快照/分配表🔒)。
+- Word:`export=docx` http200 · **3989 字节** · `Microsoft OOXML`(七节 + 数据溯源表)。
+
+### 报表快照落库
+- `POST /monthly-report/generate?period=2026-08` → `yc_rent_monthly_report` id=1 · calendar_status=REPORTED · generated_by=manual · package_json 3529 字符 · analysis_json 4123 字符 · llm_call_id=2。
+
+### 定时任务集补齐(M3-10 · cron 双 export + startup 注册)
+- 新增 cron:**月报包**(每月2日02:00 `MonthlyReportScheduler`)·**合同到期30天转让提醒**(每日06:00)·**潜客跟进到期提醒**(每日07:00)·**兑付缺口 T-N 扫描**(每日05:00 `CoverageGapScanScheduler`·前波缺此调度器,本波补)。
+- 手动触发落库:`POST /reminders/scan/contract-expiry` upserted 1(HT-M2-TEST-01 逾期9天)· `POST /reminders/scan/followup-due` upserted 3;`yc_rent_reminder` 落 4 行;**幂等**二次触发不重复插(唯一键 type+ref_id+due_date)。
+- `GET /rent/crons` 登记全 8 条 cron(收租生成/逾期检测/折旧/兑付缺口/分配/月报/到期提醒×2·各带 schedule+执行体+手动入口+里程碑)。
+
+### 浏览器真测(built-in preview · V1 happy path)
+- `/monthly` 页:账期切换器(2026-09/2026-08)· 财务日历看板(4 卡·自动完成/待人工 tag)· 六件套 Tab · 七节报告(每节叙述+溯源表)· 导出按钮 · 🔬 AI 过程弹窗(场景/模型/置信0.9(computed)/推理·输出·脱敏原始数据三 Tab)。
+- V4 SQL vs UI:UI 收租台账「应收1.50万/已收1.50万/回款率100%/逾期2单」= SQL 15000/15000 ✅。
+
+### 已知边界(诚实)
+- ③现金流水取 ops 银行存款(1002)分录 dr/cr,当前无付款凭证 → 流出仅含红冲镜像;真实付款流水待 M4 付款单挂钩。
+- ④往来复用 CashflowService 分层口径(应收取 rent_bill 未核销·应付取 payable 待付)。
+- 残值损益(residual)口径待 M4 转让模块对齐(postResidual 现为 501 预留);利润表 residual 行数据为 0 时不显。
+- LLM 走 mock 断路(无 key·零外呼);接真网关只需加 OpenAiCompat 实现标 @Primary + 配 rule_config `ai_model_monthly`。
