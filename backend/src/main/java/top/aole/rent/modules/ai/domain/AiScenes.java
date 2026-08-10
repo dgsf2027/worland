@@ -14,7 +14,9 @@ import lombok.Getter;
 @AllArgsConstructor
 public enum AiScenes {
 
-    MONTHLY("monthly", "月报起草", "月度经营分析报告综述(长上下文喂脱敏整月数据)", "kimi-k2");
+    MONTHLY("monthly", "月报起草", "月度经营分析报告综述(长上下文喂脱敏整月数据)", "kimi-k2"),
+
+    PDCA("pdca", "PDCA综述", "经营指标红绿灯改进综述(脱敏·只说趋势与动作·不出数字)", "kimi-k2");
 
     /** 路由键(rule_config key 后缀 ai_model_<key> / idempotent key 前缀) */
     private final String key;
