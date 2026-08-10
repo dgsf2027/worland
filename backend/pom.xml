@@ -25,6 +25,7 @@
         <druid.version>1.2.20</druid.version>
         <knife4j.version>4.3.0</knife4j.version>
         <hutool.version>5.8.25</hutool.version>
+        <poi.version>5.2.5</poi.version>
     </properties>
 
     <dependencies>
@@ -98,6 +99,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <!-- Apache POI:月度报表包 Excel(XSSF)+ 经营分析报告 Word(XWPF)导出(照园区小卖账房 imports/monthly)-->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
         </dependency>
     </dependencies>
 
