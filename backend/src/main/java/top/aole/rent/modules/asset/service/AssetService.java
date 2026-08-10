@@ -14,6 +14,7 @@ import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.domain.AssetBom;
+import top.aole.rent.modules.asset.domain.AssetDepreciationLine;
 import top.aole.rent.modules.asset.domain.AssetEvent;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetListItem;
@@ -22,6 +23,7 @@ import top.aole.rent.modules.asset.dto.BomNodeRequest;
 import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
+import top.aole.rent.modules.asset.mapper.AssetDepreciationLineMapper;
 import top.aole.rent.modules.asset.mapper.AssetEventMapper;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
 import top.aole.rent.modules.contract.domain.ContractAsset;
@@ -69,6 +71,7 @@ public class AssetService {
     private final AssetMapper assetMapper;
     private final AssetBomMapper bomMapper;
     private final AssetEventMapper eventMapper;
+    private final AssetDepreciationLineMapper depreciationLineMapper;
     private final RuleConfigService rules;
     private final SupplierMapper supplierMapper;
     private final CustomerMapper customerMapper;
@@ -545,22 +548,20 @@ public class AssetService {
     }
 
     /**
-     * 经营口径账面价(简化占位·M3 折旧表精确化):
-     * 折旧基数 =(集采价 - 残值),按品类租期直线折旧,已用月 = 首次投放/在租至今(封顶租期)。
+     * 经营口径账面价(M3-02·ADR-004:唯一写手=折旧真相源 asset_depreciation_line):
+     * 取本设备 ops 账最新一期折旧行的 {@code book_value_after};尚未计提折旧(无折旧行)→ 集采价原值。
+     * 不再自行直线推算(旧占位已下线),避免与折旧表账值/累计折旧凭证打架(§4.17 stale 消解)。
      */
     private BigDecimal bookValue(Asset a) {
         if (a.getPurchasePrice() == null) {
             return null;
         }
-        BigDecimal residual = residualValue(a);
-        BigDecimal base = residual != null ? a.getPurchasePrice().subtract(residual) : a.getPurchasePrice();
-        int lifeMonths = lifeMonths(a.getCategory());
-        int elapsed = monthsInServiceElapsed(a.getId());
-        elapsed = Math.min(elapsed, lifeMonths);
-        BigDecimal accumDepr = base
-                .multiply(BigDecimal.valueOf(elapsed))
-                .divide(BigDecimal.valueOf(lifeMonths), 2, RoundingMode.HALF_UP);
-        return a.getPurchasePrice().subtract(accumDepr).setScale(2, RoundingMode.HALF_UP);
+        AssetDepreciationLine latest = depreciationLineMapper.selectOne(new LambdaQueryWrapper<AssetDepreciationLine>()
+                .eq(AssetDepreciationLine::getAssetId, a.getId())
+                .eq(AssetDepreciationLine::getBook, "ops")
+                .orderByDesc(AssetDepreciationLine::getPeriodNo)
+                .last("limit 1"));
+        return latest != null ? latest.getBookValueAfter() : a.getPurchasePrice().setScale(2, RoundingMode.HALF_UP);
     }
 
     /** 自购回本期(月)= 市场价 / 月替代人工价值。 */
