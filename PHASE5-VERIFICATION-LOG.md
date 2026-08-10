@@ -430,3 +430,43 @@ health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → �
 - ④往来复用 CashflowService 分层口径(应收取 rent_bill 未核销·应付取 payable 待付)。
 - 残值损益(residual)口径待 M4 转让模块对齐(postResidual 现为 501 预留);利润表 residual 行数据为 0 时不显。
 - LLM 走 mock 断路(无 key·零外呼);接真网关只需加 OpenAiCompat 实现标 @Primary + 配 rule_config `ai_model_monthly`。
+
+---
+
+## M4 到期转让/处置 + 维保 + 盘点(2026-08-10)
+
+环境:main·Flyway V12 已 apply(boot 日志「Successfully applied 1 migration ... now at version v12」)。后端 8082 boot OK,`/api/v1/health`=200;12 模块回归 curl 全 200。前端 vite build 通过,浏览器三页 happy path 截图(转让详情/维保列表/盘点已闭合)。
+
+### M4-01/02 到期转让(逐台·P0-A)+残值凭证+资产出账+合同关闭
+- 签约 HT-M4-01(合同5·assets 5,6 在租·endTransferPrice=100000)。
+- `POST /rent/transfer/expiry {contractId:5}` → 单 TR-HT-M4-01-126069,type=转让,已完成,2 台。
+- **逐台 line**(SQL yc_rent_transfer_order_line):line1 asset5 book_value=41200(快照)/transfer_price=50000/**gain=8800**/voucher=29;line2 asset6 同,voucher=31。
+- **残值凭证双账**(yc_rent_voucher source_doc_type=transfer_line):
+  - tax#29 dr 银行存款50000 / cr 主营业务收入(分期收款销售)50000 → ledger tax revenue=50000(**并入分期收款销售计税**);
+  - ops#28 dr 银行存款50000 / cr 固定资产41200 / cr 资产处置损益8800(借贷自平衡) → ledger ops revenue=8800(经营口径处置损益)。
+- **资产出账**:asset 5,6 status→已转让(SQL 验),asset_event 转让 ref transfer_order#1。
+- **合同关闭**:contract 5 status→到期转让(contract_change 留痕)。
+
+### 名义价硬阈值守卫(P1-19·非仅亮灯)
+- `dispose {assetId:3,action:二手,transferPrice:2000}` 无理由 → **400「须录理由并走审批」**(转让价2000 < 账面41200 且 < 市场60000×下限0.05=3000)。
+- 带 approvalReason → 单 TR-二手-A3(status=**待审批**,needApproval=true,nominalGuardHits=["WL-HJ-0001(转让价2000 vs 账面41200/市场×下限3000)"])。
+- `POST /rent/transfer/3/approve {reason}` → 已完成,approvedBy=老板;line gain=-39200;ops#32 dr银行2000/cr固定资产41200/**dr资产处置损益39200**(损失)平衡;asset3→已转让。
+
+### 复投飞轮(M4-03)
+- **报废**:`dispose {assetId:1,action:报废}` → totalGain=-171111.12;凭证#34 **ops-only**(dr资产处置损益/cr固定资产,transferPrice=0 不确认税务收入)ledger ops revenue=-171111.12;asset1→报废。
+- **二手**:见守卫用例(asset3→已转让+损益凭证)。
+- **再投放**:新建 asset9 采购→投放→收回待处置 → `redeploy {assetId:9}` → 投放;asset_event 采购/投放/收回待处置/**再投放** 全留痕。
+
+### M4-04 维保工单(报修→派工→处理→回写)
+- asset1 bom6(PLC控制器)报修 → 派工(我方) → **完工 inWarranty=true**:responsibleParty 自动转**供应商**,cost=1500 但 **ourCost=0**(费用不计我方);**fault_count 回写 6:0→1**(SQL 验)。
+- 第二单 bom3 完工 inWarranty=false 我方 → **ourCost=800**(计入我方)。
+- **高故障备件提示**:bom3 fault_count 累加至 4 > 阈值3(rule_config spare_part_fault_threshold)→ `/spare-alert` 命中 1 项「传感模组 fault4 → 建议常备备件」。
+
+### M4-05 盘点(扫码差异→盘盈亏调整单闭合)
+- 建盘点 ST(全量·账面3台)→ scan 3 差异:asset9 实收回待处置=**状态不符**;asset7(账面报废)实投放=**盘盈**;asset2 实丢失=**盘亏**(diffType 服务端推断正确)。
+- `POST /rent/stocktake/{id}/close` → 已闭合,调整3台(盘盈1/盘亏1/状态不符1)。
+- **走单据不直改台账**(§4.24):经 AssetService.applyStocktakeAdjust → asset9→收回待处置、asset7→投放、asset2→报废(盘亏核销);asset_event **盘点调整** ref stocktake;stock_diff 各行 adjusted=1 + adjust_event_id 回填(37/38/39)。
+
+### 收口 & 剩余
+- M4 收口:转让处置(逐台·残值凭证·名义价守卫)/维保/盘点 后端+前端全通,postResidual 501 已落地。
+- 剩余:M5(人·事/BI/导入)+ M1 遗留前端(采购页/工作台)。
