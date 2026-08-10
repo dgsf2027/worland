@@ -25,6 +25,7 @@ services:
     networks: [worlandnet]
 
   worland-server:
+    image: worland-rent-backend:local
     build:
       context: ..
       dockerfile: deploy/backend.Dockerfile
@@ -53,10 +54,13 @@ services:
     networks: [worlandnet]
 
   worland-web:
+    image: worland-rent-web:local
     build:
       context: ..
       dockerfile: deploy/frontend.Dockerfile
     container_name: worland-web
+    ports:
+      - "8088:80"      # 本地验收发布口(生产走中央网关时可去掉)
     restart: unless-stopped
     depends_on: [worland-server]
     networks: [worlandnet, worland-edge]   # worland-edge = 与中央网关共享,供反代
