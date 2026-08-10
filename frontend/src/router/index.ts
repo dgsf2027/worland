@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/contract', name: 'contract', meta: { title: '合同 · 签约与租金计划' }, component: () => import('@/views/Contract.vue') },
     { path: '/rent', name: 'rent', meta: { title: '收租 · 收租单与逾期' }, component: () => import('@/views/Rent.vue') },
     { path: '/voucher', name: 'voucher', meta: { title: '凭证中心 · 双账/折旧/500万红线' }, component: () => import('@/views/Voucher.vue') },
+    { path: '/cashflow', name: 'cashflow', meta: { title: '现金流/分配驾驶舱 · 兑付缺口/回报四源' }, component: () => import('@/views/Cashflow.vue') },
   ],
 })
 

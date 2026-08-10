@@ -15,6 +15,7 @@ const route = useRoute()
         <el-menu-item index="/contract">合同 · 租金计划</el-menu-item>
         <el-menu-item index="/rent">收租 · 收租单/逾期</el-menu-item>
         <el-menu-item index="/voucher">凭证 · 双账/折旧/红线</el-menu-item>
+        <el-menu-item index="/cashflow">现金流/分配驾驶舱</el-menu-item>
         <el-menu-item index="/dashboard">工作台</el-menu-item>
       </el-menu>
     </el-aside>
