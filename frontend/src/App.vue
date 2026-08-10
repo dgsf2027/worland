@@ -39,6 +39,8 @@ function switchRole(r: { name: string; role: string }) {
         <el-menu-item index="/voucher">凭证 · 双账/折旧/红线</el-menu-item>
         <el-menu-item index="/cashflow">现金流/分配驾驶舱</el-menu-item>
         <el-menu-item index="/monthly">月度报表 · 六件套/报告</el-menu-item>
+        <el-menu-item index="/bi-pdca">📊 BI 矩阵 · PDCA 改进</el-menu-item>
+        <el-menu-item index="/import">📥 导入中心</el-menu-item>
         <el-menu-item index="/task">✅ 任务 · 审批</el-menu-item>
         <el-menu-item index="/roster">🧑‍💼 花名册 · 提成</el-menu-item>
       </el-menu>
