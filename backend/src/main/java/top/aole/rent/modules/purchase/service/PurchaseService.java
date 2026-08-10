@@ -17,6 +17,7 @@ import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
+import top.aole.rent.modules.finance.service.VoucherService;
 import top.aole.rent.modules.purchase.domain.Payable;
 import top.aole.rent.modules.purchase.domain.PurchaseIn;
 import top.aole.rent.modules.purchase.domain.PurchaseItem;
@@ -63,6 +64,7 @@ public class PurchaseService {
     private final SupplierMapper supplierMapper;
     private final AssetMapper assetMapper;
     private final AssetService assetService;
+    private final VoucherService voucherService;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
 
@@ -217,6 +219,10 @@ public class PurchaseService {
         p.setStatus("已入库");
         p.setReceiveDate(receiveDate);
         purchaseInMapper.updateById(p);
+
+        // M3-01 钩子:采购入库 → 应付凭证(税务账·dr 固定资产 / cr 应付账款·借贷平衡·幂等)
+        voucherService.postPayable(id, total, receiveDate,
+                "采购入库应付 " + p.getNo() + " " + total + "元");
         log.info("采购入库: id={}, 生成设备{}件, 验收={}, 尾款={}", id, items.size(), accAmt, tailAmt);
     }
 
