@@ -38,6 +38,10 @@ public class AuditLogService {
             log.setOperatorId(u.getUserId());
             log.setOperatorName(u.getUserName());
             log.setOperatorRole(u.getRole());
+            // 请求指纹(网关注入·抗抵赖 M5-06 P1-16)
+            log.setClientIp(u.getClientIp());
+            log.setRequestUri(u.getRequestUri());
+            log.setRequestId(u.getRequestId());
         }
         log.setDetail(detail);
         log.setCreateTime(LocalDateTime.now());

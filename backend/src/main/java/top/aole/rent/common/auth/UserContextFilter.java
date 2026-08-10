@@ -54,8 +54,14 @@ public class UserContextFilter extends OncePerRequestFilter {
             String role = decodeHeader(request.getHeader(HEADER_ROLE));
             if (name != null && !name.trim().isEmpty()) {
                 Long userId = resolveUserId(name.trim());
-                UserContext.set(new CurrentUser(userId, name.trim(), role == null ? "" : role.trim(), null));
-                log.debug("占位头解析: name={}, role={}, userId={}", name, role, userId);
+                CurrentUser u = new CurrentUser(userId, name.trim(), role == null ? "" : role.trim(), null);
+                // 请求指纹(审计抗抵赖 M5-06 P1-16):IP/URI/请求号。生产由可信网关注入 X-Forwarded-For/X-Request-Id
+                u.setClientIp(clientIp(request));
+                u.setRequestUri(request.getRequestURI());
+                String reqId = request.getHeader("X-Request-Id");
+                u.setRequestId(reqId != null && !reqId.isEmpty() ? reqId : java.util.UUID.randomUUID().toString());
+                UserContext.set(u);
+                log.debug("占位头解析: name={}, role={}, userId={}, ip={}", name, role, userId, u.getClientIp());
             }
             chain.doFilter(request, response);
         } finally {
@@ -82,6 +88,16 @@ public class UserContextFilter extends OncePerRequestFilter {
             }
         }
         return utf8;
+    }
+
+    /** 请求来源 IP:优先可信网关注入的 X-Forwarded-For 首段,退化到 remoteAddr。 */
+    private String clientIp(HttpServletRequest request) {
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.trim().isEmpty()) {
+            int comma = xff.indexOf(',');
+            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
+        }
+        return request.getRemoteAddr();
     }
 
     /** 姓名 → 稳定非 0 主键:种子表优先,否则名字 hash 落到 [100000, 999999] 区间(确定性、可复现)。 */

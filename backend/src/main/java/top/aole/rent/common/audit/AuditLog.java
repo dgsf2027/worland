@@ -36,6 +36,15 @@ public class AuditLog {
 
     private String operatorRole;
 
+    /** 请求指纹:来源IP(网关注入·M5-06 P1-16 抗抵赖) */
+    private String clientIp;
+
+    /** 请求指纹:请求URI */
+    private String requestUri;
+
+    /** 请求指纹:请求号(链路追踪) */
+    private String requestId;
+
     private String detail;
 
     private LocalDateTime createTime;
