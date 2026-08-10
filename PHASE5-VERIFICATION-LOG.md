@@ -470,3 +470,45 @@ health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → �
 ### 收口 & 剩余
 - M4 收口:转让处置(逐台·残值凭证·名义价守卫)/维保/盘点 后端+前端全通,postResidual 501 已落地。
 - 剩余:M5(人·事/BI/导入)+ M1 遗留前端(采购页/工作台)。
+
+---
+
+## M5 Wave A · 任务中心 + 审批 + 花名册/权限/提成 + 工作台聚合 + 采购前端页(2026-08-10)
+
+**环境**：Flyway V13 boot 自动 apply(`Successfully applied 1 migration ... now at version v13`),`Started RentApplication`;新表 4 张(yc_rent_task/approval/user_role_ext/commission)+ rule 种子(approval_self_limit=300万·commission_rate 集采降本5%/成交贡献1%)+ 花名册种子 5 人。前端 vite build exit=0。回归:13 模块 curl 全 200(purchase/tasks/approvals/roster/workbench/transfer/maintenance/stocktake/bills/distribution/cashflow/monthly-report/health)。
+
+### M5-01 任务中心(绑角色绑人·转派留痕·完成校验)
+- **派单**:`POST /rent/tasks {title,assigneeRole:供应链,assigneeUserId:1004,assigneeUserName:李工,verifyRequired:true}` → task#1(source=派单)。
+- **转派留痕(只追加)**:`POST /tasks/1/transfer {toRole:业务,toUserName:王业务,reason:李工外出转王业务}` → 承接改王业务;SQL `transfer_log`=`[{"from":"供应链·李工","to":"业务·王业务","at":...,"by":"小洪","reason":"李工外出,转王业务跟进"}]`。
+- **完成校验**:verify_required=1 无证据 `complete {}` → **400「本任务需上传完成证据」**;带 `{evidence:"泵表文件 s3://..."}` → 已完成 + verify_evidence 落库。
+- **系统派单(幂等)**:`POST /tasks/system-scan`(逾期→财务催收/兑付缺口→财务/合同到期→业务),同 biz_type+biz_id 未完成不重复开。cron 双出口 TaskDispatchScheduler(@Scheduled 每日03:00 + runSystemDispatchCron)。
+
+### M5-02 投放审批(本金回报达标闸 + 300万自主/超额协商 + RBAC)
+- **不达标拒绝**:本金回报25% < 目标30% → **400「不允许发起投放审批(须先达标)」**。
+- **300万内自主**:35%≥30% & 18万≤300万 → approval#1 decision_mode=**自主**(target_rate=0.30/self_limit=3000000 快照)。
+- **超额协商**:500万>300万 → approval#2 decision_mode=**协商**。
+- **RBAC**:供应链调 `/approvals/1/approve` → **403「需要角色[老板]」** + audit DENIED;老板通过 → 已通过 + audit EXECUTED(SQL yc_rent_audit_log action=投放审批 EXECUTED/DENIED 各一)。
+
+### M5-03 花名册/权限/提成(复用 DataScope·从管理费列支)
+- **花名册**:5 人 SQL 验;LP 刘总 cost_visible=0(🔒仅月报不见成本)、业务王业务 owner_scoped=1(名下+公海)。角色改动 @RequireRole 老板 + audit(action=角色权限变更)。
+- **提成计提(2026-08)**:集采降本 李工=Σ(市场60000-集采42000)×2件×5% → base¥36,000→提成¥1,800(source_ref=purchase:2);成交贡献 王业务=(合同HT-2026-0001 ¥78,000 + HT-M4-01 ¥18,000)×1% → 2行合计¥960;`funded_from=管理费`。
+- **幂等**:再算一次 costCutRows=0/dealRows=0/**skipped=3**(uk period+user+type+source_ref)。
+
+### WT-01 工作台聚合(按角色投影可见)
+- **老板**:全量 KPI 在租率20%(1/5)/应收¥106,000/本月分配¥450,000/加权回报30% + 红点(空置1)。
+- **财务**:应收/分配/回报 KPI + 逾期/兑付缺口/税务红点(当前数据全正常故红点空)。
+- **供应链/业务**:仅在租率(应收/分配/回报=null);供应链见空置红点、业务见到期红点。
+- **LP**:**仅加权回报30%**,在租率/应收/本月分配 全 null(字段级保密验证)。
+- **待办分流**:派供应链+财务各 1 任务 → 供应链待办=1/财务待办=1/业务待办=0。
+
+### 前端(浏览器 happy path·内置 Browser pane)
+- **工作台按角色不同**:老板(4 KPI 全显+空置红点)vs LP(在租率/应收/分配显「—」·仅加权回报30%·scope「LP视图·字段级保密」)——截图两版对比。
+- **任务页**:任务表显 承接=业务·王业务、校验=**已验证**(绿)、转派留痕=**1 次**(popover from/to/by/reason);投放审批 tab 显 自主(已通过·小洪·300万内自主通过)/协商(待审批·通过/驳回)。
+- **采购页浏览器可下单**:UI 弹「采购下单(先签约后采购)」→ 填单号CG-UI-TEST-01/合同1/供应商1/序列号UISN-001/市场55000/集采40000 → 下单 → 列表出 CG-UI-TEST-01(已下单);SQL 验 purchase#3 total_amount=40000(Σ集采价)+ 首付 payable ¥12,000 待付。
+- **花名册页**:5 人矩阵(LP🔒保密/业务名下+公海)+ 提成(李工降本¥36,000→¥1,800·王业务成交¥96,000→¥960)DOM 验。
+
+### 提交(4 后端 + 1 前端 commit)
+M5-01 任务中心 / M5-02 投放审批 / M5-03 花名册提成 / WT-01 工作台聚合 / feat(M5·前端)。
+
+### 剩余(M5 Wave B)
+BI 多维矩阵(M5-04)/PDCA action_item+AI 综述(M5-05)/audit 强化只追加(M5-06)/导入中心(M5-07)/对象存储签名URL(M5-08)。
