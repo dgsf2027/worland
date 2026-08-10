@@ -283,3 +283,47 @@ health/contracts/assets/purchase/customers/suppliers/bills/overdue 各 GET → �
 - **收入凭证**M2 为简化流水(rent_bill 已核销 + received_amount),完整双账凭证 + `voucher_id` 回填属 M3(稽核「已核销缺凭证」恒亮以提示)。
 - 核销金额一致才自动核销;**部分收款/超额/多笔拆分**属 M3;罚息为按次手动计(自动罚息 cron 可后续加)。
 - audit/operator 身份仍取占位头(P1-16 网关注入指纹待真 SSO);P0-C 网关剥离 X-User-* 红线同前波未消解。
+
+---
+
+# M3 Wave A 验收(凭证双账 + 折旧真相源 + 500万红线 + 凭证视图 · 2026-08-10)
+
+> Flyway V9 boot 自动 apply(`Successfully applied 1 migration … now at v9`)。后端 mvn compile BUILD SUCCESS + boot OK(Started in ~1.6s)。前端 vite ready + 真浏览器验凭证页 happy path 0 console error。
+
+## M3-01 凭证双账(核销→双账收入凭证 + 借贷平衡 + 稽核缺凭证归 0)
+- **回填历史已核销单**:`POST /rent/vouchers/backfill-rent-income` → `scanned=5 posted=5 voucherCount=10`(每单 tax+ops 各一)。
+- **稽核联动**:`GET /rent/audit/cash-check` `matchedNoVoucher` **5 → 0**,`allClear=true`。✅
+- **SQL 借贷平衡**:每张凭证 `Σdr=Σcr`(`IF(...)='BALANCED'`),税务收入凭证分录 = dr 1122 应收账款 5000 / cr 6001 主营业务收入 5000;经营 = dr 1002 银行 / cr 6051 租赁收入。✅
+- **退款负额**:bill10(退款)方向反转(dr 主营收入 / cr 应收),ledger_book `-5000`。✅
+- **rent_bill.voucher_id 回填**:5 张已核销单均回填 tax 凭证 id(1/3/5/7/9)。✅
+- **实时核销自动过账**:`POST /rent/bills/6/match` → `status=已核销 voucherId=24`,SQL 见 tax+ops 双账各一。✅
+- **红冲联动**:`POST /rent/bills/6/reverse` → 影响清单含「联动红冲收入凭证 2 张(税务账+经营账·ledger_book 同步冲销·营收红线回退)」;SQL `reverses_id` 命中 2 张红冲凭证。✅
+
+## M3-02 折旧真相源(逐月 book_value 递减 · book_value 唯一写手)
+- **月度计提**:`POST /rent/depreciation/run?bizDate=2026-08-15` → `scanned=6 generated=6 vouchers=6 totalDepr=14533.32`;2026-09 再计提 6 台。
+- **SQL 递减**:asset 2(播种墙)`period_no=1 → book_value_after=175555.56`,`period_no=2 → 171111.12`(月折旧 4444.44)。✅
+- **book_value 即时取真相源**:`GET /rent/assets/2` → `bookValue=171111.12`(=最新折旧行 book_value_after,旧直线占位已下线)。✅
+- **幂等**:同月重复触发 `generated=0 skipped=6`(unique(asset_id,book,period_no) 兜底)。✅
+- **ops≠tax 佐证**:折旧凭证只落 ops 账(12 张 cost 29066.64),tax 账无 cost 行。✅
+
+## M3-08 500万营收红线(取税务账)
+- `GET /rent/tax/threshold` → `book=tax threshold=5000000 currentRevenue=15000 opsRevenue=15000 remaining=4985000 usedRatio=0.003 level=正常`。
+- **SQL 口径**:`SUM(amount) WHERE book='tax' AND entry_type='revenue' AND YEAR=2026` = 15000(正常 4×5000 − 退款 5000)。阈值/预警占比走 rule_config(`tax_revenue_threshold`/`tax_threshold_warn_ratio`,禁硬编码)。✅
+- **红冲联动回退**:红冲凭证 #3 后 tax 收入 `15000 → 10000`(ledger_book 写负额行)。✅
+
+## M3-11 凭证查询/红冲视图(P0-F 通用红冲内核)
+- `GET /rent/vouchers`(账套/来源/期/是否红冲筛选) + `GET /rent/vouchers/{id}`(分录借贷 + 借贷合计平衡 + 双账对家凭证对照 + 红冲指向)。
+- **P0-F 红冲**:`POST /rent/vouchers/3/reverse` → 生成 `-R` 镜像反转凭证 + ledger 负额冲销;**幂等**重复红冲拒(`code=400 该凭证已被红冲`);**锁账守卫**:锁 2026-08/ops 后红冲 ops 折旧凭证 #12 拒(`会计期已锁账`)。✅
+- **RBAC**:业务角色红冲凭证 `code=403`(`需要角色 [财务, 老板]`),voucher 未被红冲,audit `DENIED` 留痕。✅
+- **前端凭证页(真浏览器验)**:`/voucher` 顶部 500万红线进度条(0.2%·正常·税务1万/剩余499万·经营账对照1.5万);列表双账成对 + 借=贷 tag + 红冲 tag;详情弹窗见分录 dr/cr(1122 借 5000 / 6001 贷 5000)+ 借贷平衡✓ + 「本凭证已被红冲(#26)」+ 双账口径对照(经营账 PZ-ops-rent_bill-6 查看)。**0 console error**。✅
+
+## 回归(已过模块未坏 · main 仍 boot)
+- assets/purchase/contracts/customers/suppliers/bills 各 GET → 全 `code:200`。
+- 采购 `receive()` 加应付凭证钩子(dr 固定资产 / cr 应付账款·tax·幂等),不改既有 payable 行为;billing `match/reverse` 扩为同事务过账/冲销凭证(钱账一致·失败整体回滚)。
+
+## 遗留 / 未做(诚实 · 本波)
+- **转让残值凭证** `postResidual` 仅留接口(抛 501),分录口径待 M4 转让模块对齐处置损益后填充。
+- **ledger_book** 为 append-only 收入/成本流水(500万口径够用);完整 GL 试算平衡表/科目余额表属 M3 Wave B/BI。
+- 折旧口径为**直线法**(base=集采价−残值,末期结平尾差);加速折旧/税会差异(税务账折旧)属后续。
+- 折旧 cron 记账期取执行当月;跨月补提用 `?bizDate=` 手动入口(运维/测试)。
+- M3 Wave B 待做:分配(管理费阶梯/50-50)/现金流/账期兑付缺口红灯/月度报表六件套。
