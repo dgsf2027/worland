@@ -412,6 +412,40 @@ public class AssetService {
         log.info("设备报废处置: assetId={}, {}→报废, by={}", assetId, from, UserContext.getUserId());
     }
 
+    // ============ 盘点调整(M4-05·设备状态机 owner,供 StocktakeService 调用) ============
+
+    /**
+     * 盘点盘盈亏调整:按调整单对齐台账状态(走事件流留痕·§4.24 不直改台账)。返回 asset_event.id 供差异行回填。
+     * {@code targetStatus} 为实盘状态;为空则只留痕不改状态。非在租状态清承租关系。
+     */
+    @Transactional
+    public Long applyStocktakeAdjust(Long assetId, String targetStatus, Long stocktakeId, String remark) {
+        Asset a = load(assetId);
+        if (targetStatus != null && !targetStatus.isEmpty() && !targetStatus.equals(a.getStatus())) {
+            LambdaUpdateWrapper<Asset> uw = new LambdaUpdateWrapper<Asset>()
+                    .eq(Asset::getId, assetId)
+                    .set(Asset::getStatus, targetStatus);
+            if (!"在租".equals(targetStatus)) {
+                uw.set(Asset::getCurrentHolderCustomerId, null);
+                if (!"待转让".equals(targetStatus) && !"已转让".equals(targetStatus)) {
+                    uw.set(Asset::getContractId, null);
+                }
+            }
+            assetMapper.update(null, uw);
+        }
+        AssetEvent e = new AssetEvent();
+        e.setAssetId(assetId);
+        e.setEventType("盘点调整");
+        e.setRefDocType("stocktake");
+        e.setRefDocId(stocktakeId);
+        e.setBizTime(LocalDateTime.now());
+        e.setOperatorId(UserContext.get() != null ? UserContext.get().getUserId() : null);
+        e.setRemark(remark);
+        eventMapper.insert(e);
+        log.info("盘点调整: assetId={}, →{}, 盘点单#{}, eventId={}", assetId, targetStatus, stocktakeId, e.getId());
+        return e.getId();
+    }
+
     // ============ 投放/交付确认(M1-14·投放审批→老板) ============
 
     /** 投放/交付确认:采购/收回待处置 → 投放。走事件流 + audit(EXECUTED)。切面已卡老板。 */

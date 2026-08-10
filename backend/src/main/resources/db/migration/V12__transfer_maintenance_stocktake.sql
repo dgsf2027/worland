@@ -143,3 +143,9 @@ CREATE TABLE yc_rent_stock_diff (
 -- ---------------------------------------------------------------------
 INSERT INTO yc_rent_rule_config (rule_key, scope_key, rule_value, value_type, version, effective_from, effective_to, remark) VALUES
  ('nominal_price_floor_rate', '', 0.05000000, 'rate', 1, '2023-01-01', NULL, '名义价守卫:转让价低于市场价 5% 强制升级审批(评审 P1-19)');
+
+-- ---------------------------------------------------------------------
+-- 7. 种子:高故障配件备件提示阈值(M4-04) —— fault_count 超此值 → 备件提示
+-- ---------------------------------------------------------------------
+INSERT INTO yc_rent_rule_config (rule_key, scope_key, rule_value, value_type, version, effective_from, effective_to, remark) VALUES
+ ('spare_part_fault_threshold', '', 3, 'months', 1, '2023-01-01', NULL, '配件累计故障 >3 次触发高故障备件提示(M4-04 维保)');
