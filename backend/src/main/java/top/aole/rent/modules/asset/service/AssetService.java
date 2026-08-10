@@ -358,6 +358,60 @@ public class AssetService {
         writeEvent(assetId, "收回待处置", "repossess_order", repossessOrderId, "逾期收回·转收回待处置");
     }
 
+    // ============ 转让/处置驱动的资产状态(M4·设备状态机 owner,供 TransferService 调用) ============
+
+    /** 处置时账面价快照(ops 口径·ADR-004)。TransferService 落 transfer_order_line.book_value 用(不回写)。 */
+    public BigDecimal snapshotBookValue(Long assetId) {
+        return bookValue(load(assetId));
+    }
+
+    /** 供 TransferService 读取设备(市场价/品类/状态·名义价守卫用)。 */
+    public Asset requireAsset(Long assetId) {
+        return load(assetId);
+    }
+
+    /**
+     * 转让/二手处置:在租/待转让/收回待处置 → 已转让(走事件流·清承租关系)。
+     * {@code eventType}=转让(到期转让)/二手(收回后二手流转)。终态。
+     */
+    @Transactional
+    public void markTransferred(Long assetId, Long transferOrderId, String eventType, String remark) {
+        Asset a = load(assetId);
+        String from = a.getStatus();
+        if (!"在租".equals(from) && !"待转让".equals(from) && !"收回待处置".equals(from)) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 当前 " + from
+                    + " 不可转让出账(需 在租/待转让/收回待处置)");
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "已转让")
+                .set(Asset::getCurrentHolderCustomerId, null)
+                .set(Asset::getContractId, null));
+        writeEvent(assetId, eventType == null ? "转让" : eventType, "transfer_order", transferOrderId,
+                remark == null ? "转让出账·设备已转让" : remark);
+        log.info("设备转让出账: assetId={}, {}→已转让, by={}", assetId, from, UserContext.getUserId());
+    }
+
+    /**
+     * 报废处置:采购/投放/收回待处置 → 报废(走事件流·清承租关系)。终态。供 TransferService 调用。
+     */
+    @Transactional
+    public void markScrapped(Long assetId, Long transferOrderId, String remark) {
+        Asset a = load(assetId);
+        String from = a.getStatus();
+        if ("已转让".equals(from) || "报废".equals(from) || "在租".equals(from)) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 当前 " + from + " 不可直接报废");
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getStatus, "报废")
+                .set(Asset::getCurrentHolderCustomerId, null)
+                .set(Asset::getContractId, null));
+        writeEvent(assetId, "报废", "transfer_order", transferOrderId,
+                remark == null ? "处置报废" : remark);
+        log.info("设备报废处置: assetId={}, {}→报废, by={}", assetId, from, UserContext.getUserId());
+    }
+
     // ============ 投放/交付确认(M1-14·投放审批→老板) ============
 
     /** 投放/交付确认:采购/收回待处置 → 投放。走事件流 + audit(EXECUTED)。切面已卡老板。 */

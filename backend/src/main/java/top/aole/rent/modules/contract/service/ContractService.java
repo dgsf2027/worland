@@ -646,6 +646,34 @@ public class ContractService {
         return c;
     }
 
+    /**
+     * 合同要求(供 M4 转让模块读取·校验)。生效/到期转让合同方可到期转让;已作废/关闭不可。
+     */
+    public Contract requireTransferable(Long id) {
+        Contract c = load(id);
+        if (!"生效".equals(c.getStatus()) && !"到期转让".equals(c.getStatus())) {
+            throw new BizException(400, "合同状态为" + c.getStatus() + ",仅生效/到期转让合同可做到期转让处置");
+        }
+        return c;
+    }
+
+    /**
+     * 到期转让完成 → 合同关闭(status=到期转让)。供 TransferService 调用(合同状态 owner 收敛在本服务)。
+     * 留痕走 contract_change。幂等:已到期转让则跳过。
+     */
+    @Transactional
+    public void closeOnTransfer(Long id, String transferNo) {
+        Contract c = load(id);
+        if ("到期转让".equals(c.getStatus())) {
+            return;
+        }
+        String before = "status=" + c.getStatus();
+        c.setStatus("到期转让");
+        contractMapper.updateById(c);
+        recordChange(id, "到期转让", false, before, "status=到期转让", "到期转让处置·转让单" + transferNo);
+        log.info("合同到期转让关闭: id={}, 转让单={}", id, transferNo);
+    }
+
     private Contract requireActive(Long id) {
         Contract c = load(id);
         if (!"生效".equals(c.getStatus())) {

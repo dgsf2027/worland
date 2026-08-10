@@ -62,6 +62,7 @@ public class VoucherService {
     private static final String ACC_MAIN_REV = "6001";    private static final String ACC_MAIN_REV_N = "主营业务收入(分期收款销售)";
     private static final String ACC_LEASE_REV = "6051";   private static final String ACC_LEASE_REV_N = "租赁收入";
     private static final String ACC_DEPR_EXP = "6602";    private static final String ACC_DEPR_EXP_N = "折旧费用";
+    private static final String ACC_DISPOSAL = "6301";    private static final String ACC_DISPOSAL_N = "资产处置损益";
 
     // ================= 内部过账原语(建头+行+平衡校验+ledger_book+锁账守卫) =================
 
@@ -218,15 +219,68 @@ public class VoucherService {
                 summary == null ? "采购入库应付 " + amount + "元" : summary, lines);
     }
 
-    // ================= 转让 → 残值凭证(接口留·M3 Wave B/M4 细化) =================
+    // ================= 转让/处置 → 残值凭证(双账 · M4-01/02) =================
 
     /**
-     * 转让/处置 → 残值结转凭证(接口留)。M3 Wave A 仅提供入口,分录口径(资产处置损益/累计折旧结转)
-     * 待转让模块(M4)对齐后填充。当前调用直接抛以避免半成品静默过账。
+     * 转让/处置 → 残值结转凭证(双账·M4)。返回税务账凭证 id(报废无收款则返 ops 凭证 id),回填 transfer_order_line.voucher_id。
+     *
+     * <p><b>税务账(tax·并入分期收款销售计税)</b>:仅当 transferPrice&gt;0 —— dr 银行存款 / cr 主营业务收入,
+     * ledger revenue += transferPrice(计税收入)。报废(transferPrice=0)不确认销售收入,跳过税务账。
+     * <p><b>经营账(ops·三层回报之残值收益)</b>:dr 银行存款 transferPrice + 结转账面价 cr 固定资产 bookValue +
+     * 处置损益 gain(gain&gt;0 → cr 资产处置损益;gain&lt;0/报废 → dr 资产处置损益)。借贷自平衡;
+     * ledger revenue += gain(处置净损益计入经营口径回报,与折旧/收租同源汇总,不重复计银行流水)。
+     * <p>幂等:同 transfer_line 已过账则返既有 tax(或 ops)凭证 id。
      */
     @Transactional
     public Long postResidual(Long transferLineId, BigDecimal transferPrice, BigDecimal bookValue, LocalDate bizDate) {
-        throw new BizException(501, "残值凭证接口预留(M4 转让模块对齐处置损益口径后填充)");
+        BigDecimal price = transferPrice == null ? BigDecimal.ZERO : transferPrice;
+        BigDecimal book = bookValue == null ? BigDecimal.ZERO : bookValue;
+        if (price.signum() < 0) {
+            throw new BizException(400, "处置价不可为负: " + price);
+        }
+        Long existTax = existingTaxVoucher("transfer_line", transferLineId);
+        if (existTax != null) {
+            return existTax;   // 幂等:已过账
+        }
+        // 幂等兜底:report ops 也查一遍(报废单只有 ops)
+        Voucher existOps = voucherMapper.selectOne(new LambdaQueryWrapper<Voucher>()
+                .eq(Voucher::getSourceDocType, "transfer_line")
+                .eq(Voucher::getSourceDocId, transferLineId)
+                .eq(Voucher::getBook, BOOK_OPS)
+                .eq(Voucher::getIsReversal, 0)
+                .last("limit 1"));
+        if (existOps != null) {
+            return existOps.getId();
+        }
+
+        BigDecimal gain = price.subtract(book);
+        String sum = "资产处置结转 line#" + transferLineId + " 处置价" + price + " 账面" + book + " 损益" + gain;
+
+        // 经营账 ops:结转账面 + 处置损益
+        List<Entry> opsLines = new ArrayList<>();
+        if (price.signum() > 0) {
+            opsLines.add(dr(ACC_BANK, ACC_BANK_N, price));
+        }
+        opsLines.add(cr(ACC_FIXED, ACC_FIXED_N, book));
+        if (gain.signum() > 0) {
+            opsLines.add(cr(ACC_DISPOSAL, ACC_DISPOSAL_N, gain));
+        } else if (gain.signum() < 0) {
+            opsLines.add(dr(ACC_DISPOSAL, ACC_DISPOSAL_N, gain.abs()));
+        }
+        Long opsId = post("transfer_line", transferLineId, BOOK_OPS, bizDate, "revenue", gain, "[经营]" + sum, opsLines);
+
+        // 税务账 tax:并入分期收款销售(仅有收款)
+        Long taxId = null;
+        if (price.signum() > 0) {
+            List<Entry> taxLines = new ArrayList<>();
+            taxLines.add(dr(ACC_BANK, ACC_BANK_N, price));
+            taxLines.add(cr(ACC_MAIN_REV, ACC_MAIN_REV_N, price));
+            taxId = post("transfer_line", transferLineId, BOOK_TAX, bizDate, "revenue", price,
+                    "[税务]" + sum + "(并入分期收款销售)", taxLines);
+        }
+        log.info("[凭证·残值处置] transfer_line#{} 处置价{} 账面{} 损益{} · tax#{} ops#{}",
+                transferLineId, price, book, gain, taxId, opsId);
+        return taxId != null ? taxId : opsId;
     }
 
     // ================= P0-F 通用凭证红冲 =================
