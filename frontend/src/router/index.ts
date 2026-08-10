@@ -3,8 +3,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/quote' },
-    { path: '/dashboard', name: 'dashboard', meta: { title: '工作台' }, component: () => import('@/views/Dashboard.vue') },
+    { path: '/', redirect: '/workbench' },
+    { path: '/workbench', name: 'workbench', meta: { title: '工作台 · 各角色驾驶舱首页' }, component: () => import('@/views/Workbench.vue') },
+    { path: '/purchase', name: 'purchase', meta: { title: '采购入库 · 应付' }, component: () => import('@/views/Purchase.vue') },
+    { path: '/task', name: 'task', meta: { title: '任务 · 审批' }, component: () => import('@/views/Task.vue') },
+    { path: '/roster', name: 'roster', meta: { title: '花名册 · 权限 · 提成' }, component: () => import('@/views/Roster.vue') },
+    { path: '/dashboard', name: 'dashboard', meta: { title: '地基自检' }, component: () => import('@/views/Dashboard.vue') },
     { path: '/quote', name: 'quote', meta: { title: '报价测算器' }, component: () => import('@/views/Quote.vue') },
     { path: '/supplier', name: 'supplier', meta: { title: '供应商 · 上游' }, component: () => import('@/views/Supplier.vue') },
     { path: '/customer', name: 'customer', meta: { title: '客户 · CRM' }, component: () => import('@/views/Customer.vue') },
