@@ -34,7 +34,7 @@ defineExpose({ load })
   <div v-loading="loading" class="wb">
     <div class="hero">
       <div>
-        <h2>沃朗科技 · 租赁板块工作台</h2>
+        <h2>曜石科技 · 租赁板块工作台</h2>
         <div class="scope">
           <template v-if="wb">{{ wb.userName || '未登录' }}<template v-if="wb.role">（{{ wb.role }}）</template><template v-if="wb.scopeNote"> · {{ wb.scopeNote }}</template></template>
           <template v-else-if="loading">加载中…</template>
