@@ -19,11 +19,11 @@ async function load() {
   }
 }
 function pct(v?: number) {
-  if (v === null || v === undefined) return '—'
+  if (v === null || v === undefined) return '0.0%'
   return (v * 100).toFixed(1) + '%'
 }
 function money(v?: number) {
-  if (v === null || v === undefined) return '—'
+  if (v === null || v === undefined) return '¥0'
   return '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 onMounted(load)
@@ -35,7 +35,11 @@ defineExpose({ load })
     <div class="hero">
       <div>
         <h2>沃朗科技 · 租赁板块工作台</h2>
-        <div class="scope">{{ wb?.userName }}（{{ wb?.role }}） · {{ wb?.scopeNote }}</div>
+        <div class="scope">
+          <template v-if="wb">{{ wb.userName || '未登录' }}<template v-if="wb.role">（{{ wb.role }}）</template><template v-if="wb.scopeNote"> · {{ wb.scopeNote }}</template></template>
+          <template v-else-if="loading">加载中…</template>
+          <template v-else>—（无数据）</template>
+        </div>
       </div>
       <el-button @click="load">刷新</el-button>
     </div>
@@ -44,7 +48,7 @@ defineExpose({ load })
     <el-row :gutter="16" class="kpis">
       <el-col :span="6"><div class="kpi"><div class="v">{{ pct(wb?.kpi?.rentedRate) }}</div><div class="l">在租率<span v-if="wb?.kpi?.rentedCount != null" class="sub">（{{ wb?.kpi?.rentedCount }}/{{ wb?.kpi?.activeAssetCount }}）</span></div></div></el-col>
       <el-col :span="6"><div class="kpi"><div class="v">{{ money(wb?.kpi?.receivableTotal) }}</div><div class="l">应收合计</div></div></el-col>
-      <el-col :span="6"><div class="kpi"><div class="v">{{ money(wb?.kpi?.monthDistribution) }}</div><div class="l">本月分配<span class="sub">（{{ wb?.kpi?.period }}）</span></div></div></el-col>
+      <el-col :span="6"><div class="kpi"><div class="v">{{ money(wb?.kpi?.monthDistribution) }}</div><div class="l">本月分配<span v-if="wb?.kpi?.period" class="sub">（{{ wb.kpi.period }}）</span></div></div></el-col>
       <el-col :span="6"><div class="kpi"><div class="v up">{{ pct(wb?.kpi?.weightedReturn) }}</div><div class="l">加权回报（税后IRR）</div></div></el-col>
     </el-row>
 
