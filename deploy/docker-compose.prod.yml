@@ -43,10 +43,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?must set in .env}
       # 附件/导入/现场照落盘(挂宿主卷持久化)
       RENT_STORAGE_DIR: /app/storage
-      # LLM 留空=全 mock 不外呼;SSO 暂关(占位头)。真值由 .env 覆盖
+      # LLM 三项(base-url/api-key/model)全非空=真调用;任一空或调用失败=回退 mock 零外呼。真值由 .env 覆盖(key 不入库)
       SSO_ENABLED: ${SSO_ENABLED:-false}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      LLM_TRUST_ALL_SSL: ${LLM_TRUST_ALL_SSL:-true}
     volumes:
       - ./storage:/app/storage
     expose:
