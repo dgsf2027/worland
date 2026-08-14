@@ -91,6 +91,7 @@ public class LlmGateway {
 
         String outputText;
         String callStatus = "成功";
+        String executor = "mock";
         Integer tokensIn = null;
         Integer tokensOut = null;
         try {
@@ -98,19 +99,27 @@ public class LlmGateway {
             outputText = reply.getText();
             tokensIn = reply.getTokensIn();
             tokensOut = reply.getTokensOut();
+            executor = StrUtil.blankToDefault(reply.getExecutor(), "mock");
         } catch (Exception ex) {
+            // llmService 内部已做 mock 回退不该抛;仍抛=连 mock 都没兜住 → 用规则草稿保业务不断
             if (task.getFallbackText() == null) {
                 throw ex;
             }
             log.warn("[LlmGateway] {} 调用失败,降级用规则草稿:{}", task.getScene().getKey(), ex.getMessage());
             outputText = task.getFallbackText();
             callStatus = "降级";
+            executor = "fallback";
+        }
+
+        // 真调用失败已在 llmService 内部回退 mock 草稿并标 fallback,库里记「降级」便于排障
+        if ("fallback".equals(executor) && "成功".equals(callStatus)) {
+            callStatus = "降级";
         }
 
         LlmCallLog call = new LlmCallLog();
         call.setScene(StrUtil.blankToDefault(task.getSceneLabel(), task.getScene().getLabel()));
-        // 占位期无 key → mock 断路,模型记 mock(路由目标)(接真后一眼对照)
-        call.setModel("mock(" + routedModel + ")");
+        // 模型即来源标记:real=真模型名(不带 mock 前缀)/ mock=无 key 断路 / mock(fallback:...)=真调失败回退
+        call.setModel(modelTag(executor, routedModel));
         call.setPromptFingerprint(task.getPromptFingerprint());
         call.setIdempotentKey(idemKey);
         call.setCacheHit(0);
@@ -125,6 +134,18 @@ public class LlmGateway {
         call.setCallStatus(callStatus);
         llmCallLogMapper.insert(call);
         return new GatewayResult(call, false);
+    }
+
+    /** 模型/来源标记:real→真模型名;mock→mock(路由);fallback→mock(fallback:路由)。前端 startsWith("mock") 判 mock。 */
+    private String modelTag(String executor, String routedModel) {
+        switch (executor == null ? "mock" : executor) {
+            case "real":
+                return routedModel;
+            case "fallback":
+                return "mock(fallback:" + routedModel + ")";
+            default:
+                return "mock(" + routedModel + ")";
+        }
     }
 
     /** 幂等键:接入点 + 业务key + 当日(24h 窗口) */

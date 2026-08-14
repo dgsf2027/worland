@@ -57,6 +57,17 @@ knife4j:
 sso:
   enabled: ${SSO_ENABLED:false}
 
+# LLM 网关(OpenAI 兼容)。三项(base-url/api-key/model)全非空 → 真调用;任一空或调用失败 → 回退 mock(零外呼)。
+# key 由用户自行填 deploy/.env(LLM_API_KEY),绝不入库。base-url 到 /v1 前的前缀(网关自动补 /v1/chat/completions)。
+llm:
+  base-url: ${LLM_BASE_URL:}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:}
+  # 单次调用超时(毫秒),默认 30s
+  timeout-ms: ${LLM_TIMEOUT_MS:30000}
+  # 自签证书/内网代理宽松容错(§4.13):true=信任所有证书
+  trust-all-ssl: ${LLM_TRUST_ALL_SSL:true}
+
 logging:
   level:
     top.aole.rent: debug
