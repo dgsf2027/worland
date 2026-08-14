@@ -648,3 +648,33 @@ BI 多维矩阵(M5-04)/PDCA action_item+AI 综述(M5-05)/audit 强化只追加(M
 ## A.5 deploy-ready 套件构建验证
 
 见 `deploy/`(backend.Dockerfile / frontend.Dockerfile / frontend-nginx.conf / docker-compose.prod.yml / .env.example)与 `部署runbook.md`。docker 镜像本地构建结果记录于 `整合验收报告-全系统.md`「B. deploy-ready」节。
+
+---
+
+## A.6 真 LLM 网关(mock → OpenAI 兼容真调用 · 2026-08-14)
+
+**改造**:新增 `OpenAiCompatLlmService`(`modules/ai/infrastructure/`,`@Primary` 覆盖 mock),接口 `ILlmService.chat` 不变,monthly/pdca 业务方零改动。断路三态:
+- `llm.base-url` / `api-key` / `model` 三项全非空 → 真 HTTP `POST {base-url}/v1/chat/completions`(system 角色设定 + user 脱敏 prompt · temperature 0.5 · 超时 30s · hutool `SSLUtil.createSSLContext(null)` 信任自签证书 §4.13),解析 `choices[0].message.content` + `usage` token。
+- 任一空 → 零外呼走 `MockLlmService`(executor=mock)。
+- 真调用抛异常/超时/非 200 → 回退 mock 草稿(executor=fallback,不 500/不 null/不空页)。
+`LlmGateway` 按 `reply.executor` 记来源:real→真模型名 / mock→`mock(路由)` / fallback→`mock(fallback:路由)`+`call_status=降级`。保留 24h idempotent + 透明四件套 + 脱敏。
+
+**镜像重建**:本机 docker.io 拉 base 镜像 TLS handshake timeout(DeadlineExceeded 变体),`--pull=false` 无本地 base 可回退。改用「本地 JDK17 编 jar(`mvn -o clean package -DskipTests` exit 0,64MB)+ 薄层 `FROM worland-rent-backend:local` 换入新 jar」绕开 docker.io,`docker build` exit 0 → 新镜像 `18e704131a8f`。`compose up -d --no-build --force-recreate worland-server` 换装成功,`Started RentApplication in 2.6s`,schema v14。
+
+**真测证据(穿 nginx 8088 → 生产栈 worland_prod)**:
+
+1. **无 key 回归**(LLM_* 空):
+   - `GET /api/rent/monthly-report/analysis?force=true` → **200**,`aiText` = `[MOCK] 2026-08 租赁收入 16000.00…`,`model=mock(kimi-k2)`,`mock=true`,`llmCallId=6`。
+   - `GET /api/rent/pdca/board?force=true` → 200,`[MOCK]` 综述。
+   - SQL:`yc_rent_llm_call_log` id7 `model=mock(kimi-k2)` `call_status=成功`(HEX E68890E58A9F)`tokens=0`。页面正常。
+
+2. **异常回退**(临时 `LLM_BASE_URL=http://127.0.0.1:59999` + 假 key + 假 model,`printenv` 已验注入):
+   - `GET /api/rent/monthly-report/analysis?force=true` → **http=200(非 500)**,`aiText` = `[MOCK]…`(草稿·页面不空),`model=mock(fallback:kimi-k2)`,`mock=true`。
+   - 后端日志:`[OpenAiLlm] 真调用失败,回退 mock 草稿:ConnectException: Connection refused` —— 真 HTTP 确实发出并优雅回退。
+   - SQL:id8 `model=mock(fallback:kimi-k2)` `call_status=降级`(HEX E9998DE7BAA7)`duration_ms=63`。
+
+3. **真成功路径**:无真实 key 无法测,**填真 key(LLM_BASE_URL+LLM_API_KEY+LLM_MODEL 三项)后生效** → model 记真模型名(不带 mock 前缀)、`call_status=成功`、带真 token 用量。
+
+4. **回归各模块 200**:恢复空 LLM_* 换装后,`/api/rent/{monthly-report/analysis, pdca/board, workbench, monthly-report, suppliers, customers}` 全 **200**。
+
+**启用方式**:用户在 `deploy/.env` 填 `LLM_BASE_URL=`(OpenAI 兼容端点·到 /v1 前的前缀)、`LLM_API_KEY=`(真 key·禁入 Git)、`LLM_MODEL=`(如 gpt-4o-mini / kimi-k2),`compose up -d --force-recreate worland-server` 即切真调用;任一留空自动回退 mock。
