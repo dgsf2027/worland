@@ -66,11 +66,13 @@ services:
       - "${WEB_PORT:-8088}:80"   # 发布口(本地默认8088;ECS 用 .env 的 WEB_PORT 避端口冲突)
     restart: unless-stopped
     depends_on: [worland-server]
-    networks: [worlandnet]
+    networks: [worlandnet, worland-edge]   # worland-edge=与中央网关central-caddy共享,供zulin.aoleplat.com反代
 
 networks:
   worlandnet:
     driver: bridge
+  worland-edge:
+    external: true    # 需先 docker network create worland-edge 并 connect central-caddy(已做)
 
 volumes:
   worland_mysql_data:
