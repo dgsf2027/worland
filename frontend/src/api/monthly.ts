@@ -78,12 +78,11 @@ export function fetchLlmCall(id: number) {
 
 // 导出:blob 直下(绕开统一响应拦截器,带 X-User 头保证分配表按角色导出)
 export async function downloadMonthly(period: string | undefined, kind: 'xlsx' | 'docx') {
-  const name = localStorage.getItem('rent_user_name') || '老板'
-  const role = localStorage.getItem('rent_user_role') || '老板'
+  const token = localStorage.getItem('rent_token') || ''
   const resp = await axios.get((import.meta.env.VITE_API_BASE_URL || '/api') + '/rent/monthly-report', {
     params: { period, export: kind },
     responseType: 'blob',
-    headers: { 'X-User-Name': encodeURIComponent(name), 'X-User-Role': encodeURIComponent(role) },
+    headers: { Authorization: `Bearer ${token}` },
   })
   const url = window.URL.createObjectURL(new Blob([resp.data]))
   const a = document.createElement('a')

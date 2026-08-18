@@ -3,25 +3,19 @@ import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()
 
-// 占位期"登录身份"切换(生产由可信网关注入 X-User-*·ADR-001)
-const roles = [
-  { name: '小洪', role: '老板' },
-  { name: '财务', role: '财务' },
-  { name: '李工', role: '供应链' },
-  { name: '王业务', role: '业务' },
-  { name: '刘总', role: 'LP' },
-]
-const current = ref(localStorage.getItem('rent_user_role') || '老板')
-function switchRole(r: { name: string; role: string }) {
-  localStorage.setItem('rent_user_name', r.name)
-  localStorage.setItem('rent_user_role', r.role)
-  current.value = r.role
-  window.location.reload()
+// 2026-08-19 邀请码注册上线:身份来自登录会话(token),不再前端切角色
+import { clearSession } from '@/utils/session'
+const displayName = ref(localStorage.getItem('rent_user_name') || '')
+const current = ref(localStorage.getItem('rent_user_role') || '')
+function logout() {
+  clearSession()
+  window.location.href = '/login'
 }
 </script>
 
 <template>
-  <el-container class="app-root">
+  <router-view v-if="route.meta.public" />
+  <el-container v-else class="app-root">
     <el-aside width="210px" class="app-aside">
       <div class="brand">曜石科技</div>
       <el-menu :default-active="route.path" router>
@@ -57,15 +51,8 @@ function switchRole(r: { name: string; role: string }) {
       <el-header class="app-header">
         <span class="title">{{ (route.meta.title as string) || '曜石科技 · 租赁板块' }}</span>
         <div class="right">
-          <span class="env">占位登录（网关注入 X-User-*）：</span>
-          <el-dropdown @command="switchRole">
-            <el-button size="small" type="primary" plain>当前：{{ current }} <el-icon class="el-icon--right">▾</el-icon></el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-for="r in roles" :key="r.role" :command="r">{{ r.name }}（{{ r.role }}）</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <span class="env">{{ displayName }}（{{ current }}）</span>
+          <el-button size="small" plain @click="logout">退出登录</el-button>
         </div>
       </el-header>
       <el-main>

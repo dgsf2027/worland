@@ -1,9 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { isLoggedIn } from '@/utils/session'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/workbench' },
+    { path: '/login', name: 'login', meta: { title: '登录 / 注册', public: true }, component: () => import('@/views/Login.vue') },
     { path: '/workbench', name: 'workbench', meta: { title: '工作台 · 各角色驾驶舱首页' }, component: () => import('@/views/Workbench.vue') },
     { path: '/purchase', name: 'purchase', meta: { title: '采购入库 · 应付' }, component: () => import('@/views/Purchase.vue') },
     { path: '/task', name: 'task', meta: { title: '任务 · 审批' }, component: () => import('@/views/Task.vue') },
@@ -24,6 +26,13 @@ const router = createRouter({
     { path: '/bi-pdca', name: 'bi-pdca', meta: { title: 'BI 多维矩阵 · PDCA 改进循环' }, component: () => import('@/views/BiPdca.vue') },
     { path: '/import', name: 'import', meta: { title: '导入中心 · 映射/预览/去重' }, component: () => import('@/views/ImportCenter.vue') },
   ],
+})
+
+// 2026-08-19 邀请码注册上线:未登录一律去 /login
+router.beforeEach((to) => {
+  if (!to.meta.public && !isLoggedIn()) return { path: '/login', query: { redirect: to.fullPath } }
+  if (to.path === '/login' && isLoggedIn()) return '/workbench'
+  return true
 })
 
 router.afterEach((to) => {

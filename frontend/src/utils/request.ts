@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { getToken, clearSession } from '@/utils/session'
 
 /**
  * 统一 axios 实例:
@@ -13,11 +14,9 @@ const request = axios.create({
 })
 
 request.interceptors.request.use((config) => {
-  // 占位期身份头:就绪后换真 SSO token
-  const name = localStorage.getItem('rent_user_name') || '老板'
-  const role = localStorage.getItem('rent_user_role') || '老板'
-  config.headers['X-User-Name'] = encodeURIComponent(name)
-  config.headers['X-User-Role'] = encodeURIComponent(role)
+  // 2026-08-19 邀请码注册上线:身份来源 = /api/auth 签发的 Bearer token(后端按 token 派生 X-User-*,不再信任客户端头)
+  const token = getToken()
+  if (token) config.headers['Authorization'] = `Bearer ${token}`
   return config
 })
 
@@ -32,6 +31,11 @@ request.interceptors.response.use(
     return Promise.reject(new Error(message))
   },
   (error) => {
+    if (error?.response?.status === 401) {
+      clearSession()
+      if (!location.pathname.startsWith('/login')) location.href = `/login?redirect=${encodeURIComponent(location.pathname)}`
+      return Promise.reject(error)
+    }
     ElMessage.error(error?.response?.data?.message || error?.message || '网络异常')
     return Promise.reject(error)
   },

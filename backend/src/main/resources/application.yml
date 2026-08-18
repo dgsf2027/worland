@@ -71,3 +71,12 @@ llm:
 logging:
   level:
     top.aole.rent: debug
+
+# 账号体系（2026-08-19 邀请码注册 · 全系统统一契约）
+rent:
+  auth:
+    invite-code: ${REGISTER_INVITE_CODE:dgsd1985}
+    register-default-role: ${REGISTER_DEFAULT_ROLE:业务}   # 首个注册账号自动为「老板」
+    secret: ${RENT_AUTH_SECRET:rent-dev-secret-change-me}     # 生产必须配 RENT_AUTH_SECRET
+    token-ttl-seconds: 2592000
+    placeholder-headers-enabled: ${RENT_PLACEHOLDER_HEADERS:false}   # true 才信任 X-User-* 占位头(仅本地开发)

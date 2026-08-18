@@ -28,10 +28,30 @@ import java.util.Map;
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @Component
+@lombok.RequiredArgsConstructor
 public class UserContextFilter extends OncePerRequestFilter {
 
     public static final String HEADER_NAME = "X-User-Name";
     public static final String HEADER_ROLE = "X-User-Role";
+
+    private final AuthTokenService tokenService;
+
+    /**
+     * 2026-08-19 邀请码注册上线后：身份唯一来源 = Bearer 令牌（/auth/register|login 签发），
+     * 占位头 X-User-* 仅在 rent.auth.placeholder-headers-enabled=true（本地开发）时才被信任。
+     * 无令牌访问业务接口 → 401（/auth/**、健康检查、swagger 放行）。
+     */
+    @org.springframework.beans.factory.annotation.Value("${rent.auth.placeholder-headers-enabled:false}")
+    private boolean placeholderHeadersEnabled;
+
+    private static final String[] PUBLIC_PREFIXES = {
+            "/auth/", "/v1/health", "/doc.html", "/webjars/", "/swagger-resources", "/v2/api-docs", "/v3/api-docs", "/swagger-ui", "/favicon.ico", "/error", "/actuator"
+    };
+
+    private static boolean isPublic(String path) {
+        for (String p : PUBLIC_PREFIXES) if (path.startsWith(p)) return true;
+        return false;
+    }
 
     /** 占位期已知用户种子映射(姓名 → 主键)。切真 SSO 后废弃。 */
     private static final Map<String, Long> SEED_USERS = new HashMap<>();
@@ -49,11 +69,32 @@ public class UserContextFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         try {
-            // Undertow/Servlet 默认按 ISO-8859-1 解析请求头,中文名会 mojibake,需转回 UTF-8
-            String name = decodeHeader(request.getHeader(HEADER_NAME));
-            String role = decodeHeader(request.getHeader(HEADER_ROLE));
+            String name = null;
+            String role = null;
+            Long tokenUserId = null;
+            String auth = request.getHeader("Authorization");
+            if (auth != null && auth.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                AuthTokenService.Claims c = tokenService.verify(auth.substring(7).trim());
+                if (c != null) { name = c.name; role = c.role; tokenUserId = c.userId; }
+            }
+            if (name == null && placeholderHeadersEnabled) {
+                // Undertow/Servlet 默认按 ISO-8859-1 解析请求头,中文名会 mojibake,需转回 UTF-8
+                name = decodeHeader(request.getHeader(HEADER_NAME));
+                role = decodeHeader(request.getHeader(HEADER_ROLE));
+            }
+            String path = request.getRequestURI();
+            String ctx = request.getContextPath();
+            if (ctx != null && !ctx.isEmpty() && path.startsWith(ctx)) path = path.substring(ctx.length());
+            if ((name == null || name.trim().isEmpty()) && !isPublic(path) && !"OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                response.setStatus(401);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":401,\"message\":\"未登录或登录已过期\",\"data\":null}");
+                return;
+            }
             if (name != null && !name.trim().isEmpty()) {
+                // 用户主键仍按显示名确定性映射(与占位期数据键一致,老数据不串;tokenUserId 仅留作审计)
                 Long userId = resolveUserId(name.trim());
+                if (tokenUserId != null) log.debug("token userId={}", tokenUserId);
                 CurrentUser u = new CurrentUser(userId, name.trim(), role == null ? "" : role.trim(), null);
                 // 请求指纹(审计抗抵赖 M5-06 P1-16):IP/URI/请求号。生产由可信网关注入 X-Forwarded-For/X-Request-Id
                 u.setClientIp(clientIp(request));
