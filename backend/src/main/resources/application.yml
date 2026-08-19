@@ -53,9 +53,16 @@ knife4j:
   setting:
     language: zh_cn
 
-# SSO 留位(ole 澳乐门户单点登录,暂用占位头 UserContext 适配层;ADR-001)
+# 澳乐门户 SSO(ole-portal-sso 规范 · eco.vvaix.com 生态管理平台点卡片免登直达)。
+# SSO_ENABLED=false(默认)整个模块不挂载,账号密码登录不受影响;凭据全部 .env 注入,禁硬编码。
 sso:
   enabled: ${SSO_ENABLED:false}
+  portal-base-url: ${SSO_PORTAL_BASE_URL:}
+  app-id: ${SSO_APP_ID:}
+  client-secret: ${SSO_CLIENT_SECRET:}
+  jwt-issuer: ${SSO_PORTAL_JWT_ISSUER:aole-portal,yunshan-portal}
+  allowed-tenant-ids: ${SSO_ALLOWED_TENANT_IDS:}
+  frontend-base-url: ${SSO_FRONTEND_BASE_URL:}
 
 # LLM 网关(OpenAI 兼容)。三项(base-url/api-key/model)全非空 → 真调用;任一空或调用失败 → 回退 mock(零外呼)。
 # key 由用户自行填 deploy/.env(LLM_API_KEY),绝不入库。base-url 到 /v1 前的前缀(网关自动补 /v1/chat/completions)。

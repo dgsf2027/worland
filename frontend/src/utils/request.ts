@@ -13,10 +13,21 @@ const request = axios.create({
   timeout: 15000,
 })
 
+/**
+ * 免登白名单(ole-portal-sso 硬约束 9):门户 SSO 回调与登录/注册接口不带旧 token、401 也不弹回登录页。
+ * 路径按 baseURL 之后的相对路径匹配(/v1/sso/*、/auth/login|register)。
+ */
+const AUTH_WHITELIST = ['/v1/sso/', '/auth/login', '/auth/register']
+function isWhitelisted(url?: string): boolean {
+  if (!url) return false
+  const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api(?=\/)/, '')
+  return AUTH_WHITELIST.some((p) => path.startsWith(p))
+}
+
 request.interceptors.request.use((config) => {
   // 2026-08-19 邀请码注册上线:身份来源 = /api/auth 签发的 Bearer token(后端按 token 派生 X-User-*,不再信任客户端头)
   const token = getToken()
-  if (token) config.headers['Authorization'] = `Bearer ${token}`
+  if (token && !isWhitelisted(config.url)) config.headers['Authorization'] = `Bearer ${token}`
   return config
 })
 
@@ -32,6 +43,8 @@ request.interceptors.response.use(
   },
   (error) => {
     if (error?.response?.status === 401) {
+      // 白名单接口 / SSO 落地页上的 401 由页面自己处理,不清会话、不强跳登录页(硬约束 9)
+      if (isWhitelisted(error?.config?.url) || location.pathname.startsWith('/sso/')) return Promise.reject(error)
       clearSession()
       if (!location.pathname.startsWith('/login')) location.href = `/login?redirect=${encodeURIComponent(location.pathname)}`
       return Promise.reject(error)
