@@ -51,8 +51,9 @@ public class SsoController {
             fragment = "token=" + enc(r.token) + "&name=" + enc(r.displayName) + "&role=" + enc(r.role)
                     + (r.created ? "&created=1" : "");
         } catch (BizException e) {
+            // 细节只留日志；对外文案按错误码给通用提示，不泄 issuer 列表 / 配置项名 / 门户内部报错
             log.warn("[sso] callback rejected code={} msg={}", e.getCode(), e.getMessage());
-            fragment = "error=" + enc(e.getMessage());
+            fragment = "error=" + enc(publicMessage(e.getCode()));
         } catch (Exception e) {
             log.error("[sso] callback error", e);
             fragment = "error=" + enc("SSO 登录异常，请稍后重试");
@@ -70,6 +71,17 @@ public class SsoController {
         response.setHeader("Location", base + "/sso/callback#" + fragment);
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Pragma", "no-cache");
+    }
+
+    /** 对外通用文案（按 code 分桶），排查看后端日志 */
+    static String publicMessage(int code) {
+        switch (code) {
+            case 400: return "登录参数不正确，请回平台重新点击进入";
+            case 401: return "平台授权校验未通过或已过期，请回平台重新点击进入";
+            case 403: return "该账号暂无本系统访问权限，请联系管理员";
+            case 502: return "平台门户暂不可达，请稍后再试";
+            default:  return "SSO 登录未成功，请稍后重试或使用账号密码登录";
+        }
     }
 
     private static String enc(String s) {

@@ -48,7 +48,15 @@ function goPortal() { window.location.href = PORTAL_URL }
 function goLogin() { window.location.href = '/login' }
 
 onMounted(() => {
-  const h = parseHash()
+  let h: Record<string, string>
+  try {
+    h = parseHash()
+  } catch {
+    // 畸形 %xx（decodeURIComponent 抛 URIError）→ 走 error 分支，不白屏
+    clearSession()
+    error.value = '登录参数无法解析，请回平台重新点击进入'
+    return
+  }
   if (h.error) {
     clearSession()
     error.value = h.error

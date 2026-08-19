@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import top.aole.rent.common.auth.AuthTokenService;
@@ -24,7 +25,7 @@ import java.util.List;
  * <p><b>首登口径（负责人拍板·全自动）</b>：按 portal_uid 找不到本地账号时自动建号——
  * 用户名=手机号（可用且未被占用）否则 {@code portal_<uid>}；姓名=JWT name；绑定 portal_uid；
  * 角色=系统默认最低角色（rent.auth.register-default-role，默认「业务」）；密码为随机不可用值（只能走 SSO，
- * 老板可在花名册改角色）。若手机号恰好等于某个尚未绑定门户的本地账号名 → 首次绑定（硬约束 8：手机号仅用于首次绑定，长期键=portal_uid）。
+ * 老板可在花名册改角色）。若手机号（^1\\d{10}$）恰好等于某个尚未绑定门户、且角色==默认最低角色的本地账号名 → 首次绑定（硬约束 8：手机号仅用于首次绑定，长期键=portal_uid）；高权限账号不自动绑。display_name 只在建号时取门户 name，之后不覆写（它是行级隔离键）。
  */
 @Slf4j
 @Service
@@ -76,19 +77,24 @@ public class SsoService {
             user = findUnboundByPhone(id);
             if (user != null) {
                 user.setPortalUid(id.getPortalUid());
-                log.info("[sso] 首次绑定 username={} ← portalUid={}", user.getUsername(), id.getPortalUid());
             } else {
-                user = createUser(id);
-                created = true;
+                try {
+                    user = createUser(id);
+                    created = true;
+                } catch (DuplicateKeyException dup) {
+                    // 并发首登：另一请求已建号（uk portal_uid / uk username 撞），重查一次
+                    log.warn("[sso] 并发首登撞唯一键，重查 portalUid={}", id.getPortalUid());
+                    user = userMapper.selectOne(new LambdaQueryWrapper<AuthUser>()
+                            .eq(AuthUser::getPortalUid, id.getPortalUid()).last("limit 1"));
+                    if (user == null) throw new BizException(500, "SSO 建号冲突，请重试");
+                }
             }
         }
         if (user.getStatus() == null || user.getStatus() != 1) {
             throw new BizException(403, "账号已停用，请联系管理员");
         }
-        // 姓名跟门户同步（显示名=占位头 X-User-Name，是业务隔离键之一，只在门户有值时更新）
-        if (id.getName() != null && !id.getName().trim().isEmpty() && !id.getName().trim().equals(user.getDisplayName())) {
-            user.setDisplayName(id.getName().trim());
-        }
+        // 注意：不覆写 display_name —— 它是 UserContextFilter.resolveUserId 的行级隔离键（同名同键），
+        // 每次登录跟门户改名会让老数据"换主人"。门户 name 只在 createUser 首登建号时取一次；改名走花名册人工改。
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.updateById(user);
 
@@ -112,21 +118,36 @@ public class SsoService {
     }
 
     private static final String USERNAME_PATTERN = "^[A-Za-z0-9_\\-]{3,32}$";
+    /** 手机号首绑只认大陆 11 位手机号（收紧：不让任意字母数字串撞本地账号名） */
+    private static final String PHONE_PATTERN = "^1\\d{10}$";
 
-    /** 手机号 == 某个尚未绑定门户的本地账号名 → 返回它（首次绑定）；否则 null */
-    private AuthUser findUnboundByPhone(PortalIdentity id) {
+    /**
+     * 手机号 == 某个尚未绑定门户的本地账号名 → 返回它（首次绑定）；否则 null。
+     * 安全收口：只允许绑 role == 默认最低角色 的未绑账号；老板/财务/供应链等高权限账号一律不自动绑
+     * （防门户侧手机号被冒用/改号后直接接管高权限号）→ 返回 null 走建号。
+     */
+    AuthUser findUnboundByPhone(PortalIdentity id) {
         String phone = id.getPhone() == null ? "" : id.getPhone().trim();
-        if (!phone.matches(USERNAME_PATTERN)) return null;
+        if (!phone.matches(PHONE_PATTERN)) return null;
         AuthUser byPhone = userMapper.selectOne(new LambdaQueryWrapper<AuthUser>()
                 .eq(AuthUser::getUsername, phone).last("limit 1"));
-        if (byPhone != null && (byPhone.getPortalUid() == null || byPhone.getPortalUid().isEmpty())) return byPhone;
-        return null;
+        if (byPhone == null) return null;
+        if (byPhone.getPortalUid() != null && !byPhone.getPortalUid().isEmpty()) return null;
+        if (defaultRole == null || !defaultRole.equals(byPhone.getRole())) {
+            log.warn("[sso] 手机号首绑拒绝：本地账号 username={} role={} 非默认角色 {}，不自动绑 portalUid={}，改走建号",
+                    byPhone.getUsername(), byPhone.getRole(), defaultRole, id.getPortalUid());
+            return null;
+        }
+        log.warn("[sso] 手机号首绑：本地 username={} role={} ← 门户 portalUid={} name={} phone={}",
+                byPhone.getUsername(), byPhone.getRole(), id.getPortalUid(), id.getName(), phone);
+        return byPhone;
     }
 
     /** 自动建号：用户名=手机号（可用且未占用）否则 portal_<uid>；角色=默认最低角色 */
     private AuthUser createUser(PortalIdentity id) {
         String phone = id.getPhone() == null ? "" : id.getPhone().trim();
-        String username = phone.matches(USERNAME_PATTERN) && !usernameTaken(phone) ? phone : "portal_" + id.getPortalUid();
+        String username = phone.matches(PHONE_PATTERN) && phone.matches(USERNAME_PATTERN) && !usernameTaken(phone)
+                ? phone : "portal_" + id.getPortalUid();
         if (usernameTaken(username)) {
             // 极端兜底：portal_<uid> 也被占了（人工手建撞名）→ 加短随机后缀
             username = username + "_" + randomSuffix();
