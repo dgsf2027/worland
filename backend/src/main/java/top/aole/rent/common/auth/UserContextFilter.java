@@ -39,13 +39,13 @@ public class UserContextFilter extends OncePerRequestFilter {
     /**
      * 2026-08-19 邀请码注册上线后：身份唯一来源 = Bearer 令牌（/auth/register|login 签发），
      * 占位头 X-User-* 仅在 rent.auth.placeholder-headers-enabled=true（本地开发）时才被信任。
-     * 无令牌访问业务接口 → 401（/auth/**、健康检查、swagger 放行）。
+     * 无令牌访问业务接口 → 401（/auth/**、/v1/sso/**（门户 SSO 回调）、健康检查、swagger 放行）。
      */
     @org.springframework.beans.factory.annotation.Value("${rent.auth.placeholder-headers-enabled:false}")
     private boolean placeholderHeadersEnabled;
 
     private static final String[] PUBLIC_PREFIXES = {
-            "/auth/", "/v1/health", "/doc.html", "/webjars/", "/swagger-resources", "/v2/api-docs", "/v3/api-docs", "/swagger-ui", "/favicon.ico", "/error", "/actuator"
+            "/auth/", "/v1/sso/", "/v1/health", "/doc.html", "/webjars/", "/swagger-resources", "/v2/api-docs", "/v3/api-docs", "/swagger-ui", "/favicon.ico", "/error", "/actuator"
     };
 
     private static boolean isPublic(String path) {

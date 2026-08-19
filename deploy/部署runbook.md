@@ -39,7 +39,7 @@ git revert <bad_commit> && docker compose -f deploy/docker-compose.prod.yml up -
 | # | 红线 | 谁做 | 说明 |
 |---|---|---|---|
 | 1 | **prod 服务器 / 域名目标** | 你 | 至今本地(docker)跑，无线上 ECS/域名。给目标才能真推 |
-| 2 | **真 SSO 凭据** | 门户团队 | 在 `yc_portal_system` 注册子系统 + 下发 `app_id`/`client_secret` + base_url + 测试账号；之后走 skill `ole-portal-sso` 把占位头适配层换成真 JWT。**凭据/密钥类 AI 不能代申请、代输入** |
+| 2 | **真 SSO 凭据** | 门户团队 | 代码已按 `ole-portal-sso` 接好(2026-08-19,`SSO_ENABLED=false` 默认不挂载)。门户团队在 `yc_portal_system` 注册「曜石租赁」(callback_url=`https://<域名>/api/v1/sso/callback`)+ 下发 `app_id`/`client_secret`；运维填 `.env` 的 `SSO_ENABLED/SSO_PORTAL_BASE_URL/SSO_APP_ID/SSO_CLIENT_SECRET` 即生效。**凭据/密钥类 AI 不能代申请、代输入** |
 | 3 | **P0-C 网关剥离 X-User-\*** | 你/运维 | 已在 `frontend-nginx.conf` 清空 `X-User-*`；上游中央网关也须剥离，否则可伪造 `X-User-Role:老板` 绕 RBAC |
 | 4 | **rsync/部署 exclude .env** | 运维 | 覆盖 prod `.env` = 全站 outage；`.env` 已入 .gitignore |
 | 5 | **密钥走 env/KMS** | 你 | DB 密码、`FILE_SIGN_SECRET`、LLM key 全走 `.env`/KMS，不入库 |

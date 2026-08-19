@@ -85,9 +85,9 @@ docker compose -f deploy/docker-compose.prod.yml up -d --build rent-server rent-
 
 > 以下每条**未完成前不得对外真上线**。AI 只做到 deploy-ready,红线由人/门户/运维团队落地。
 
-1. **真 SSO 接入(当前占位)**
-   - 现状:`SSO_ENABLED=false`,用占位头 `X-User-*` 适配层(ADR-001)。
-   - 待办:**门户团队**注册子系统 → 下发 `app_id` / `client_secret` / `base_url` / 测试账号 → 再走 `ole-portal-sso` 换真适配层,`SSO_ENABLED=true` 并配 `SSO_*` env。缺凭据不可上线放开登录。
+1. **真 SSO 接入(2026-08-19 代码已接好,待凭据激活)**
+   - 现状:代码按 `ole-portal-sso` 已实装(`common/sso/*`:`GET /api/v1/sso/callback` → 门户 exchange → RS256 验签 → 按 `portal_uid` 找/建 `yc_rent_auth_user` → 签本系统 token → 302 前端 `/sso/callback`);`SSO_ENABLED=false` 时模块不挂载,账号密码登录不受影响。
+   - 待办:**门户团队**在 `yc_portal_system` 注册「曜石租赁」(回调地址 `https://<域名>/api/v1/sso/callback`)→ 下发 `app_id` / `client_secret` → 运维填 `deploy/.env` 的 `SSO_ENABLED=true / SSO_PORTAL_BASE_URL / SSO_APP_ID / SSO_CLIENT_SECRET`(见 `.env.example`)→ 重启后端容器,`V100__auth_user_portal_uid.sql` 由 **Flyway 随 boot 自动跑(幂等·INFORMATION_SCHEMA 守卫),禁止手动 apply**;起来后 `SHOW COLUMNS FROM yc_rent_auth_user LIKE 'portal_uid'` 验证即可。
 
 2. **P0-C 网关剥离并重注入 X-User-* 头**
    - 边界网关(中央 Caddy/Nginx/SSO 层)**必须先剥离**客户端传入的任何 `X-User-Id/X-User-Name/X-User-Roles`,再由**可信** SSO 适配层重注入,严禁把浏览器伪造的 X-User-* 直通后端(否则越权 = 任意角色伪装)。`deploy/frontend-nginx.conf` 已占位置空这三头作提示;真隔离须在**最外层可信网关**做。

@@ -20,4 +20,6 @@ public class AuthUser {
     private Integer status;
     private LocalDateTime createdAt;
     private LocalDateTime lastLoginAt;
+    /** 门户 portal_uid（澳乐门户 SSO 长期身份键，V100 迁移加列；NULL=本地注册账号） */
+    private String portalUid;
 }

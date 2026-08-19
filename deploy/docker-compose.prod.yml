@@ -44,7 +44,14 @@ services:
       # 附件/导入/现场照落盘(挂宿主卷持久化)
       RENT_STORAGE_DIR: /app/storage
       # LLM 三项(base-url/api-key/model)全非空=真调用;任一空或调用失败=回退 mock 零外呼。真值由 .env 覆盖(key 不入库)
+      # 澳乐门户 SSO(真值全在 .env;SSO_ENABLED=false 时模块不挂载)
       SSO_ENABLED: ${SSO_ENABLED:-false}
+      SSO_PORTAL_BASE_URL: ${SSO_PORTAL_BASE_URL:-}
+      SSO_APP_ID: ${SSO_APP_ID:-}
+      SSO_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-}
+      SSO_PORTAL_JWT_ISSUER: ${SSO_PORTAL_JWT_ISSUER:-aole-portal,yunshan-portal}
+      SSO_ALLOWED_TENANT_IDS: ${SSO_ALLOWED_TENANT_IDS:-}
+      SSO_FRONTEND_BASE_URL: ${SSO_FRONTEND_BASE_URL:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
@@ -52,6 +59,9 @@ services:
       LLM_TRUST_ALL_SSL: ${LLM_TRUST_ALL_SSL:-true}
     volumes:
       - ./storage:/app/storage
+    # 容器内访问宿主上的 portal-server(SSO_PORTAL_BASE_URL=http://host.docker.internal:18151/api);Docker Desktop 自带,Linux 需此映射
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8082"          # 仅容器网络内暴露
     networks: [worlandnet]
