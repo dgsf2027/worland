@@ -56,6 +56,8 @@ public class SupplierService {
     private static final Set<String> ACTIVE_STATUS = new HashSet<>(Arrays.asList("入库", "主供", "备供"));
     private static final Set<String> VALID_STATUS =
             new HashSet<>(Arrays.asList("接触", "试样", "入库", "主供", "备供", "淘汰"));
+    private static final Set<String> VALID_INVOICE_TYPE =
+            new HashSet<>(Arrays.asList("增值税专用发票", "增值税普通发票", "无票"));
 
     // ============ 供应商池列表 ============
 
@@ -104,6 +106,8 @@ public class SupplierService {
             item.setContact(s.getContact());
             item.setStatus(s.getStatus());
             item.setMainCategory(s.getMainCategory());
+            item.setFullName(s.getFullName());
+            item.setBillingComplete(billingComplete(s));
             if (primary != null) {
                 item.setItemDesc(primary.getItemName() + "(" + primary.getItemType() + ")");
                 item.setQuotePrice(canSeeCost ? primary.getQuotePrice() : null);
@@ -143,6 +147,16 @@ public class SupplierService {
         r.setMainCategory(s.getMainCategory());
         r.setRemark(s.getRemark());
         r.setCostMasked(!canSeeCost);
+        // 工商/开票信息全角色可见(采购、财务、业务都要用);银行账号属财务敏感,与成本同一打码口径
+        r.setFullName(s.getFullName());
+        r.setTaxNo(s.getTaxNo());
+        r.setRegAddress(s.getRegAddress());
+        r.setRegPhone(s.getRegPhone());
+        r.setBankName(s.getBankName());
+        r.setAccountName(s.getAccountName());
+        r.setInvoiceType(s.getInvoiceType());
+        r.setBankAccount(canSeeCost ? s.getBankAccount() : null);
+        r.setBankMasked(!canSeeCost && s.getBankAccount() != null);
 
         // 履约雷达
         if (primary != null && primary.getScoreQuality() != null) {
@@ -202,6 +216,7 @@ public class SupplierService {
         s.setMainCategory(req.getMainCategory());
         s.setStatus(normalizeStatus(req.getStatus(), "接触"));
         s.setRemark(req.getRemark());
+        applyBilling(s, req, true);
         supplierMapper.insert(s);
         saveSupplies(s.getId(), req.getSupplies(), false);
         return s.getId();
@@ -221,12 +236,56 @@ public class SupplierService {
             s.setStatus(normalizeStatus(req.getStatus(), s.getStatus()));
         }
         s.setRemark(req.getRemark());
+        // 不可见成本的角色(GP/LP)读详情时银行账号被打码,回填的是空值 —— 不许拿它覆盖真账号
+        applyBilling(s, req, DataScope.canSeeCost(currentRole()));
         supplierMapper.updateById(s);
         if (req.getSupplies() != null) {
             // 全量覆盖供货矩阵
             supplyMapper.delete(new LambdaQueryWrapper<SupplierSupply>().eq(SupplierSupply::getSupplierId, id));
             saveSupplies(id, req.getSupplies(), true);
         }
+    }
+
+    /**
+     * 工商/开票/收款字段落库。户名留空默认取公司全称;发票类型校验枚举(防静默写脏)。
+     *
+     * @param canWriteBank 是否允许改银行账号。详情接口对不可见成本角色打码返回 null,
+     *                     若照单全收会把真账号抹成空 —— 这类角色的提交一律保留原账号。
+     */
+    private void applyBilling(Supplier s, SupplierSaveRequest req, boolean canWriteBank) {
+        s.setFullName(trimToNull(req.getFullName()));
+        s.setTaxNo(trimToNull(req.getTaxNo()));
+        s.setRegAddress(trimToNull(req.getRegAddress()));
+        s.setRegPhone(trimToNull(req.getRegPhone()));
+        s.setBankName(trimToNull(req.getBankName()));
+        if (canWriteBank) {
+            s.setBankAccount(trimToNull(req.getBankAccount()));
+        }
+        String accountName = trimToNull(req.getAccountName());
+        s.setAccountName(accountName != null ? accountName : s.getFullName());
+        String invoiceType = trimToNull(req.getInvoiceType());
+        if (invoiceType != null && !VALID_INVOICE_TYPE.contains(invoiceType)) {
+            throw new BizException(400, "非法发票类型: " + invoiceType
+                    + ",应为 增值税专用发票/增值税普通发票/无票");
+        }
+        s.setInvoiceType(invoiceType);
+    }
+
+    /** 收款资料是否齐(公司全称+开户行+银行账号);缺任一 → 采购付款环节无账户可打款。 */
+    private boolean billingComplete(Supplier s) {
+        return notBlank(s.getFullName()) && notBlank(s.getBankName()) && notBlank(s.getBankAccount());
+    }
+
+    private static boolean notBlank(String v) {
+        return v != null && !v.trim().isEmpty();
+    }
+
+    private static String trimToNull(String v) {
+        if (v == null) {
+            return null;
+        }
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     private void saveSupplies(Long supplierId, List<SupplierSaveRequest.SupplyItem> supplies, boolean isUpdate) {

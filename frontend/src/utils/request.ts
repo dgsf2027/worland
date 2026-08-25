@@ -33,6 +33,8 @@ request.interceptors.request.use((config) => {
 
 request.interceptors.response.use(
   (response) => {
+    // 文件下载(导入模板等)不是 R{code,message,data} 包体,原样透出让调用方拿 Blob
+    if (response.config?.responseType === 'blob') return response
     const res = response.data
     if (res && res.code === 200) {
       return res.data

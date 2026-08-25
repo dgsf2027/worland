@@ -3,7 +3,9 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchSupplierPool, fetchSupplierDetail, fetchDependencyAlert, retireSupplier,
+  createSupplier, updateSupplier,
   type SupplierPoolItem, type SupplierDetail, type DependencyAlert,
+  type SupplierSaveRequest, type SupplyItemInput,
 } from '@/api/supplier'
 
 const activeTab = ref('pool')
@@ -65,6 +67,90 @@ function pct(v?: number) {
   return v === null || v === undefined ? '—' : (v * 100).toFixed(0) + '%'
 }
 
+// ---- 新增 / 编辑(建档录入) ----
+const invoiceTypes = ['增值税专用发票', '增值税普通发票', '无票']
+const statusOptions = ['接触', '试样', '入库', '主供', '备供']
+const formVisible = ref(false)
+const editingId = ref<number | null>(null)
+const saving = ref(false)
+
+function emptyForm(): SupplierSaveRequest {
+  return {
+    name: '', fullName: '', taxNo: '', regAddress: '', regPhone: '',
+    bankName: '', bankAccount: '', accountName: '', invoiceType: '',
+    contact: '', phone: '', mainCategory: '', status: '接触', remark: '',
+  }
+}
+function emptySupply(): SupplyItemInput {
+  return {
+    itemType: '整机', itemName: '', category: '',
+    quotePrice: null, firstPayRatio: null, accountDays: null,
+    noInterest: 1, canSingleBuy: 1,
+    scoreQuality: null, scoreDelivery: null, scoreService: null, scorePrice: null, scoreTerm: null,
+    costMaterial: null, costProcessing: null, profitAmount: null, bomEstimate: null,
+    isPrimary: 1, remark: '',
+  }
+}
+const form = reactive<SupplierSaveRequest>(emptyForm())
+// 新增时可顺手录一条「代表供货项」(报价/账期/评分的来源;不填则该供应商暂无报价)
+const withSupply = ref(false)
+const supply = reactive<SupplyItemInput>(emptySupply())
+
+function resetForm() {
+  Object.assign(form, emptyForm())
+  Object.assign(supply, emptySupply())
+  withSupply.value = false
+}
+function openCreate() {
+  editingId.value = null
+  resetForm()
+  formVisible.value = true
+}
+async function openEdit(id: number) {
+  const d = await fetchSupplierDetail(id)
+  editingId.value = id
+  resetForm()
+  Object.assign(form, {
+    name: d.name, fullName: d.fullName || '', taxNo: d.taxNo || '',
+    regAddress: d.regAddress || '', regPhone: d.regPhone || '',
+    bankName: d.bankName || '', bankAccount: d.bankAccount || '',
+    accountName: d.accountName || '', invoiceType: d.invoiceType || '',
+    contact: d.contact || '', phone: d.phone || '',
+    mainCategory: d.mainCategory || '', status: d.status, remark: d.remark || '',
+  })
+  formVisible.value = true
+}
+
+async function submitForm() {
+  if (!form.name || !form.name.trim()) { ElMessage.warning('供应商名称必填'); return }
+  const body: SupplierSaveRequest = { ...form }
+  if (editingId.value == null) {
+    // 新增:勾了代表供货项才带 supplies
+    if (withSupply.value) {
+      if (!supply.itemName || !supply.itemName.trim()) { ElMessage.warning('供货项名称必填'); return }
+      body.supplies = [{ ...supply }]
+    }
+  }
+  // 编辑不传 supplies —— 后端 supplies=null 时保持供货矩阵原样(传了会全量覆盖)
+  saving.value = true
+  try {
+    if (editingId.value == null) {
+      await createSupplier(body)
+      ElMessage.success('供应商已建档')
+    } else {
+      await updateSupplier(editingId.value, body)
+      ElMessage.success('已保存')
+      if (detail.value && detail.value.id === editingId.value) {
+        detail.value = await fetchSupplierDetail(editingId.value)
+      }
+    }
+    formVisible.value = false
+    loadPool(); loadAlert()
+  } finally {
+    saving.value = false
+  }
+}
+
 async function onRetire(row: SupplierPoolItem) {
   try {
     const { value } = await ElMessageBox.prompt('淘汰/停用原因(留痕)', `淘汰供应商 ${row.name}`, {
@@ -97,6 +183,7 @@ onMounted(() => { loadPool(); loadAlert() })
           </el-select>
           <el-input-number v-model="filters.minScore" :min="0" :max="100" placeholder="评分≥" controls-position="right" style="width: 130px" @change="loadPool" />
           <el-button type="primary" @click="loadPool">筛选</el-button>
+          <el-button type="success" @click="openCreate">+ 新增供应商</el-button>
           <span class="cnt">共 {{ total }} 家</span>
         </div>
 
@@ -111,9 +198,10 @@ onMounted(() => { loadPool(); loadAlert() })
               <el-tag :type="(statusType[row.status] as any) || 'info'" size="small">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="供应商" min-width="130">
+          <el-table-column label="供应商" min-width="180">
             <template #default="{ row }">
               <a class="lnk" @click="openDetail(row.id)">{{ row.name }}</a>
+              <div v-if="row.fullName" class="sub-name">{{ row.fullName }}</div>
             </template>
           </el-table-column>
           <el-table-column prop="itemDesc" label="品类/配件" min-width="150" />
@@ -129,13 +217,21 @@ onMounted(() => { loadPool(); loadAlert() })
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="90">
+          <el-table-column label="收款资料" width="100">
             <template #default="{ row }">
+              <el-tag :type="row.billingComplete ? 'success' : 'danger'" size="small" effect="plain">
+                {{ row.billingComplete ? '齐' : '缺' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEdit(row.id)">编辑</el-button>
               <el-button v-if="row.status !== '淘汰'" link type="danger" size="small" @click="onRetire(row)">淘汰</el-button>
             </template>
           </el-table-column>
         </el-table>
-        <div class="mini">配件级可比价；供应商行可「淘汰/停用（留痕）」；每品类需 ≥2 家防单一依赖</div>
+        <div class="mini">配件级可比价；供应商行可「淘汰/停用（留痕）」；每品类需 ≥2 家防单一依赖；「收款资料=缺」的供应商在采购付款环节无账户可打款</div>
       </el-tab-pane>
 
       <!-- ============ 供应商详情 ============ -->
@@ -147,7 +243,39 @@ onMounted(() => { loadPool(); loadAlert() })
             <el-tag :type="(statusType[detail.status] as any) || 'info'" size="small">{{ detail.status }}</el-tag>
             <el-tag v-if="detail.scoreRadar" type="primary" size="small">履约分 {{ detail.scoreRadar.total }}</el-tag>
             <el-tag v-if="detail.costMasked" type="info" size="small">成本已按角色打码</el-tag>
+            <el-button link type="primary" size="small" @click="openEdit(detail.id)">编辑档案</el-button>
           </h3>
+
+          <div class="panel bill">
+            <h4>工商 · 开票 · 收款信息（采购付款/开票依据）</h4>
+            <el-descriptions :column="2" border size="small">
+              <el-descriptions-item label="公司全称">
+                <span v-if="detail.fullName">{{ detail.fullName }}</span>
+                <el-tag v-else type="danger" size="small" effect="plain">未填</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="统一社会信用代码">
+                <span v-if="detail.taxNo">{{ detail.taxNo }}</span>
+                <el-tag v-else type="danger" size="small" effect="plain">未填</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="注册地址">{{ detail.regAddress || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="注册电话">{{ detail.regPhone || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="开户行">
+                <span v-if="detail.bankName">{{ detail.bankName }}</span>
+                <el-tag v-else type="danger" size="small" effect="plain">未填</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="银行账号">
+                <el-tag v-if="detail.bankMasked" type="info" size="small" effect="plain">按角色打码</el-tag>
+                <span v-else-if="detail.bankAccount">{{ detail.bankAccount }}</span>
+                <el-tag v-else type="danger" size="small" effect="plain">未填</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="收款户名">{{ detail.accountName || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="发票类型">{{ detail.invoiceType || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="联系人">{{ detail.contact || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="联系电话">{{ detail.phone || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="备注" :span="2">{{ detail.remark || '—' }}</el-descriptions-item>
+            </el-descriptions>
+            <div class="mini">公司全称 / 开户行 / 银行账号三项缺任一，采购入库·应付环节无收款账户可打款</div>
+          </div>
 
           <div class="grid2">
             <div class="panel">
@@ -209,6 +337,131 @@ onMounted(() => { loadPool(); loadAlert() })
         </template>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- ============ 新增 / 编辑供应商档案 ============ -->
+    <el-dialog v-model="formVisible" :title="editingId == null ? '新增供应商（建档录入）' : '编辑供应商档案'" width="720px" top="6vh">
+      <el-form :model="form" label-width="130px" size="small">
+        <div class="fm-sec">基本信息</div>
+        <div class="fm-grid">
+          <el-form-item label="供应商简称" required>
+            <el-input v-model="form.name" placeholder="恒丰自动化（列表/比价显示用）" />
+          </el-form-item>
+          <el-form-item label="主营品类">
+            <el-select v-model="form.mainCategory" clearable style="width:100%">
+              <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="关系阶段">
+            <el-select v-model="form.status" style="width:100%">
+              <el-option v-for="s in statusOptions" :key="s" :label="s" :value="s" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="联系人">
+            <el-input v-model="form.contact" placeholder="张经理" />
+          </el-form-item>
+          <el-form-item label="联系电话">
+            <el-input v-model="form.phone" placeholder="13800000001" />
+          </el-form-item>
+        </div>
+
+        <div class="fm-sec">工商 · 开票 · 收款（采购付款必需）</div>
+        <el-form-item label="公司全称">
+          <el-input v-model="form.fullName" placeholder="苏州恒丰自动化设备有限公司（工商注册名，开票抬头）" />
+        </el-form-item>
+        <div class="fm-grid">
+          <el-form-item label="统一社会信用代码">
+            <el-input v-model="form.taxNo" placeholder="91320500MA1XXXXX1A" />
+          </el-form-item>
+          <el-form-item label="发票类型">
+            <el-select v-model="form.invoiceType" clearable style="width:100%">
+              <el-option v-for="t in invoiceTypes" :key="t" :label="t" :value="t" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="注册电话">
+            <el-input v-model="form.regPhone" placeholder="0512-6600-0001（开票用，区别于联系人手机）" />
+          </el-form-item>
+          <el-form-item label="开户行">
+            <el-input v-model="form.bankName" placeholder="中国建设银行苏州吴中支行（支行全称）" />
+          </el-form-item>
+          <el-form-item label="银行账号">
+            <el-input v-model="form.bankAccount" placeholder="32050166360800000001" />
+          </el-form-item>
+          <el-form-item label="收款户名">
+            <el-input v-model="form.accountName" placeholder="留空默认取公司全称" />
+          </el-form-item>
+        </div>
+        <el-form-item label="注册地址">
+          <el-input v-model="form.regAddress" placeholder="江苏省苏州市吴中区木渎镇金枫路 1 号（开票用）" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" />
+        </el-form-item>
+
+        <!-- 供货项:仅新增时录代表项;编辑时不动供货矩阵,避免全量覆盖丢评分/价格构成 -->
+        <template v-if="editingId == null">
+          <div class="fm-sec">
+            代表供货项（选填）
+            <el-checkbox v-model="withSupply" style="margin-left:10px">同时录入一条供货项</el-checkbox>
+          </div>
+          <template v-if="withSupply">
+            <div class="fm-grid">
+              <el-form-item label="供货类型">
+                <el-select v-model="supply.itemType" style="width:100%">
+                  <el-option label="整机" value="整机" />
+                  <el-option label="配件" value="配件" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="供何物" required>
+                <el-input v-model="supply.itemName" placeholder="播种墙 整机 / 电控系统" />
+              </el-form-item>
+              <el-form-item label="所属品类">
+                <el-select v-model="supply.category" clearable style="width:100%">
+                  <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="集采报价(元)">
+                <el-input-number v-model="supply.quotePrice" :min="0" :step="1000" controls-position="right" style="width:100%" placeholder="按图报价留空" />
+              </el-form-item>
+              <el-form-item label="首付比例(0-1)">
+                <el-input-number v-model="supply.firstPayRatio" :min="0" :max="1" :step="0.05" :precision="2" controls-position="right" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="账期(天)">
+                <el-input-number v-model="supply.accountDays" :min="0" :step="15" controls-position="right" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="可单采">
+                <el-switch v-model="supply.canSingleBuy" :active-value="1" :inactive-value="0" />
+              </el-form-item>
+              <el-form-item label="账期无息">
+                <el-switch v-model="supply.noInterest" :active-value="1" :inactive-value="0" />
+              </el-form-item>
+            </div>
+            <div class="fm-sub">履约五维评分（0-100，选填；填了才有加权总分）</div>
+            <div class="fm-grid">
+              <el-form-item label="品质(故障率)"><el-input-number v-model="supply.scoreQuality" :min="0" :max="100" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="交期(准时率)"><el-input-number v-model="supply.scoreDelivery" :min="0" :max="100" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="服务(响应)"><el-input-number v-model="supply.scoreService" :min="0" :max="100" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="价格(vs市场)"><el-input-number v-model="supply.scorePrice" :min="0" :max="100" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="账期(首付低)"><el-input-number v-model="supply.scoreTerm" :min="0" :max="100" controls-position="right" style="width:100%" /></el-form-item>
+            </div>
+            <div class="fm-sub">价格构成（选填；vs 我方 BOM 识别虚高）</div>
+            <div class="fm-grid">
+              <el-form-item label="材料(元)"><el-input-number v-model="supply.costMaterial" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="加工(元)"><el-input-number v-model="supply.costProcessing" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="利润(元)"><el-input-number v-model="supply.profitAmount" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item>
+              <el-form-item label="我方BOM估算(元)"><el-input-number v-model="supply.bomEstimate" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item>
+            </div>
+            <el-form-item label="供货项备注"><el-input v-model="supply.remark" placeholder="现金折扣/阶梯返利/维保返点" /></el-form-item>
+          </template>
+        </template>
+        <div v-else class="fm-tip">供货矩阵不在本弹窗编辑，保存不会改动已有报价 / 评分 / 价格构成。</div>
+      </el-form>
+      <template #footer>
+        <el-button @click="formVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitForm">
+          {{ editingId == null ? '建档' : '保存' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -231,5 +484,11 @@ onMounted(() => { loadPool(); loadAlert() })
 .wf .seg { color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-top: 1px dashed #eee; }
 .up { color: #2f9e44; } .warn { color: #e8a33d; }
+.sub-name { color: #999; font-size: 12px; font-weight: 400; margin-top: 2px; }
+.bill { margin-bottom: 14px; }
+.fm-sec { font-size: 13px; font-weight: 600; color: #2e6da4; border-left: 3px solid #2e6da4; padding-left: 8px; margin: 4px 0 12px; }
+.fm-sub { font-size: 12px; color: #909399; margin: 0 0 10px 8px; }
+.fm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.fm-tip { font-size: 12px; color: #909399; margin-left: 8px; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 </style>

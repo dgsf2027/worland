@@ -19,6 +19,26 @@ public class SupplierDetailResponse {
     private String mainCategory;
     private String remark;
 
+    // ---- 工商 / 开票 / 收款(付款必需;银行账号按角色打码) ----
+    /** 公司全称(工商注册名;开票抬头) */
+    private String fullName;
+    /** 统一社会信用代码/纳税人识别号 */
+    private String taxNo;
+    /** 注册地址(开票用) */
+    private String regAddress;
+    /** 注册电话(开票用) */
+    private String regPhone;
+    /** 开户行(支行全称) */
+    private String bankName;
+    /** 银行账号;不可见成本角色返回 null */
+    private String bankAccount;
+    /** 收款户名 */
+    private String accountName;
+    /** 发票类型 */
+    private String invoiceType;
+    /** 收款账户是否已按角色打码 */
+    private Boolean bankMasked;
+
     /** 履约评分雷达(取代表供货项五维 + 加权总分) */
     private ScoreRadar scoreRadar;
 

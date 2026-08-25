@@ -19,6 +19,30 @@ public class Supplier {
 
     private String name;
 
+    /** 公司全称(工商注册名;开票抬头) */
+    private String fullName;
+
+    /** 统一社会信用代码/纳税人识别号 */
+    private String taxNo;
+
+    /** 注册地址(开票用) */
+    private String regAddress;
+
+    /** 注册电话(开票用) */
+    private String regPhone;
+
+    /** 开户行(支行全称) */
+    private String bankName;
+
+    /** 银行账号(财务敏感·按角色打码) */
+    private String bankAccount;
+
+    /** 收款户名(默认同公司全称) */
+    private String accountName;
+
+    /** 发票类型:增值税专用发票/增值税普通发票/无票 */
+    private String invoiceType;
+
     private String contact;
 
     private String phone;

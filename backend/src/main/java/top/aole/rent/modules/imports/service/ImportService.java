@@ -81,6 +81,14 @@ public class ImportService {
                 t.setLabel("供应商");
                 t.setDedupKeyLabel("供应商名称");
                 t.getFields().add(new ImportDtos.Field("name", "供应商名称", true));
+                t.getFields().add(new ImportDtos.Field("fullName", "公司全称", false));
+                t.getFields().add(new ImportDtos.Field("taxNo", "统一社会信用代码", false));
+                t.getFields().add(new ImportDtos.Field("regAddress", "注册地址", false));
+                t.getFields().add(new ImportDtos.Field("regPhone", "注册电话", false));
+                t.getFields().add(new ImportDtos.Field("bankName", "开户行", false));
+                t.getFields().add(new ImportDtos.Field("bankAccount", "银行账号", false));
+                t.getFields().add(new ImportDtos.Field("accountName", "收款户名", false));
+                t.getFields().add(new ImportDtos.Field("invoiceType", "发票类型", false));
                 t.getFields().add(new ImportDtos.Field("contact", "联系人", false));
                 t.getFields().add(new ImportDtos.Field("phone", "电话", false));
                 t.getFields().add(new ImportDtos.Field("mainCategory", "主营品类", false));
@@ -112,6 +120,83 @@ public class ImportService {
                 t.getFields().add(new ImportDtos.Field("remark", "备注", false));
         }
         return t;
+    }
+
+    /**
+     * 生成空白导入模板 .xlsx:第一行=表头(与 {@link #template} 字段 label 逐字一致,预览时能自动映射),
+     * 第二行=示例行(填写口径提示;导入前删掉即可)。表头必填项带 * 号仅做视觉提示,匹配时会剥掉。
+     */
+    public byte[] templateXlsx(String targetType) {
+        checkTarget(targetType);
+        ImportDtos.TemplateResp t = template(targetType);
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = wb.createSheet(t.getLabel());
+
+            org.apache.poi.ss.usermodel.CellStyle headStyle = wb.createCellStyle();
+            org.apache.poi.ss.usermodel.Font headFont = wb.createFont();
+            headFont.setBold(true);
+            headStyle.setFont(headFont);
+
+            org.apache.poi.ss.usermodel.Row head = sheet.createRow(0);
+            org.apache.poi.ss.usermodel.Row sample = sheet.createRow(1);
+            Map<String, String> samples = sampleRow(targetType);
+            for (int i = 0; i < t.getFields().size(); i++) {
+                ImportDtos.Field f = t.getFields().get(i);
+                org.apache.poi.ss.usermodel.Cell hc = head.createCell(i);
+                hc.setCellValue(f.getLabel());
+                hc.setCellStyle(headStyle);
+                sample.createCell(i).setCellValue(samples.getOrDefault(f.getKey(), ""));
+                sheet.setColumnWidth(i, Math.min(60, Math.max(12, f.getLabel().length() * 3 + 6)) * 256);
+            }
+            wb.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new BizException("模板生成失败:" + e.getMessage());
+        }
+    }
+
+    /** 模板示例行:告诉填表人每列该写什么格式(第 2 行,导入前删除)。 */
+    private Map<String, String> sampleRow(String targetType) {
+        Map<String, String> m = new LinkedHashMap<>();
+        switch (targetType) {
+            case "supplier":
+                m.put("name", "恒丰自动化");
+                m.put("fullName", "苏州恒丰自动化设备有限公司");
+                m.put("taxNo", "91320500MA1XXXXX1A");
+                m.put("regAddress", "江苏省苏州市吴中区木渎镇金枫路 1 号");
+                m.put("regPhone", "0512-6600-0001");
+                m.put("bankName", "中国建设银行苏州吴中支行");
+                m.put("bankAccount", "32050166360800000001");
+                m.put("accountName", "留空则默认取公司全称");
+                m.put("invoiceType", "增值税专用发票/增值税普通发票/无票");
+                m.put("contact", "张经理");
+                m.put("phone", "13800000001");
+                m.put("mainCategory", "播种墙/货架/阁楼/配件");
+                m.put("status", "接触/试样/入库/主供/备供");
+                m.put("remark", "示例行,导入前请删除本行");
+                break;
+            case "customer":
+                m.put("name", "示例客户有限公司");
+                m.put("contact", "李经理");
+                m.put("phone", "13900000001");
+                m.put("industry", "电商仓储");
+                m.put("valueTier", "A/B/C");
+                m.put("ownerUser", "归属人用户主键(数字)");
+                m.put("projectId", "项目ID(数字,须与导入目标项目一致)");
+                m.put("remark", "示例行,导入前请删除本行");
+                break;
+            default:
+                m.put("serialNo", "WL-BZQ-0004");
+                m.put("category", "播种墙");
+                m.put("model", "HF-2400");
+                m.put("marketPrice", "220000");
+                m.put("purchasePrice", "180000");
+                m.put("supplierId", "供应商主键(数字)");
+                m.put("projectId", "项目ID(数字,须与导入目标项目一致)");
+                m.put("remark", "示例行,导入前请删除本行");
+        }
+        return m;
     }
 
     // ============================== 预览 ==============================
@@ -366,6 +451,14 @@ public class ImportService {
             case "supplier": {
                 SupplierSaveRequest req = new SupplierSaveRequest();
                 req.setName(data.get("name"));
+                req.setFullName(data.get("fullName"));
+                req.setTaxNo(data.get("taxNo"));
+                req.setRegAddress(data.get("regAddress"));
+                req.setRegPhone(data.get("regPhone"));
+                req.setBankName(data.get("bankName"));
+                req.setBankAccount(data.get("bankAccount"));
+                req.setAccountName(data.get("accountName"));
+                req.setInvoiceType(data.get("invoiceType"));
                 req.setContact(data.get("contact"));
                 req.setPhone(data.get("phone"));
                 req.setMainCategory(data.get("mainCategory"));

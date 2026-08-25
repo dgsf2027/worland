@@ -74,6 +74,21 @@ export const importApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  /** 下载空白模板 .xlsx(表头=目标字段 label,填完可直接回传预览) */
+  downloadTemplate: async (target: string) => {
+    const resp: any = await request.get('/rent/imports/template/download', {
+      params: { target },
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(resp.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `导入模板-${target}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
   commit: (jobId: number) => request.post<any, CommitResp>(`/rent/imports/${jobId}/commit`),
   list: (target?: string, status?: string) =>
     request.get<any, JobRow[]>('/rent/imports', { params: { target, status } }),

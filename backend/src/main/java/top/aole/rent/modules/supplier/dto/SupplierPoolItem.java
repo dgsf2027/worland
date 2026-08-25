@@ -16,6 +16,11 @@ public class SupplierPoolItem {
     private String status;
     private String mainCategory;
 
+    /** 公司全称(工商注册名);列表用于区分同简称的不同主体 */
+    private String fullName;
+    /** 收款账户是否已填全(公司全称+开户行+银行账号);缺则采购付款卡壳 */
+    private Boolean billingComplete;
+
     /** 代表供货项:品类/配件描述 */
     private String itemDesc;
     /** 集采价(元);按图报价=null */

@@ -25,6 +25,11 @@ async function loadTpl() {
 }
 async function loadJobs() { jobs.value = await importApi.list() }
 
+async function downloadTpl() {
+  await importApi.downloadTemplate(target.value)
+  ElMessage.success('模板已下载:第 1 行表头请勿改动,第 2 行示例填完后删除')
+}
+
 function onFile(f: any) {
   file.value = f.raw
   return false
@@ -69,7 +74,8 @@ onMounted(() => { loadTpl(); loadJobs() })
         </el-radio-group>
         <span style="margin-left:16px">目标项目ID(选填):</span>
         <el-input-number v-model="projectId" :min="1" size="small" style="width:120px" controls-position="right" />
-        <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFile" accept=".xlsx" style="margin-left:16px">
+        <el-button size="small" type="success" plain @click="downloadTpl" style="margin-left:16px">⬇ 下载模板 .xlsx</el-button>
+        <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFile" accept=".xlsx" style="margin-left:8px">
           <el-button size="small">选择 .xlsx</el-button>
         </el-upload>
         <span v-if="file" class="fname">{{ file.name }}</span>
@@ -77,7 +83,7 @@ onMounted(() => { loadTpl(); loadJobs() })
       </div>
 
       <div v-if="tpl" class="tpl">
-        目标字段(去重键:<b>{{ tpl.dedupKeyLabel }}</b>):
+        目标字段(去重键:<b>{{ tpl.dedupKeyLabel }}</b>;红色=必填。表头须与下列名称逐字一致,直接下载模板最稳):
         <el-tag v-for="f in tpl.fields" :key="f.key" size="small" :type="f.required ? 'danger' : 'info'" effect="plain" style="margin:2px">
           {{ f.label }}{{ f.required ? ' *' : '' }}
         </el-tag>

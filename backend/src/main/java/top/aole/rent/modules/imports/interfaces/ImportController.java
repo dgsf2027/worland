@@ -4,6 +4,10 @@ import cn.hutool.json.JSONUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +19,9 @@ import top.aole.rent.common.result.R;
 import top.aole.rent.modules.imports.dto.ImportDtos;
 import top.aole.rent.modules.imports.service.ImportService;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +41,25 @@ public class ImportController {
     @GetMapping("/template")
     public R<ImportDtos.TemplateResp> template(@RequestParam String target) {
         return R.ok(importService.template(target));
+    }
+
+    @ApiOperation("下载空白导入模板 .xlsx(表头与目标字段逐字一致,可直接填完回传预览)")
+    @GetMapping("/template/download")
+    public ResponseEntity<byte[]> templateXlsx(@RequestParam String target) {
+        byte[] body = importService.templateXlsx(target);
+        String fileName = "import-template-" + target + ".xlsx";
+        String encoded;
+        try {
+            encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8.name()).replace("+", "%20");
+        } catch (UnsupportedEncodingException e) {
+            encoded = fileName;
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + fileName + "\"; filename*=UTF-8''" + encoded);
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
     }
 
     @ApiOperation("上传 Excel + 列映射 → 逐行预览(ok/dup/err + 公式转义计数),落作业(待确认)")
