@@ -1,8 +1,11 @@
 package top.aole.rent.modules.supplier.dto;
 
+
 import lombok.Data;
 
+
 import java.math.BigDecimal;
+
 
 /**
  * 供应商池列表行。集采价/首付/履约分取代表供货项(is_primary),履约分由权重即时算。
@@ -10,11 +13,15 @@ import java.math.BigDecimal;
 @Data
 public class SupplierPoolItem {
 
+
     private Long id;
     private String name;
     private String contact;
+    private String companyAccount;
+    private String openingBank;
     private String status;
     private String mainCategory;
+
 
     /** 代表供货项:品类/配件描述 */
     private String itemDesc;
