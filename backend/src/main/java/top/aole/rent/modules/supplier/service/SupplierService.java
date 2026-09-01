@@ -1,5 +1,6 @@
 package top.aole.rent.modules.supplier.service;
 
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +24,7 @@ import top.aole.rent.modules.supplier.mapper.SupplierMapper;
 import top.aole.rent.modules.supplier.mapper.SupplierSupplyMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+
 /**
  * 供应商模块服务(M1-01/02)。供应商池/详情/CRUD/淘汰留痕/单一依赖预警。
  *
@@ -46,35 +49,43 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SupplierService {
 
+
     private final SupplierMapper supplierMapper;
     private final SupplierSupplyMapper supplyMapper;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+
     /** 可用状态(计入单一依赖统计) */
     private static final Set<String> ACTIVE_STATUS = new HashSet<>(Arrays.asList("入库", "主供", "备供"));
     private static final Set<String> VALID_STATUS =
             new HashSet<>(Arrays.asList("接触", "试样", "入库", "主供", "备供", "淘汰"));
 
+
     // ============ 供应商池列表 ============
+
 
     public PageResult<SupplierPoolItem> pool(String keyword, String category, String status,
                                              Integer minScore, int page, int size) {
         boolean canSeeCost = DataScope.canSeeCost(currentRole());
 
+
         List<Supplier> suppliers = supplierMapper.selectList(new LambdaQueryWrapper<Supplier>()
                 .eq(status != null && !status.isEmpty(), Supplier::getStatus, status)
                 .orderByAsc(Supplier::getId));
+
 
         List<SupplierSupply> allSupplies = supplyMapper.selectList(new LambdaQueryWrapper<SupplierSupply>());
         Map<Long, List<SupplierSupply>> bySupplier = allSupplies.stream()
                 .collect(Collectors.groupingBy(SupplierSupply::getSupplierId));
 
+
         List<SupplierPoolItem> items = new ArrayList<>();
         for (Supplier s : suppliers) {
             List<SupplierSupply> supplies = bySupplier.getOrDefault(s.getId(), new ArrayList<>());
             SupplierSupply primary = pickPrimary(supplies);
+
 
             // 关键词:命中供应商名 或 任一供货项名
             if (keyword != null && !keyword.trim().isEmpty()) {
@@ -93,15 +104,19 @@ public class SupplierService {
                 }
             }
 
+
             Integer scoreTotal = primary == null ? null : weightedTotal(primary);
             if (minScore != null && (scoreTotal == null || scoreTotal < minScore)) {
                 continue;
             }
 
+
             SupplierPoolItem item = new SupplierPoolItem();
             item.setId(s.getId());
             item.setName(s.getName());
             item.setContact(s.getContact());
+            item.setCompanyAccount(s.getCompanyAccount());
+            item.setOpeningBank(s.getOpeningBank());
             item.setStatus(s.getStatus());
             item.setMainCategory(s.getMainCategory());
             if (primary != null) {
@@ -113,6 +128,7 @@ public class SupplierService {
             items.add(item);
         }
 
+
         long total = items.size();
         int from = Math.max(0, (page - 1) * size);
         int to = Math.min(items.size(), from + size);
@@ -120,7 +136,9 @@ public class SupplierService {
         return new PageResult<>(total, page, size, pageRecords);
     }
 
+
     // ============ 供应商详情 ============
+
 
     public SupplierDetailResponse detail(Long id) {
         Supplier s = supplierMapper.selectById(id);
@@ -129,20 +147,25 @@ public class SupplierService {
         }
         boolean canSeeCost = DataScope.canSeeCost(currentRole());
 
+
         List<SupplierSupply> supplies = supplyMapper.selectList(new LambdaQueryWrapper<SupplierSupply>()
                 .eq(SupplierSupply::getSupplierId, id)
                 .orderByDesc(SupplierSupply::getIsPrimary).orderByAsc(SupplierSupply::getId));
         SupplierSupply primary = pickPrimary(supplies);
+
 
         SupplierDetailResponse r = new SupplierDetailResponse();
         r.setId(s.getId());
         r.setName(s.getName());
         r.setContact(s.getContact());
         r.setPhone(s.getPhone());
+        r.setCompanyAccount(s.getCompanyAccount());
+        r.setOpeningBank(s.getOpeningBank());
         r.setStatus(s.getStatus());
         r.setMainCategory(s.getMainCategory());
         r.setRemark(s.getRemark());
         r.setCostMasked(!canSeeCost);
+
 
         // 履约雷达
         if (primary != null && primary.getScoreQuality() != null) {
@@ -155,6 +178,7 @@ public class SupplierService {
             radar.setTotal(weightedTotal(primary));
             r.setScoreRadar(radar);
         }
+
 
         // 供货矩阵
         List<SupplierDetailResponse.SupplyRow> matrix = new ArrayList<>();
@@ -172,6 +196,7 @@ public class SupplierService {
             matrix.add(row);
         }
         r.setSupplyMatrix(matrix);
+
 
         // 价格构成(vs BOM);仅可见成本角色返回
         if (canSeeCost && primary != null && primary.getCostMaterial() != null) {
@@ -191,7 +216,9 @@ public class SupplierService {
         return r;
     }
 
+
     // ============ 新增 / 编辑 ============
+
 
     @Transactional
     public Long create(SupplierSaveRequest req) {
@@ -199,6 +226,8 @@ public class SupplierService {
         s.setName(req.getName().trim());
         s.setContact(req.getContact());
         s.setPhone(req.getPhone());
+        s.setCompanyAccount(req.getCompanyAccount());
+        s.setOpeningBank(req.getOpeningBank());
         s.setMainCategory(req.getMainCategory());
         s.setStatus(normalizeStatus(req.getStatus(), "接触"));
         s.setRemark(req.getRemark());
@@ -206,6 +235,7 @@ public class SupplierService {
         saveSupplies(s.getId(), req.getSupplies(), false);
         return s.getId();
     }
+
 
     @Transactional
     public void update(Long id, SupplierSaveRequest req) {
@@ -216,6 +246,8 @@ public class SupplierService {
         s.setName(req.getName().trim());
         s.setContact(req.getContact());
         s.setPhone(req.getPhone());
+        s.setCompanyAccount(req.getCompanyAccount());
+        s.setOpeningBank(req.getOpeningBank());
         s.setMainCategory(req.getMainCategory());
         if (req.getStatus() != null && !req.getStatus().isEmpty()) {
             s.setStatus(normalizeStatus(req.getStatus(), s.getStatus()));
@@ -228,6 +260,7 @@ public class SupplierService {
             saveSupplies(id, req.getSupplies(), true);
         }
     }
+
 
     private void saveSupplies(Long supplierId, List<SupplierSaveRequest.SupplyItem> supplies, boolean isUpdate) {
         if (supplies == null || supplies.isEmpty()) {
@@ -262,7 +295,9 @@ public class SupplierService {
         }
     }
 
+
     // ============ 淘汰留痕 ============
+
 
     @Transactional
     public void retire(Long id, RetireRequest req) {
@@ -282,15 +317,19 @@ public class SupplierService {
         log.info("供应商淘汰留痕: id={}, by={}, reason={}", id, s.getRetiredBy(), req.getReason());
     }
 
+
     // ============ 单一依赖预警 ============
+
 
     public DependencyAlert dependencyAlert() {
         int min = rules.getValue("supplier_min_per_category", LocalDate.now()).intValue();
+
 
         List<Supplier> suppliers = supplierMapper.selectList(new LambdaQueryWrapper<Supplier>()
                 .in(Supplier::getStatus, ACTIVE_STATUS));
         Set<Long> activeIds = suppliers.stream().map(Supplier::getId).collect(Collectors.toSet());
         List<SupplierSupply> supplies = supplyMapper.selectList(new LambdaQueryWrapper<SupplierSupply>());
+
 
         // 品类 → 可用供应商去重集
         Map<String, Set<Long>> catToSuppliers = new LinkedHashMap<>();
@@ -306,6 +345,7 @@ public class SupplierService {
                 catToSuppliers.putIfAbsent(s.getMainCategory(), new HashSet<>());
             }
         }
+
 
         List<DependencyAlert.CategoryRisk> risks = new ArrayList<>();
         for (Map.Entry<String, Set<Long>> e : catToSuppliers.entrySet()) {
@@ -324,7 +364,9 @@ public class SupplierService {
         return alert;
     }
 
+
     // ============ 内部工具 ============
+
 
     /** 履约加权总分(即时算):Σ 维度分×权重,权重来自 rule_config。缺任一维度视为该项未评。 */
     private Integer weightedTotal(SupplierSupply sp) {
@@ -340,6 +382,7 @@ public class SupplierService {
         return (int) Math.round(total);
     }
 
+
     private JsonNode readJson(String ruleKey) {
         try {
             return objectMapper.readTree(rules.getJson(ruleKey, "", LocalDate.now()));
@@ -347,6 +390,7 @@ public class SupplierService {
             throw new BizException(500, "规则 JSON 解析失败: " + ruleKey + " · " + e.getMessage());
         }
     }
+
 
     private SupplierSupply pickPrimary(List<SupplierSupply> supplies) {
         if (supplies == null || supplies.isEmpty()) {
@@ -356,6 +400,7 @@ public class SupplierService {
                 .filter(x -> Integer.valueOf(1).equals(x.getIsPrimary()))
                 .findFirst().orElse(supplies.get(0));
     }
+
 
     private String normalizeStatus(String status, String fallback) {
         if (status == null || status.trim().isEmpty()) {
@@ -368,13 +413,16 @@ public class SupplierService {
         return t;
     }
 
+
     private int nz(Integer v) {
         return v == null ? 0 : v;
     }
 
+
     private boolean contains(String s, String kw) {
         return s != null && s.contains(kw);
     }
+
 
     private String currentRole() {
         return UserContext.get() == null ? null : UserContext.get().getRole();
