@@ -1,13 +1,11 @@
 import request from '@/utils/request'
 
-
 export interface PageResult<T> {
   total: number
   page: number
   size: number
   records: T[]
 }
-
 
 export interface SupplierPoolItem {
   id: number
@@ -23,7 +21,6 @@ export interface SupplierPoolItem {
   scoreTotal?: number
 }
 
-
 export interface ScoreRadar {
   quality: number
   delivery: number
@@ -32,7 +29,6 @@ export interface ScoreRadar {
   term: number
   total: number
 }
-
 
 export interface SupplyRow {
   id: number
@@ -46,7 +42,6 @@ export interface SupplyRow {
   scoreTotal?: number
 }
 
-
 export interface PriceComposition {
   material?: number
   processing?: number
@@ -55,7 +50,6 @@ export interface PriceComposition {
   bomEstimate?: number
   verdict?: string
 }
-
 
 export interface SupplierDetail {
   id: number
@@ -73,12 +67,10 @@ export interface SupplierDetail {
   costMasked?: boolean
 }
 
-
 export interface DependencyAlert {
   minPerCategory: number
   risks: { category: string; available: number; message: string }[]
 }
-
 
 export function fetchSupplierPool(params: Record<string, any>): Promise<PageResult<SupplierPoolItem>> {
   return request.get('/rent/suppliers', { params })
