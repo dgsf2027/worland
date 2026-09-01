@@ -1,5 +1,6 @@
 package top.aole.rent.modules.file.interfaces;
 
+
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +19,10 @@ import org.springframework.web.multipart.MultipartFile;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.file.service.FileStorageService;
 
+
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+
 
 /**
  * 对象存储接口(M5-08 · 评审 P1-20)。合同/现场照上传 + 短时效签名URL + 服务端鉴权代理下载。
@@ -30,9 +34,11 @@ import java.nio.charset.StandardCharsets;
 @RequiredArgsConstructor
 public class FileController {
 
+
     private final FileStorageService fileStorageService;
 
-    @ApiOperation("上传文件(bizType=contract/site_photo;ownerRole 可限定可见角色)")
+
+    @ApiOperation("上传文件(bizType=contract/site_photo/asset_bom;ownerRole 可限定可见角色)")
     @PostMapping
     public R<FileStorageService.UploadResp> upload(@RequestParam("file") MultipartFile file,
                                                    @RequestParam String bizType,
@@ -41,11 +47,21 @@ public class FileController {
         return R.ok(fileStorageService.upload(file, bizType, bizId, ownerRole));
     }
 
+
+    @ApiOperation("按业务对象查询附件")
+    @GetMapping
+    public R<List<FileStorageService.FileItemResp>> list(@RequestParam String bizType,
+                                                         @RequestParam Long bizId) {
+        return R.ok(fileStorageService.list(bizType, bizId));
+    }
+
+
     @ApiOperation("获取短时效签名URL(先过一次鉴权;URL 内嵌 token·TTL 走 rule)")
     @GetMapping("/{id}/signed-url")
     public R<FileStorageService.SignedUrlResp> signedUrl(@PathVariable Long id) {
         return R.ok(fileStorageService.signedUrl(id));
     }
+
 
     @ApiOperation("签名URL下载代理(验签+服务端鉴权;过期/篡改/越权 → 403)")
     @GetMapping("/download")
