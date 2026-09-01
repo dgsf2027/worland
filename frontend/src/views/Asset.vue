@@ -375,7 +375,6 @@ onMounted(() => {
 })
 </script>
 
-
 <template>
   <div class="asset-page">
     <div class="toolbar">
@@ -386,7 +385,6 @@ onMounted(() => {
       <el-button size="small" style="margin-left:auto" @click="openCreateSupplier">+ 录入供应商</el-button>
       <el-button type="primary" size="small" @click="openCreateAsset">+ 新建设备</el-button>
     </div>
-
 
     <el-card shadow="never" class="filter-card">
       <el-select v-model="filters.status" placeholder="状态" clearable size="small" style="width:130px" @change="loadList">
@@ -399,7 +397,6 @@ onMounted(() => {
       <el-button size="small" style="margin-left:8px" @click="loadList">查询</el-button>
       <span class="total">共 {{ total }} 台</span>
     </el-card>
-
 
     <el-table :data="list" v-loading="loading" size="small" @row-click="(r:any) => openDetail(r.id)" style="cursor:pointer">
       <el-table-column prop="serialNo" label="序列号" width="130" />
@@ -415,7 +412,6 @@ onMounted(() => {
       <el-table-column prop="currentHolderName" label="承租客户" width="120"><template #default="{ row }">{{ row.currentHolderName || '—' }}</template></el-table-column>
     </el-table>
 
-
     <!-- 详情抽屉 -->
     <el-drawer v-model="drawer" :title="detail ? `设备 ${detail.serialNo} · ${detail.status}` : '设备详情'" size="60%">
       <div v-if="detail" class="detail">
@@ -424,7 +420,6 @@ onMounted(() => {
         <div class="detail-actions">
           <el-button v-if="!detail.sensitiveMasked" type="primary" size="small" @click="openEditAsset">修改设备</el-button>
         </div>
-
 
         <!-- 要点 -->
         <el-descriptions :column="3" border size="small">
@@ -439,14 +434,12 @@ onMounted(() => {
           <el-descriptions-item label="自购回本(月)">{{ detail.selfPurchasePayback ?? '—' }}</el-descriptions-item>
         </el-descriptions>
 
-
         <!-- 状态机流转 -->
         <div class="block-title">状态流转</div>
         <div>
           <el-button v-for="t in (transitions[detail.status] || [])" :key="t" size="small" @click="doChangeStatus(t)">→ {{ t }}</el-button>
           <span v-if="!(transitions[detail.status] || []).length" style="color:#999">终态,无可流转</span>
         </div>
-
 
         <!-- 配件树 BOM -->
         <div class="block-title block-title-row">
@@ -474,7 +467,6 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-
         <!-- 成本 / 残值 拆解 -->
         <el-row :gutter="12" v-if="detail.costBreakdown || detail.residualBreakdown">
           <el-col :span="12" v-if="detail.costBreakdown">
@@ -498,7 +490,6 @@ onMounted(() => {
           </el-col>
         </el-row>
 
-
         <!-- 故障档案 -->
         <div class="block-title">故障档案(按配件)</div>
         <el-table :data="detail.faultArchive" size="small" border>
@@ -511,7 +502,6 @@ onMounted(() => {
           </template></el-table-column>
           <el-table-column prop="supplierName" label="质保方" width="110"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
         </el-table>
-
 
         <!-- 单台收益 -->
         <div class="block-title">单台收益</div>
@@ -526,7 +516,6 @@ onMounted(() => {
           </el-descriptions-item>
         </el-descriptions>
 
-
         <!-- 状态机时间轴 -->
         <div class="block-title">状态机时间轴</div>
         <el-timeline>
@@ -538,7 +527,6 @@ onMounted(() => {
         </el-timeline>
       </div>
     </el-drawer>
-
 
     <!-- 新建 / 编辑设备弹窗 -->
     <el-dialog
@@ -606,7 +594,6 @@ onMounted(() => {
         </el-button>
       </template>
     </el-dialog>
-
 
     <!-- 供应商快速录入弹窗 -->
     <el-dialog v-model="supplierDialogVisible" title="录入供应商" width="520px" append-to-body>
@@ -727,7 +714,6 @@ onMounted(() => {
     </el-dialog>
   </div>
 </template>
-
 
 <style scoped>
 .asset-page { padding: 4px; }
