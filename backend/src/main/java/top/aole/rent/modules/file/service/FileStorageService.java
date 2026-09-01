@@ -1,5 +1,7 @@
 package top.aole.rent.modules.file.service;
 
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +16,7 @@ import top.aole.rent.modules.file.domain.FileObject;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
@@ -25,8 +28,12 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
+
 
 /**
  * 对象存储 + 签名URL 服务(M5-08 · 评审 P1-20)。本地文件系统模拟对象存储:
@@ -45,14 +52,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class FileStorageService {
 
+
     private final FileObjectMapper fileObjectMapper;
     private final RuleConfigService ruleConfigService;
+
 
     @Value("${rent.storage.dir:storage}")
     private String storageDir;
 
+
     /** 进程内签名密钥(占位期随机;真上线走 KMS)。 */
     private final byte[] signSecret = newSecret();
+
 
     @Data
     public static class UploadResp {
@@ -64,6 +75,18 @@ public class FileStorageService {
         private Long bizId;
     }
 
+
+    @Data
+    public static class FileItemResp {
+        private Long id;
+        private String fileName;
+        private String contentType;
+        private Long size;
+        private String uploaderName;
+        private LocalDateTime createTime;
+    }
+
+
     @Data
     public static class SignedUrlResp {
         private Long id;
@@ -71,6 +94,7 @@ public class FileStorageService {
         private long expiresAt;
         private int ttlSeconds;
     }
+
 
     /** 下载载荷(经服务端鉴权代理返回) */
     @Data
@@ -80,7 +104,9 @@ public class FileStorageService {
         private String contentType;
     }
 
+
     // ============================== 上传 ==============================
+
 
     public UploadResp upload(MultipartFile file, String bizType, Long bizId, String ownerRole) {
         CurrentUser u = UserContext.require();
@@ -88,7 +114,7 @@ public class FileStorageService {
             throw new BizException(400, "请上传文件");
         }
         if (bizType == null || bizType.isEmpty()) {
-            throw new BizException(400, "bizType 必填(contract/site_photo/import)");
+            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom)");
         }
         String key = UUID.randomUUID().toString().replace("-", "");
         Path dir = Paths.get(storageDir, bizType);
@@ -96,6 +122,7 @@ public class FileStorageService {
             Files.createDirectories(dir);
             Path target = dir.resolve(key);
             file.transferTo(target.toAbsolutePath());
+
 
             FileObject fo = new FileObject();
             fo.setStorageKey(key);
@@ -111,6 +138,7 @@ public class FileStorageService {
             fo.setUploaderName(u.getUserName());
             fileObjectMapper.insert(fo);
 
+
             UploadResp resp = new UploadResp();
             resp.setId(fo.getId());
             resp.setStorageKey(key);
@@ -124,7 +152,38 @@ public class FileStorageService {
         }
     }
 
+
+    // ============================== 附件列表 ==============================
+
+
+    public List<FileItemResp> list(String bizType, Long bizId) {
+        if (bizType == null || bizType.trim().isEmpty() || bizId == null) {
+            throw new BizException(400, "bizType 和 bizId 必填");
+        }
+        CurrentUser u = UserContext.require();
+        List<FileObject> files = fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
+                .eq(FileObject::getBizType, bizType.trim())
+                .eq(FileObject::getBizId, bizId)
+                .eq(FileObject::getIsDeleted, 0)
+                .orderByDesc(FileObject::getId));
+        List<FileItemResp> result = new ArrayList<>();
+        for (FileObject fo : files) {
+            authorize(fo, u);
+            FileItemResp item = new FileItemResp();
+            item.setId(fo.getId());
+            item.setFileName(fo.getFileName());
+            item.setContentType(fo.getContentType());
+            item.setSize(fo.getFileSize());
+            item.setUploaderName(fo.getUploaderName());
+            item.setCreateTime(fo.getCreateTime());
+            result.add(item);
+        }
+        return result;
+    }
+
+
     // ============================== 签名URL ==============================
+
 
     /** 生成短时效签名URL(先过一次鉴权:能签的人才能拿链接)。 */
     public SignedUrlResp signedUrl(Long fileId) {
@@ -134,6 +193,7 @@ public class FileStorageService {
         long expiry = Instant.now().getEpochSecond() + ttl;
         String token = sign(fileId, expiry);
 
+
         SignedUrlResp resp = new SignedUrlResp();
         resp.setId(fileId);
         resp.setUrl("/api/rent/files/download?token=" + token);
@@ -142,13 +202,16 @@ public class FileStorageService {
         return resp;
     }
 
+
     // ============================== 下载(服务端鉴权代理) ==============================
+
 
     public DownloadPayload download(String token) {
         long[] parsed = verify(token); // [fileId, expiry] 或抛 403
         Long fileId = parsed[0];
         FileObject fo = require(fileId);
         authorize(fo, UserContext.require()); // token 有效后再过行级/角色隔离
+
 
         Path target = Paths.get(storageDir, fo.getStoragePath());
         try {
@@ -162,7 +225,9 @@ public class FileStorageService {
         }
     }
 
+
     // ============================== 签名/验签 ==============================
+
 
     private String sign(long fileId, long expiry) {
         String payload = fileId + ":" + expiry;
@@ -170,6 +235,7 @@ public class FileStorageService {
         String raw = payload + ":" + sig;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
+
 
     /** 验签:篡改/过期 → 403。返回 [fileId, expiry]。 */
     private long[] verify(String token) {
@@ -204,6 +270,7 @@ public class FileStorageService {
         return new long[]{fileId, expiry};
     }
 
+
     private String hmac(String data) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
@@ -219,7 +286,9 @@ public class FileStorageService {
         }
     }
 
+
     // ============================== 服务端鉴权(行级/角色隔离) ==============================
+
 
     /** 过行级/角色隔离:ownerRole 约束 + 项目隔离。越权 → 403。 */
     private void authorize(FileObject fo, CurrentUser u) {
@@ -239,6 +308,7 @@ public class FileStorageService {
         }
     }
 
+
     private FileObject require(Long id) {
         FileObject fo = fileObjectMapper.selectById(id);
         if (fo == null || Integer.valueOf(1).equals(fo.getIsDeleted())) {
@@ -246,6 +316,7 @@ public class FileStorageService {
         }
         return fo;
     }
+
 
     private static byte[] newSecret() {
         byte[] b = new byte[32];
