@@ -1,7 +1,6 @@
 import request from '@/utils/request'
 import type { PageResult } from '@/api/supplier'
 
-
 export interface AssetListItem {
   id: number
   serialNo: string
@@ -17,7 +16,6 @@ export interface AssetListItem {
   currentHolderName?: string
   sensitiveMasked?: boolean
 }
-
 
 export interface BomNode {
   id: number
@@ -45,14 +43,12 @@ export interface BomAttachment {
   createTime?: string
 }
 
-
 export interface SignedUrl {
   id: number
   url: string
   expiresAt: number
   ttlSeconds: number
 }
-
 
 export interface CostItem { name: string; amount: number; ratio: number }
 export interface AssetDetail {
@@ -82,7 +78,6 @@ export interface AssetDetail {
   timeline: { eventType: string; bizTime: string; refDocType?: string; refDocId?: number; operatorName?: string; remark?: string }[]
 }
 
-
 export function fetchAssets(params: Record<string, any>): Promise<PageResult<AssetListItem>> {
   return request.get('/rent/assets', { params })
 }
@@ -108,7 +103,6 @@ export function deleteBom(bomId: number): Promise<void> {
   return request.delete(`/rent/assets/bom/${bomId}`)
 }
 
-
 export function uploadBomAttachment(bomId: number, file: File): Promise<BomAttachment> {
   const fd = new FormData()
   fd.append('file', file)
@@ -119,11 +113,9 @@ export function uploadBomAttachment(bomId: number, file: File): Promise<BomAttac
   })
 }
 
-
 export function fetchBomAttachments(bomId: number): Promise<BomAttachment[]> {
   return request.get('/rent/files', { params: { bizType: 'asset_bom', bizId: bomId } })
 }
-
 
 export function fetchFileSignedUrl(fileId: number): Promise<SignedUrl> {
   return request.get('/rent/files/' + fileId + '/signed-url')
