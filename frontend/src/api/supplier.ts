@@ -11,6 +11,8 @@ export interface SupplierPoolItem {
   id: number
   name: string
   contact?: string
+  companyAccount?: string
+  openingBank?: string
   status: string
   mainCategory?: string
   itemDesc?: string
@@ -54,6 +56,8 @@ export interface SupplierDetail {
   name: string
   contact?: string
   phone?: string
+  companyAccount?: string
+  openingBank?: string
   status: string
   mainCategory?: string
   remark?: string
@@ -70,6 +74,9 @@ export interface DependencyAlert {
 
 export function fetchSupplierPool(params: Record<string, any>): Promise<PageResult<SupplierPoolItem>> {
   return request.get('/rent/suppliers', { params })
+}
+export function createSupplier(body: Record<string, any>): Promise<number> {
+  return request.post('/rent/suppliers', body)
 }
 export function fetchSupplierDetail(id: number): Promise<SupplierDetail> {
   return request.get(`/rent/suppliers/${id}`)

@@ -1,5 +1,6 @@
 package top.aole.rent.modules.file.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +26,10 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -65,6 +69,16 @@ public class FileStorageService {
     }
 
     @Data
+    public static class FileItemResp {
+        private Long id;
+        private String fileName;
+        private String contentType;
+        private Long size;
+        private String uploaderName;
+        private LocalDateTime createTime;
+    }
+
+    @Data
     public static class SignedUrlResp {
         private Long id;
         private String url;
@@ -88,7 +102,7 @@ public class FileStorageService {
             throw new BizException(400, "请上传文件");
         }
         if (bizType == null || bizType.isEmpty()) {
-            throw new BizException(400, "bizType 必填(contract/site_photo/import)");
+            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom)");
         }
         String key = UUID.randomUUID().toString().replace("-", "");
         Path dir = Paths.get(storageDir, bizType);
@@ -122,6 +136,33 @@ public class FileStorageService {
         } catch (IOException e) {
             throw new BizException("文件保存失败:" + e.getMessage());
         }
+    }
+
+    // ============================== 附件列表 ==============================
+
+    public List<FileItemResp> list(String bizType, Long bizId) {
+        if (bizType == null || bizType.trim().isEmpty() || bizId == null) {
+            throw new BizException(400, "bizType 和 bizId 必填");
+        }
+        CurrentUser u = UserContext.require();
+        List<FileObject> files = fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
+                .eq(FileObject::getBizType, bizType.trim())
+                .eq(FileObject::getBizId, bizId)
+                .eq(FileObject::getIsDeleted, 0)
+                .orderByDesc(FileObject::getId));
+        List<FileItemResp> result = new ArrayList<>();
+        for (FileObject fo : files) {
+            authorize(fo, u);
+            FileItemResp item = new FileItemResp();
+            item.setId(fo.getId());
+            item.setFileName(fo.getFileName());
+            item.setContentType(fo.getContentType());
+            item.setSize(fo.getFileSize());
+            item.setUploaderName(fo.getUploaderName());
+            item.setCreateTime(fo.getCreateTime());
+            result.add(item);
+        }
+        return result;
     }
 
     // ============================== 签名URL ==============================

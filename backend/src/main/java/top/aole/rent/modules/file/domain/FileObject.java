@@ -20,7 +20,7 @@ public class FileObject {
 
     private String storageKey;
 
-    /** contract(合同)/site_photo(现场照)/import(导入原件) */
+    /** contract(合同)/site_photo(现场照)/import(导入原件)/asset_bom(BOM附件) */
     private String bizType;
 
     private Long bizId;

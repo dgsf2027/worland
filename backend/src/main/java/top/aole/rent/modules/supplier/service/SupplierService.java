@@ -102,6 +102,8 @@ public class SupplierService {
             item.setId(s.getId());
             item.setName(s.getName());
             item.setContact(s.getContact());
+            item.setCompanyAccount(s.getCompanyAccount());
+            item.setOpeningBank(s.getOpeningBank());
             item.setStatus(s.getStatus());
             item.setMainCategory(s.getMainCategory());
             if (primary != null) {
@@ -139,6 +141,8 @@ public class SupplierService {
         r.setName(s.getName());
         r.setContact(s.getContact());
         r.setPhone(s.getPhone());
+        r.setCompanyAccount(s.getCompanyAccount());
+        r.setOpeningBank(s.getOpeningBank());
         r.setStatus(s.getStatus());
         r.setMainCategory(s.getMainCategory());
         r.setRemark(s.getRemark());
@@ -199,6 +203,8 @@ public class SupplierService {
         s.setName(req.getName().trim());
         s.setContact(req.getContact());
         s.setPhone(req.getPhone());
+        s.setCompanyAccount(req.getCompanyAccount());
+        s.setOpeningBank(req.getOpeningBank());
         s.setMainCategory(req.getMainCategory());
         s.setStatus(normalizeStatus(req.getStatus(), "接触"));
         s.setRemark(req.getRemark());
@@ -216,6 +222,8 @@ public class SupplierService {
         s.setName(req.getName().trim());
         s.setContact(req.getContact());
         s.setPhone(req.getPhone());
+        s.setCompanyAccount(req.getCompanyAccount());
+        s.setOpeningBank(req.getOpeningBank());
         s.setMainCategory(req.getMainCategory());
         if (req.getStatus() != null && !req.getStatus().isEmpty()) {
             s.setStatus(normalizeStatus(req.getStatus(), s.getStatus()));

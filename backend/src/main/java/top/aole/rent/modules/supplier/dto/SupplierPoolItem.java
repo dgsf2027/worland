@@ -13,6 +13,8 @@ public class SupplierPoolItem {
     private Long id;
     private String name;
     private String contact;
+    private String companyAccount;
+    private String openingBank;
     private String status;
     private String mainCategory;
 

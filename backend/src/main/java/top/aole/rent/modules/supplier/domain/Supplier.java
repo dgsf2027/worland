@@ -23,6 +23,12 @@ public class Supplier {
 
     private String phone;
 
+    /** 公司账户(开户账号) */
+    private String companyAccount;
+
+    /** 开户银行 */
+    private String openingBank;
+
     /** 主营品类:播种墙/货架/阁楼/配件 */
     private String mainCategory;
 

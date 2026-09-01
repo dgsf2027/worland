@@ -19,6 +19,12 @@ public class SupplierSaveRequest {
     @ApiModelProperty("电话")
     private String phone;
 
+    @ApiModelProperty("公司账户(开户账号)")
+    private String companyAccount;
+
+    @ApiModelProperty("开户银行")
+    private String openingBank;
+
     @NotBlank(message = "供应商名称必填")
     @ApiModelProperty(value = "供应商名称", required = true)
     private String name;
