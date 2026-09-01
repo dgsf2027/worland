@@ -1,14 +1,11 @@
 package top.aole.rent.modules.supplier.dto;
 
-
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
-
 
 import javax.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.util.List;
-
 
 /**
  * 供应商新增/编辑请求。含供货矩阵行(整机/配件);编辑时 supplies 全量覆盖。
@@ -16,43 +13,33 @@ import java.util.List;
 @Data
 public class SupplierSaveRequest {
 
-
     @ApiModelProperty("联系人")
     private String contact;
-
 
     @ApiModelProperty("电话")
     private String phone;
 
-
     @ApiModelProperty("公司账户(开户账号)")
     private String companyAccount;
 
-
     @ApiModelProperty("开户银行")
     private String openingBank;
-
 
     @NotBlank(message = "供应商名称必填")
     @ApiModelProperty(value = "供应商名称", required = true)
     private String name;
 
-
     @ApiModelProperty("主营品类:播种墙/货架/阁楼/配件")
     private String mainCategory;
-
 
     @ApiModelProperty(value = "关系阶段:接触/试样/入库/主供/备供/淘汰", example = "接触")
     private String status;
 
-
     @ApiModelProperty("备注")
     private String remark;
 
-
     @ApiModelProperty("供货矩阵行(可空;编辑时全量覆盖)")
     private List<SupplyItem> supplies;
-
 
     @Data
     public static class SupplyItem {
