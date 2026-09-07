@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
-  addBom, updateBom, deleteBom, uploadBomAttachment, fetchBomAttachments, fetchFileSignedUrl,
+  addBom, updateBom, deleteBom, uploadBomAttachment, fetchBomAttachments, downloadBomAttachmentBlob,
   type AssetListItem, type AssetDetail, type BomNode, type BomAttachment,
 } from '@/api/asset'
 import { createSupplier, fetchSupplierPool, type SupplierPoolItem } from '@/api/supplier'
@@ -70,7 +70,11 @@ async function submitSupplier() {
       status: '接触',
     })
     await loadSuppliers()
-    if (assetDialogVisible.value) assetForm.supplierId = supplierId
+    if (!selectedSupplier(supplierId)) {
+      suppliers.value.unshift({ id: supplierId, ...supplierForm, status: '接触' } as SupplierPoolItem)
+    }
+    if (bomDialogVisible.value) bomForm.supplierId = supplierId
+    else if (assetDialogVisible.value) assetForm.supplierId = supplierId
     supplierDialogVisible.value = false
     ElMessage.success('供应商已录入，并已加入供应商列表')
   } finally {
@@ -189,7 +193,7 @@ async function submitAsset() {
     return
   }
   if (assetDialogMode.value === 'edit' && detail.value) {
-    await updateAsset(detail.value.id, { ...assetForm })
+    await updateAsset(detail.value.id, { ...assetForm, supplierId: assetForm.supplierId || null })
     ElMessage.success('设备资料已更新')
     await openDetail(detail.value.id)
   } else {
@@ -205,15 +209,21 @@ const bomDialogVisible = ref(false)
 const bomDialogMode = ref<'create' | 'edit'>('create')
 const bomForm = reactive<Record<string, any>>({
   id: undefined, parentId: undefined, parentName: '一级总成', name: '', qty: 1,
-  unitCost: undefined, supplierId: undefined, lifeYears: undefined,
+  unitCost: undefined, subtotalOverride: null, supplierId: undefined, lifeYears: undefined,
   warrantyUntil: undefined, repairable: true, faultCount: 0,
   residualRate: undefined, remark: '',
 })
-const bomSubtotal = computed(() => Number(bomForm.qty || 0) * Number(bomForm.unitCost || 0))
+const bomSaving = ref(false)
+const bomSubtotal = computed<number | undefined>({
+  get: () => bomForm.subtotalOverride ?? Math.round(Number(bomForm.qty || 0) * Number(bomForm.unitCost || 0) * 100) / 100,
+  set: (value) => { bomForm.subtotalOverride = value ?? null },
+})
+function resetBomSubtotal() { bomForm.subtotalOverride = null }
 const bomAttachments = ref<BomAttachment[]>([])
 const queuedBomFiles = ref<File[]>([])
 const bomFilesLoading = ref(false)
-const bomUploading = ref(false)
+const bomUploadCount = ref(0)
+const bomUploading = computed(() => bomUploadCount.value > 0)
 
 async function loadBomAttachments(bomId?: number) {
   if (!bomId) {
@@ -235,13 +245,13 @@ async function uploadBomFileRequest(options: any) {
     ElMessage.info('文件已暂存，保存 BOM 节点后自动上传')
     return
   }
-  bomUploading.value = true
+  bomUploadCount.value += 1
   try {
     await uploadBomAttachment(bomForm.id, file)
     await loadBomAttachments(bomForm.id)
     ElMessage.success('附件上传成功')
   } finally {
-    bomUploading.value = false
+    bomUploadCount.value -= 1
   }
 }
 
@@ -250,14 +260,15 @@ function removeQueuedBomFile(index: number) {
 }
 
 async function downloadBomAttachment(file: BomAttachment) {
-  const signed = await fetchFileSignedUrl(file.id)
+  const blob = await downloadBomAttachmentBlob(file.id)
+  const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  link.href = signed.url
-  link.target = '_blank'
-  link.rel = 'noopener'
+  link.href = url
+  link.download = file.fileName
   document.body.appendChild(link)
   link.click()
   link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 
 function resetBomForm(parent?: BomNode) {
@@ -295,6 +306,7 @@ async function openEditBom(row: BomNode) {
     name: row.name,
     qty: row.qty ?? 1,
     unitCost: row.unitCost,
+    subtotalOverride: row.subtotalOverride ?? null,
     supplierId: row.supplierId,
     lifeYears: row.lifeYears,
     warrantyUntil: row.warrantyUntil,
@@ -304,6 +316,7 @@ async function openEditBom(row: BomNode) {
     remark: row.remark || '',
   })
   queuedBomFiles.value = []
+  bomAttachments.value = []
   bomDialogVisible.value = true
   await loadBomAttachments(row.id)
 }
@@ -311,52 +324,63 @@ async function openEditBom(row: BomNode) {
 function applySupplierToBomForm(supplierId?: number) {
   const supplier = selectedSupplier(supplierId)
   if (!supplier) return
-  if (supplier.quotePrice != null) bomForm.unitCost = supplier.quotePrice
+  if (supplier.quotePrice != null) {
+    bomForm.unitCost = supplier.quotePrice
+    resetBomSubtotal()
+  }
   if (!bomForm.name && supplier.itemDesc) bomForm.name = supplier.itemDesc
 }
 
 async function submitBom() {
-  if (!detail.value || !bomForm.name) {
+  if (bomSaving.value || bomUploading.value) return
+  if (!detail.value || !bomForm.name.trim()) {
     ElMessage.warning('配件/模块名称必填')
     return
   }
+  if (!Number.isFinite(bomForm.qty) || bomForm.qty < 0.01 || !Number.isInteger(bomForm.faultCount) || bomForm.faultCount < 0) {
+    ElMessage.warning('数量须大于零，故障次数须为非负整数')
+    return
+  }
+  const assetId = detail.value.id
   const body = {
-    name: bomForm.name,
-    parentId: bomForm.parentId,
-    qty: bomForm.qty,
-    unitCost: bomForm.unitCost,
-    supplierId: bomForm.supplierId,
-    lifeYears: bomForm.lifeYears,
-    warrantyUntil: bomForm.warrantyUntil,
-    repairable: bomForm.repairable,
-    faultCount: bomForm.faultCount,
-    residualRate: bomForm.residualRate,
+    name: bomForm.name.trim(), parentId: bomForm.parentId ?? null,
+    qty: bomForm.qty, unitCost: bomForm.unitCost ?? null,
+    subtotalOverride: bomForm.subtotalOverride ?? null,
+    supplierId: bomForm.supplierId || null, lifeYears: bomForm.lifeYears ?? null,
+    warrantyUntil: bomForm.warrantyUntil || null, repairable: bomForm.repairable,
+    faultCount: bomForm.faultCount, residualRate: bomForm.residualRate ?? null,
     remark: bomForm.remark,
   }
-  let bomId: number
-  if (bomDialogMode.value === 'edit') {
-    bomId = bomForm.id
-    await updateBom(bomId, body)
-    ElMessage.success('BOM 节点已更新')
-  } else {
-    bomId = await addBom(detail.value.id, body)
-    bomForm.id = bomId
-    ElMessage.success('BOM 节点已新增')
-  }
-  if (queuedBomFiles.value.length) {
-    bomUploading.value = true
-    try {
-      await Promise.all(queuedBomFiles.value.map((file) => uploadBomAttachment(bomId, file)))
-      ElMessage.success('BOM 附件已上传')
-    } catch {
-      ElMessage.warning('BOM 已保存，但有附件上传失败，请编辑节点后重试')
-    } finally {
-      bomUploading.value = false
+  bomSaving.value = true
+  try {
+    let bomId = bomForm.id as number | undefined
+    if (bomId) {
+      await updateBom(bomId, body)
+    } else {
+      bomId = await addBom(assetId, body)
+      bomForm.id = bomId
+      bomDialogMode.value = 'edit'
     }
+    // 成功一个移除一个；失败时保留剩余文件和已保存节点，重试不重复建档或上传。
+    while (queuedBomFiles.value.length) {
+      try {
+        await uploadBomAttachment(bomId, queuedBomFiles.value[0])
+        queuedBomFiles.value.shift()
+      } catch {
+        ElMessage.warning('BOM 已保存，附件上传失败；待上传文件已保留，请点击保存重试')
+        await openDetail(assetId)
+        await loadBomAttachments(bomId)
+        return
+      }
+    }
+    ElMessage.success('BOM 已保存')
+    bomDialogVisible.value = false
+    await openDetail(assetId)
+  } finally {
+    bomSaving.value = false
   }
-  bomDialogVisible.value = false
-  await openDetail(detail.value.id)
 }
+
 async function removeBom(row: BomNode) {
   if (!detail.value) return
   await ElMessageBox.confirm(
@@ -618,10 +642,13 @@ onMounted(() => {
       v-model="bomDialogVisible"
       :title="bomDialogMode === 'edit' ? '编辑 BOM 节点' : '新增 BOM 节点'"
       width="680px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!bomSaving && !bomUploading"
+      :show-close="!bomSaving && !bomUploading"
     >
-      <el-form :model="bomForm" label-width="120px" size="small">
+      <el-form :model="bomForm" label-width="120px" size="small" :disabled="bomSaving || bomUploading">
         <el-form-item label="父级节点"><el-input :model-value="bomForm.parentName" disabled /></el-form-item>
-        <el-form-item label="配件/模块" required><el-input v-model="bomForm.name" /></el-form-item>
+        <el-form-item label="配件/模块" required><el-input v-model="bomForm.name" maxlength="128" /></el-form-item>
         <el-form-item label="供应商">
           <el-select
             v-model="bomForm.supplierId"
@@ -640,6 +667,7 @@ onMounted(() => {
               :disabled="supplier.status === '淘汰' || supplier.status === '已淘汰'"
             />
           </el-select>
+          <el-button type="primary" link @click="openCreateSupplier">+ 录入供应商</el-button>
         </el-form-item>
         <div v-if="selectedSupplier(bomForm.supplierId)" class="supplier-tip">
           自动带出：供货项 {{ selectedSupplier(bomForm.supplierId)?.itemDesc || '—' }}
@@ -648,13 +676,17 @@ onMounted(() => {
         </div>
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="数量"><el-input-number v-model="bomForm.qty" :min="0.01" :step="1" style="width:100%" /></el-form-item>
+            <el-form-item label="数量"><el-input-number v-model="bomForm.qty" :min="0.01" :precision="2" :step="1" @change="resetBomSubtotal" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="单价(元)"><el-input-number v-model="bomForm.unitCost" :min="0" :step="100" style="width:100%" /></el-form-item>
+            <el-form-item label="单价(元)"><el-input-number v-model="bomForm.unitCost" :min="0" :precision="2" :step="100" @change="resetBomSubtotal" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="小计(自动)"><el-input :model-value="money(bomSubtotal)" disabled /></el-form-item>
+            <el-form-item label="小计(元)">
+              <el-input-number v-model="bomSubtotal" :min="0" :precision="2" style="width:100%" />
+              <el-button v-if="bomForm.subtotalOverride != null" link type="primary" @click="resetBomSubtotal">恢复自动计算</el-button>
+              <span class="upload-tip">{{ bomForm.subtotalOverride == null ? '自动：数量 × 单价' : '手动小计；修改数量或单价后恢复自动计算' }}</span>
+            </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="使用年限"><el-input-number v-model="bomForm.lifeYears" :min="0" :step="0.5" style="width:100%" /></el-form-item>
@@ -668,7 +700,7 @@ onMounted(() => {
             <el-form-item label="可维修"><el-switch v-model="bomForm.repairable" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="故障次数"><el-input-number v-model="bomForm.faultCount" :min="0" :step="1" style="width:100%" /></el-form-item>
+            <el-form-item label="故障次数"><el-input-number v-model="bomForm.faultCount" :min="0" :precision="0" :step="1" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="残值率">
@@ -705,11 +737,11 @@ onMounted(() => {
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="bomForm.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="bomForm.remark" maxlength="255" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="bomDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitBom">保存</el-button>
+        <el-button :disabled="bomSaving || bomUploading" @click="bomDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="bomSaving" :disabled="bomUploading" @click="submitBom">保存</el-button>
       </template>
     </el-dialog>
   </div>
