@@ -32,6 +32,9 @@ public class AssetBom {
 
     private BigDecimal unitCost;
 
+    /** 手动小计(元)；null 时按 qty × unitCost 计算，兼容历史数据。 */
+    private BigDecimal subtotalOverride;
+
     private Long supplierId;
 
     private BigDecimal lifeYears;
