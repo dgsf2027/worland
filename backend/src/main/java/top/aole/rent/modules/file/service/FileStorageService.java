@@ -12,6 +12,8 @@ import top.aole.rent.common.auth.DataScope;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
 import top.aole.rent.modules.file.domain.FileObject;
+import top.aole.rent.modules.asset.domain.AssetBom;
+import top.aole.rent.modules.asset.mapper.AssetBomMapper;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 
@@ -50,6 +52,7 @@ import java.util.UUID;
 public class FileStorageService {
 
     private final FileObjectMapper fileObjectMapper;
+    private final AssetBomMapper assetBomMapper;
     private final RuleConfigService ruleConfigService;
 
     @Value("${rent.storage.dir:storage}")
@@ -103,6 +106,15 @@ public class FileStorageService {
         }
         if (bizType == null || bizType.isEmpty()) {
             throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom)");
+        }
+        if ("asset_bom".equals(bizType)) {
+            if (!DataScope.canSeeCost(u.getRole())) {
+                throw new BizException(403, "当前角色无权维护 BOM 附件");
+            }
+            AssetBom bom = bizId == null ? null : assetBomMapper.selectById(bizId);
+            if (bom == null || Integer.valueOf(1).equals(bom.getIsDeleted())) {
+                throw new BizException(404, "请先保存有效的 BOM 节点再上传附件");
+            }
         }
         String key = UUID.randomUUID().toString().replace("-", "");
         Path dir = Paths.get(storageDir, bizType);
@@ -275,8 +287,9 @@ public class FileStorageService {
             throw new BizException(403, "越权:该文件限「" + fo.getOwnerRole() + "」角色可见,当前角色无权");
         }
         // 合同类含成本/价条款:仅经营角色可见(GP/LP 不可见成本 · DataScope 口径)
-        if ("contract".equals(fo.getBizType()) && !DataScope.canSeeCost(u.getRole())) {
-            throw new BizException(403, "越权:合同文件含成本/价条款,当前角色(不可见成本)无权");
+        if (("contract".equals(fo.getBizType()) || "asset_bom".equals(fo.getBizType()))
+                && !DataScope.canSeeCost(u.getRole())) {
+            throw new BizException(403, "越权:文件含成本/价条款,当前角色(不可见成本)无权");
         }
     }
 
