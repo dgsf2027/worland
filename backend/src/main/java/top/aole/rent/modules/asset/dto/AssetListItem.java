@@ -22,6 +22,7 @@ public class AssetListItem {
     private BigDecimal bookValue;
     /** 【派生·即时算】残值=市场价×品类转让率 */
     private BigDecimal residualValue;
+    private Long supplierId;
     private String supplierName;
     private Long currentHolderCustomerId;
     private String currentHolderName;
