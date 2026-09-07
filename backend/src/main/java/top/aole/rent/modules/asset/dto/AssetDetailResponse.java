@@ -23,6 +23,7 @@ public class AssetDetailResponse {
     private BigDecimal purchasePrice;   // 敏感
     private BigDecimal monthlyLaborValue;
     private BigDecimal replaceHeadcount;
+    private Long supplierId;
     private String supplierName;
     private String currentHolderName;
     private Long contractId;
@@ -56,7 +57,10 @@ public class AssetDetailResponse {
         private String name;
         private BigDecimal qty;
         private BigDecimal unitCost;      // 敏感
-        private BigDecimal subtotal;      // 敏感 qty×unitCost
+        private BigDecimal subtotal;      // 敏感：手动小计优先，否则 qty×unitCost
+        private BigDecimal subtotalOverride; // 敏感：null 表示自动计算
+        private Long supplierId;
+        private String remark;
         private String supplierName;
         private BigDecimal lifeYears;
         private LocalDate warrantyUntil;
