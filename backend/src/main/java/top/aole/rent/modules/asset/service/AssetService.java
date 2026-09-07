@@ -128,6 +128,7 @@ public class AssetService {
             it.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
             it.setBookValue(seeCost ? bookValue(a) : null);
             it.setResidualValue(residualValue(a));
+            it.setSupplierId(a.getSupplierId());
             it.setSupplierName(supplierName(a.getSupplierId()));
             it.setCurrentHolderCustomerId(a.getCurrentHolderCustomerId());
             it.setCurrentHolderName(customerName(a.getCurrentHolderCustomerId()));
@@ -158,6 +159,7 @@ public class AssetService {
         r.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
         r.setMonthlyLaborValue(a.getMonthlyLaborValue());
         r.setReplaceHeadcount(a.getReplaceHeadcount());
+        r.setSupplierId(a.getSupplierId());
         r.setSupplierName(supplierName(a.getSupplierId()));
         r.setCurrentHolderName(customerName(a.getCurrentHolderCustomerId()));
         r.setContractId(a.getContractId());
@@ -207,7 +209,9 @@ public class AssetService {
             }
         }
         applySave(a, req);
-        assetMapper.updateById(a);
+        assetMapper.update(a, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, id)
+                .set(req.getSupplierId() == null, Asset::getSupplierId, null));
     }
 
     private void applySave(Asset a, AssetSaveRequest req) {
@@ -558,6 +562,14 @@ public class AssetService {
         if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
             throw new BizException(404, "配件不存在: id=" + bomId);
         }
+        // 父级必须存在且属于同一设备，再校验成环。
+        if (req.getParentId() != null) {
+            AssetBom parent = bomMapper.selectById(req.getParentId());
+            if (parent == null || Integer.valueOf(1).equals(parent.getIsDeleted())
+                    || !b.getAssetId().equals(parent.getAssetId())) {
+                throw new BizException(400, "父配件不存在或不属于本设备");
+            }
+        }
         // 不允许把节点挂到自己或自己的后代下(防成环)
         if (req.getParentId() != null) {
             if (req.getParentId().equals(bomId)) {
@@ -569,7 +581,21 @@ public class AssetService {
             }
         }
         applyBom(b, req);
-        bomMapper.updateById(b);
+        // updateById 默认跳过 null；显式保存清空操作与恢复自动小计。
+        bomMapper.update(null, new LambdaUpdateWrapper<AssetBom>()
+                .eq(AssetBom::getId, bomId)
+                .set(AssetBom::getName, b.getName())
+                .set(AssetBom::getQty, b.getQty())
+                .set(AssetBom::getRepairable, b.getRepairable())
+                .set(AssetBom::getFaultCount, b.getFaultCount())
+                .set(AssetBom::getParentId, b.getParentId())
+                .set(AssetBom::getUnitCost, b.getUnitCost())
+                .set(AssetBom::getSubtotalOverride, b.getSubtotalOverride())
+                .set(AssetBom::getSupplierId, b.getSupplierId())
+                .set(AssetBom::getLifeYears, b.getLifeYears())
+                .set(AssetBom::getWarrantyUntil, b.getWarrantyUntil())
+                .set(AssetBom::getResidualRate, b.getResidualRate())
+                .set(AssetBom::getRemark, b.getRemark()));
     }
 
     @Transactional
@@ -591,6 +617,7 @@ public class AssetService {
         b.setName(req.getName().trim());
         b.setQty(req.getQty() != null ? req.getQty() : BigDecimal.ONE);
         b.setUnitCost(req.getUnitCost());
+        b.setSubtotalOverride(req.getSubtotalOverride());
         b.setSupplierId(req.getSupplierId());
         b.setLifeYears(req.getLifeYears());
         b.setWarrantyUntil(req.getWarrantyUntil());
@@ -700,6 +727,9 @@ public class AssetService {
             BigDecimal subtotal = subtotal(b);
             n.setUnitCost(seeCost ? b.getUnitCost() : null);
             n.setSubtotal(seeCost ? subtotal : null);
+            n.setSupplierId(b.getSupplierId());
+            n.setRemark(b.getRemark());
+            n.setSubtotalOverride(seeCost ? b.getSubtotalOverride() : null);
             n.setSupplierName(supplierName(b.getSupplierId()));
             n.setLifeYears(b.getLifeYears());
             n.setWarrantyUntil(b.getWarrantyUntil());
@@ -754,7 +784,8 @@ public class AssetService {
         BigDecimal bomResidual = BigDecimal.ZERO;
         boolean seeCost = DataScope.canSeeCost(UserContext.getRole());
         for (AssetBom b : boms) {
-            if (b.getResidualRate() == null || b.getUnitCost() == null) {
+            if (b.getResidualRate() == null
+                    || (b.getUnitCost() == null && b.getSubtotalOverride() == null)) {
                 continue;
             }
             BigDecimal res = subtotal(b).multiply(b.getResidualRate()).setScale(2, RoundingMode.HALF_UP);
@@ -864,6 +895,9 @@ public class AssetService {
     // ============ 工具 ============
 
     private BigDecimal subtotal(AssetBom b) {
+        if (b.getSubtotalOverride() != null) {
+            return b.getSubtotalOverride().setScale(2, RoundingMode.HALF_UP);
+        }
         if (b.getUnitCost() == null) {
             return BigDecimal.ZERO;
         }
