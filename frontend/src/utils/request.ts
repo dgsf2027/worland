@@ -32,7 +32,19 @@ request.interceptors.request.use((config) => {
 })
 
 request.interceptors.response.use(
-  (response) => {
+  async (response) => {
+    if (response.config.responseType === 'blob' && response.data instanceof Blob) {
+      // 普通附件(含 JSON 文件)原样返回；兼容以 HTTP 200 返回的业务错误。
+      if (response.data.type.includes('application/json')) {
+        let payload: any
+        try { payload = JSON.parse(await response.data.text()) } catch { /* 普通附件 */ }
+        if (payload && typeof payload.code === 'number' && payload.code !== 200 && payload.message) {
+          ElMessage.error(payload.message)
+          throw new Error(payload.message)
+        }
+      }
+      return response.data
+    }
     const res = response.data
     if (res && res.code === 200) {
       return res.data
