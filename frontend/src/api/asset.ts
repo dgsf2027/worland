@@ -24,6 +24,7 @@ export interface BomNode {
   qty?: number
   unitCost?: number
   subtotal?: number
+  subtotalOverride?: number | null
   supplierId?: number
   supplierName?: string
   lifeYears?: number
@@ -119,4 +120,12 @@ export function fetchBomAttachments(bomId: number): Promise<BomAttachment[]> {
 
 export function fetchFileSignedUrl(fileId: number): Promise<SignedUrl> {
   return request.get('/rent/files/' + fileId + '/signed-url')
+}
+
+// 下载走统一请求实例，携带 Bearer 凭证；不直接打开缺少鉴权头的新窗口。
+export async function downloadBomAttachmentBlob(fileId: number): Promise<Blob> {
+  const signed = await fetchFileSignedUrl(fileId)
+  const token = new URL(signed.url, window.location.origin).searchParams.get('token')
+  if (!token) throw new Error('下载链接缺少签名')
+  return request.get('/rent/files/download', { params: { token }, responseType: 'blob' })
 }
