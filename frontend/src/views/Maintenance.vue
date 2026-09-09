@@ -97,7 +97,7 @@ onMounted(() => { loadList(); loadSpare() })
   <div class="page">
     <div class="sub">维保工单：报修/预防/巡检 → 派工 → 处理 → 回写闭环；故障回写配件 fault_count；质保内转供应商(费用不计我方)；高故障配件备件提示。</div>
 
-    <el-tabs v-model="activeTab" @tab-change="(n) => n === 'spare' && loadSpare()">
+    <el-tabs v-model="activeTab" @tab-change="(n: string | number) => n === 'spare' && loadSpare()">
       <!-- ============ 工单列表 ============ -->
       <el-tab-pane label="工单列表" name="list">
         <div class="filterbar">

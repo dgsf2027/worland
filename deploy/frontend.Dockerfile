@@ -7,6 +7,11 @@ RUN npm config set registry https://registry.npmmirror.com && npm i -g pnpm@9
 COPY frontend/package.json frontend/pnpm-lock.yaml* ./
 RUN pnpm install --no-frozen-lockfile
 COPY frontend/ .
+# 页面侧栏底部「版本 提交号 · 时间」:镜像内无 .git(.dockerignore 排除),由 compose build args 透传;缺省 unknown 不报错
+ARG GIT_COMMIT=unknown
+ARG GIT_COMMIT_TIME=unknown
+ARG GIT_BRANCH=unknown
+ENV GIT_COMMIT=$GIT_COMMIT GIT_COMMIT_TIME=$GIT_COMMIT_TIME GIT_BRANCH=$GIT_BRANCH
 RUN pnpm build
 
 FROM nginx:alpine

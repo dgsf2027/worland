@@ -11,6 +11,20 @@ function logout() {
   clearSession()
   window.location.href = '/login'
 }
+
+// 侧栏底部「版本 提交号 · 提交时间」:值在构建时注入(见 vite.config.ts),点击新开 GitHub 对应提交
+const build = __BUILD_INFO__
+const hasCommit = /^[0-9a-f]{7,40}$/i.test(build.commit)
+const shortCommit = hasCommit ? build.commit.slice(0, 7) : 'unknown'
+const commitUrl = hasCommit ? `${build.repoUrl}/commit/${build.commit}` : build.repoUrl
+function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  if (!iso || Number.isNaN(d.getTime())) return 'unknown'
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+const commitTimeText = fmtTime(build.commitTime)
+const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)}`
 </script>
 
 <template>
@@ -46,6 +60,10 @@ function logout() {
           <el-menu-item index="/import">📥 导入中心</el-menu-item>
         </el-menu-item-group>
       </el-menu>
+      <a class="build-info" :href="commitUrl" target="_blank" rel="noopener" :title="buildTip">
+        <span>版本 {{ shortCommit }}</span>
+        <span>{{ commitTimeText }}</span>
+      </a>
     </el-aside>
     <el-container>
       <el-header class="app-header">
@@ -65,7 +83,7 @@ function logout() {
 <style>
 html, body, #app { height: 100%; margin: 0; }
 .app-root { height: 100vh; }
-.app-aside { background: #1f2d3d; color: #fff; overflow-y: auto; }
+.app-aside { background: #1f2d3d; color: #fff; overflow-y: auto; display: flex; flex-direction: column; }
 .brand { font-size: 18px; font-weight: 700; padding: 18px 20px; color: #fff; letter-spacing: 2px; }
 /* 暗色侧栏:el-menu 默认文字色 #303133 压深底看不见,显式设亮色主题变量 */
 .app-aside .el-menu {
@@ -76,7 +94,23 @@ html, body, #app { height: 100%; margin: 0; }
   --el-menu-hover-text-color: #ffffff;
   --el-menu-hover-bg-color: #2a3a4d;
   --el-menu-active-color: #66b1ff;
+  flex: 1 0 auto;
 }
+/* 侧栏底部构建版本小字(沿用分组小标题的灰字;侧栏固定 210px,提交号与时间分两行以免横向溢出) */
+.app-aside .build-info {
+  display: block;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 10px 20px 14px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #6b7a8d;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.app-aside .build-info span { display: block; }
+.app-aside .build-info:hover { color: #c7ccd4; }
 .app-aside .el-menu-item { color: #c7ccd4 !important; }
 .app-aside .el-menu-item:hover { background-color: #2a3a4d !important; color: #fff !important; }
 .app-aside .el-menu-item.is-active { color: #66b1ff !important; background-color: #2a3a4d !important; }

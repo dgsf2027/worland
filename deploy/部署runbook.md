@@ -15,11 +15,13 @@ cd frontend && node node_modules/vite/bin/vite.js --host
 ```bash
 cp deploy/.env.example deploy/.env      # 填真值,chmod 600
 docker network create worland-edge      # 首次:供中央网关反代
+export GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_TIME=$(git log -1 --format=%cI) GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # 页面侧栏底部「版本 提交号 · 时间」的来源;忘了 export 页面显示 unknown,不报错
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
 # 健康:docker exec worland-server curl -s localhost:8082/api/v1/health  → code:200
 ```
 - 后端镜像：多阶段（maven:3.9-eclipse-temurin-17 构建 → eclipse-temurin:8-jre 运行，字节码 target=8）。
 - 前端镜像：node:22-alpine 构建 → nginx:alpine 托管，`/api` 反代 worland-server:8082。
+- 前端页面侧栏底部显示「版本 提交号 · 提交时间」（点击跳 GitHub 对应提交，悬停看分支/构建时间）：值来自构建时的 `GIT_COMMIT/GIT_COMMIT_TIME/GIT_BRANCH` 三个 build args（镜像内没有 .git），所以**每次 `--build` 前先跑上面的 `export` 行**；线上要看到新提交号必须重新构建部署。
 - **Flyway 随 boot 自动 apply V1→V14**（out-of-order 已开）。
 
 ## 三、Flyway / schema 上线要点
@@ -29,7 +31,9 @@ docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --
 
 ## 四、回滚
 ```bash
-git revert <bad_commit> && docker compose -f deploy/docker-compose.prod.yml up -d --build
+git revert <bad_commit>
+export GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_TIME=$(git log -1 --format=%cI) GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # 同 §二,让页面版本号跟着回滚后的提交走
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
 ```
 不可逆 schema 变更需先 restore DB 备份。**main 永不 force-push/reset。**
 

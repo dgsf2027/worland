@@ -71,6 +71,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/frontend.Dockerfile
+      # 页面侧栏底部「版本 提交号 · 时间」的来源:构建前 export GIT_*(见 runbook §二),忘了则显示 unknown
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_COMMIT_TIME: ${GIT_COMMIT_TIME:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
     container_name: worland-web
     ports:
       - "${WEB_PORT:-8088}:80"   # 发布口(本地默认8088;ECS 用 .env 的 WEB_PORT 避端口冲突)

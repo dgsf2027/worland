@@ -36,6 +36,7 @@ cd deploy
 cp .env.example .env          # ① 复制模板
 vi .env                       # ② 填真值:DB_PASSWORD(强随机)、WEB_PORT、(可选)LLM_*/SSO_*
 chmod 600 .env                # ③ 收权限(仅 owner 可读)
+export GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_TIME=$(git log -1 --format=%cI) GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # ③½ 页面侧栏底部「版本 提交号 · 时间」的来源(镜像内无 .git);忘了则显示 unknown
 docker compose -f docker-compose.prod.yml up -d --build   # ④ 构建+起全栈
 docker compose -f docker-compose.prod.yml ps              # ⑤ 看健康
 ```
@@ -73,6 +74,7 @@ docker compose -f deploy/docker-compose.prod.yml exec rent-mysql \
 ```bash
 git revert <bad_commit>            # 生成反向 commit(不改写 main 历史)
 # 或回退到已知良好 tag/commit(仅在你自己的部署分支)
+export GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_TIME=$(git log -1 --format=%cI) GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # 同 §2,页面版本号跟着回滚后的提交走
 docker compose -f deploy/docker-compose.prod.yml up -d --build rent-server rent-web
 ```
 
