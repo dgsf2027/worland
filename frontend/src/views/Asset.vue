@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
@@ -506,9 +507,13 @@ async function removeBom(row: BomNode) {
   await loadList()
 }
 
+// 从客户详情「关联合同」跳转过来(?id=):直接打开该设备详情
+const route = useRoute()
 onMounted(() => {
   loadList()
   loadSuppliers()
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
 })
 </script>
 

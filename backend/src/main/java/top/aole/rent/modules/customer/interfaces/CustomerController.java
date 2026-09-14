@@ -3,6 +3,11 @@ package top.aole.rent.modules.customer.interfaces;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,10 +25,15 @@ import top.aole.rent.modules.customer.dto.CustomerPoolItem;
 import top.aole.rent.modules.customer.dto.CustomerSaveRequest;
 import top.aole.rent.modules.customer.dto.FollowupRequest;
 import top.aole.rent.modules.customer.dto.PipelineResponse;
+import top.aole.rent.modules.customer.service.CustomerExportService;
 import top.aole.rent.modules.customer.service.CustomerService;
 
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+
 /**
- * 客户 · CRM(M1-03/04/05/09)。客户池/销售管道/详情/跟进/风控准入。
+ * 客户 · CRM(M1-03/04/05/09)。客户池/销售管道/详情/跟进/风控准入/一键导出。
  * 行级+字段级隔离(P0-E)在 {@link CustomerService} 服务端强制。
  */
 @Api(tags = "客户·CRM")
@@ -33,6 +43,7 @@ import top.aole.rent.modules.customer.service.CustomerService;
 public class CustomerController {
 
     private final CustomerService customerService;
+    private final CustomerExportService customerExportService;
 
     @ApiOperation("客户池:按阶段/评级/负责人/关键词筛选 + 分页(业务只见自己+公海)")
     @GetMapping
@@ -44,6 +55,23 @@ public class CustomerController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return R.ok(customerService.pool(phase, rating, owner, keyword, page, size));
+    }
+
+    @ApiOperation("客户信息一键导出 Excel(筛选条件同客户池;行级/字段级隔离同页面)")
+    @GetMapping("/export")
+    public ResponseEntity<ByteArrayResource> export(
+            @RequestParam(required = false) String phase,
+            @RequestParam(required = false) String rating,
+            @RequestParam(required = false) Long owner,
+            @RequestParam(required = false) String keyword) {
+        byte[] data = customerExportService.exportExcel(phase, rating, owner, keyword);
+        String fileName = "客户信息-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + ".xlsx";
+        ContentDisposition cd = ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 
     @ApiOperation("销售管道看板:按阶段分组 + 加权预测")

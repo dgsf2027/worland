@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchContracts, fetchContractDetail, signContract, voidContract, renewContract, changeContract,
@@ -105,7 +106,13 @@ async function doChange() {
   openDetail(detail.value.id); loadList()
 }
 
-onMounted(loadList)
+// 从客户详情「关联合同」跳转过来(?id=):直接打开该合同详情
+const route = useRoute()
+onMounted(() => {
+  loadList()
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
+})
 </script>
 
 <template>

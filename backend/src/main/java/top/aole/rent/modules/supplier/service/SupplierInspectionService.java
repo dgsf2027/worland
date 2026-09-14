@@ -10,6 +10,7 @@ import top.aole.rent.common.auth.CurrentUser;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
+import top.aole.rent.common.util.BusinessScope;
 import top.aole.rent.modules.file.domain.FileObject;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.supplier.domain.Supplier;
@@ -20,10 +21,8 @@ import top.aole.rent.modules.supplier.mapper.SupplierMapper;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,8 +46,6 @@ public class SupplierInspectionService {
     static final String FAILED = "不合格";
     /** 合格供应商进入供应商池的初始阶段 */
     private static final String PASSED_SUPPLIER_STATUS = "入库";
-
-    private static final List<String> VALID_SCOPE = Arrays.asList("货架", "阁楼", "播种墙");
 
     private final SupplierInspectionMapper inspectionMapper;
     private final SupplierMapper supplierMapper;
@@ -160,7 +157,7 @@ public class SupplierInspectionService {
                 s.setName(row.getCompanyName());
                 s.setContact(row.getContact());
                 s.setPhone(row.getPhone());
-                List<String> scope = splitScope(row.getBusinessScope());
+                List<String> scope = BusinessScope.split(row.getBusinessScope());
                 s.setMainCategory(scope.isEmpty() ? null : scope.get(0));
                 s.setStatus(PASSED_SUPPLIER_STATUS);
                 s.setProjectId(row.getProjectId());
@@ -196,7 +193,7 @@ public class SupplierInspectionService {
         row.setCompanyName(req.getCompanyName().trim());
         row.setLegalPerson(trimToNull(req.getLegalPerson()));
         row.setRegisteredCapital(req.getRegisteredCapital());
-        row.setBusinessScope(joinScope(req.getBusinessScope()));
+        row.setBusinessScope(BusinessScope.join(req.getBusinessScope()));
         row.setContact(trimToNull(req.getContact()));
         row.setPhone(trimToNull(req.getPhone()));
         row.setRemark(req.getRemark());
@@ -225,7 +222,7 @@ public class SupplierInspectionService {
             it.setCompanyName(r.getCompanyName());
             it.setLegalPerson(r.getLegalPerson());
             it.setRegisteredCapital(r.getRegisteredCapital());
-            it.setBusinessScope(splitScope(r.getBusinessScope()));
+            it.setBusinessScope(BusinessScope.split(r.getBusinessScope()));
             it.setContact(r.getContact());
             it.setPhone(r.getPhone());
             it.setResult(r.getResult());
@@ -257,34 +254,6 @@ public class SupplierInspectionService {
             throw new BizException(400, "考察已判定为「" + row.getResult() + "」,不可再" + action + ";需复查请新建考察记录");
         }
         return row;
-    }
-
-    private String joinScope(List<String> scope) {
-        if (scope == null || scope.isEmpty()) {
-            return null;
-        }
-        Set<String> picked = new LinkedHashSet<>();
-        for (String s : scope) {
-            String t = s == null ? "" : s.trim();
-            if (t.isEmpty()) {
-                continue;
-            }
-            if (!VALID_SCOPE.contains(t)) {
-                throw new BizException(400, "业务范围取值非法: " + t + ",应为 货架/阁楼/播种墙");
-            }
-            picked.add(t);
-        }
-        // 按固定顺序落库,便于筛选与展示一致
-        return picked.isEmpty() ? null
-                : VALID_SCOPE.stream().filter(picked::contains).collect(Collectors.joining(","));
-    }
-
-    private List<String> splitScope(String scope) {
-        if (scope == null || scope.trim().isEmpty()) {
-            return new ArrayList<>();
-        }
-        return Arrays.stream(scope.split(",")).map(String::trim).filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
     }
 
     private String scopeRemark(SupplierInspection row) {

@@ -22,8 +22,18 @@ public class Customer {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 公司名称 */
     private String name;
 
+    private String legalPerson;
+
+    /** 注册资本(元) */
+    private BigDecimal registeredCapital;
+
+    /** 业务范围(逗号分隔):货架/阁楼/播种墙 */
+    private String businessScope;
+
+    /** 主要联系人 */
     private String contact;
 
     private String phone;

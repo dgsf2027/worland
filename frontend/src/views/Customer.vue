@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCustomerPool, fetchCustomerDetail, fetchPipeline, addFollowup, runAdmission,
+  createCustomer, updateCustomer, exportCustomers, CUSTOMER_SCOPES,
   type CustomerPoolItem, type CustomerDetail, type Pipeline,
 } from '@/api/customer'
+
+const router = useRouter()
 
 const activeTab = ref('pool')
 
@@ -108,6 +112,114 @@ async function onAdmission() {
   } catch { /* 取消 */ }
 }
 
+// ---- 一键导出 ----
+const exporting = ref(false)
+async function onExport() {
+  exporting.value = true
+  try {
+    const params: Record<string, any> = {}
+    if (filters.phase) params.phase = filters.phase
+    if (filters.rating) params.rating = filters.rating
+    if (filters.keyword) params.keyword = filters.keyword
+    await exportCustomers(params)
+    ElMessage.success('客户信息已导出（按当前筛选条件）')
+  } finally {
+    exporting.value = false
+  }
+}
+
+// ---- 新增 / 编辑客户(工商信息) ----
+const formVisible = ref(false)
+const formMode = ref<'create' | 'edit'>('create')
+const saving = ref(false)
+const form = reactive<Record<string, any>>({})
+
+function capitalWan(v?: number | null) {
+  return v === null || v === undefined ? '—' : (v / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' 万元'
+}
+
+function openCreate() {
+  formMode.value = 'create'
+  Object.keys(form).forEach((k) => delete form[k])
+  Object.assign(form, {
+    id: undefined, name: '', legalPerson: '', registeredCapitalWan: undefined, businessScope: [],
+    contact: '', phone: '', industry: '', phase: '线索',
+  })
+  formVisible.value = true
+}
+
+function openEdit() {
+  if (!detail.value) return
+  const d = detail.value
+  formMode.value = 'edit'
+  Object.keys(form).forEach((k) => delete form[k])
+  Object.assign(form, {
+    id: d.id,
+    name: d.name,
+    legalPerson: d.legalPerson || '',
+    registeredCapitalWan: d.registeredCapital == null ? undefined : d.registeredCapital / 10000,
+    businessScope: [...(d.businessScope || [])],
+    contact: d.contact || '',
+    phone: d.phone || '',
+    industry: d.industry || '',
+    phase: d.phase,
+    // 编辑时原样回传,避免负责人/价值分层/信用画像被清掉
+    ownerUser: d.ownerUser ?? null,
+    valueTier: d.valueTier ?? null,
+    scoreProfit: d.creditProfile?.profit ?? null,
+    scoreCashflow: d.creditProfile?.cashflow ?? null,
+    scoreStability: d.creditProfile?.stability ?? null,
+    scoreHistory: d.creditProfile?.history ?? null,
+    scoreIndustry: d.creditProfile?.industry ?? null,
+  })
+  formVisible.value = true
+}
+
+async function submitForm() {
+  if (!String(form.name || '').trim()) {
+    ElMessage.warning('公司名称必填')
+    return
+  }
+  const { id, registeredCapitalWan, ...rest } = form
+  const body = {
+    ...rest,
+    name: String(form.name).trim(),
+    legalPerson: String(form.legalPerson || '').trim() || null,
+    registeredCapital: registeredCapitalWan == null ? null : Math.round(Number(registeredCapitalWan) * 10000 * 100) / 100,
+    contact: String(form.contact || '').trim() || null,
+    phone: String(form.phone || '').trim() || null,
+    industry: String(form.industry || '').trim() || null,
+  }
+  saving.value = true
+  try {
+    if (formMode.value === 'edit' && id) {
+      await updateCustomer(id, body)
+      ElMessage.success('客户信息已更新')
+      await openDetail(id)
+    } else {
+      const newId = await createCustomer(body)
+      ElMessage.success('客户已新增')
+      await openDetail(newId)
+    }
+    formVisible.value = false
+    loadPool(); loadPipeline()
+  } finally {
+    saving.value = false
+  }
+}
+
+// ---- 关联合同 / 设备租赁台账 ----
+const contractStatusType: Record<string, string> = { 生效: 'success', 草稿: 'info', 到期转让: 'warning', 关闭: 'info', 已作废: 'danger' }
+const assetStatusType: Record<string, string> = {
+  采购: 'info', 投放: 'warning', 在租: 'success', 待转让: 'primary', 已转让: 'info', 收回待处置: 'danger', 报废: 'info',
+}
+function goContract(id: number) {
+  router.push({ path: '/contract', query: { id: String(id) } })
+}
+function goAsset(id: number) {
+  router.push({ path: '/asset', query: { id: String(id) } })
+}
+
 onMounted(() => { loadPool(); loadPipeline() })
 </script>
 
@@ -136,16 +248,34 @@ onMounted(() => { loadPool(); loadPipeline() })
           </el-select>
           <el-button type="primary" @click="loadPool">筛选</el-button>
           <span class="cnt">共 {{ total }} 家</span>
+          <el-button :loading="exporting" @click="onExport">⬇ 一键导出</el-button>
+          <el-button type="primary" @click="openCreate">+ 新增客户</el-button>
         </div>
 
         <el-table :data="pool" v-loading="loading" stripe border size="small">
           <el-table-column label="阶段" width="80">
             <template #default="{ row }"><el-tag :type="(phaseType[row.phase] as any)" size="small">{{ row.phase }}</el-tag></template>
           </el-table-column>
-          <el-table-column label="客户" min-width="130">
+          <el-table-column label="公司名称" min-width="160">
             <template #default="{ row }">
               <a class="lnk" @click="openDetail(row.id)">{{ row.name }}</a>
               <el-tag v-if="row.inPublicPool" size="small" type="info" effect="plain" style="margin-left:4px">公海</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="法人" width="80"><template #default="{ row }">{{ row.legalPerson || '—' }}</template></el-table-column>
+          <el-table-column label="业务范围" width="150">
+            <template #default="{ row }">
+              <el-tag v-for="s in row.businessScope" :key="s" size="small" class="scope-tag">{{ s }}</el-tag>
+              <span v-if="!row.businessScope?.length">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="主要联系人" width="130">
+            <template #default="{ row }">{{ row.contact || '—' }}<div class="mini-line">{{ row.phone || '' }}</div></template>
+          </el-table-column>
+          <el-table-column label="可在租合同" width="100" align="center">
+            <template #default="{ row }">
+              <b :class="{ up: row.activeContractCount > 0 }">{{ row.activeContractCount }}</b>
+              <span class="mini-inline"> / {{ row.contractTotal }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="ownerName" label="负责业务" width="100" />
@@ -207,6 +337,61 @@ onMounted(() => { loadPool(); loadPipeline() })
             <span class="owner">负责业务：{{ detail.ownerName }}</span>
           </h3>
 
+          <div class="panel">
+            <h4>公司信息
+              <el-button link type="primary" size="small" style="float:right" @click="openEdit">编辑</el-button>
+            </h4>
+            <el-descriptions :column="3" border size="small">
+              <el-descriptions-item label="公司名称">{{ detail.name }}</el-descriptions-item>
+              <el-descriptions-item label="法人">{{ detail.legalPerson || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="注册资本">{{ capitalWan(detail.registeredCapital) }}</el-descriptions-item>
+              <el-descriptions-item label="业务范围">{{ detail.businessScope?.join(' / ') || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="主要联系人">{{ detail.contact || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="联系方式">{{ detail.phone || '—' }}</el-descriptions-item>
+            </el-descriptions>
+          </div>
+
+          <div class="panel">
+            <h4>关联合同 · 设备租赁台账</h4>
+            <div class="contract-kpi">
+              <div><span>可在租合同</span><b class="up">{{ detail.contracts.activeCount }}</b><em>份</em></div>
+              <div><span>合同总数（不含作废）</span><b>{{ detail.contracts.total }}</b><em>份</em></div>
+              <div><span>在租设备</span><b>{{ detail.contracts.activeAssetCount }}</b><em>台</em></div>
+            </div>
+            <el-table v-if="detail.contracts.rows.length" :data="detail.contracts.rows" size="small" border row-key="id">
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <el-table :data="row.assets" size="small" class="asset-sub">
+                    <el-table-column label="设备序列号" min-width="130">
+                      <template #default="{ row: a }"><a class="lnk" @click="goAsset(a.id)">{{ a.serialNo || ('#' + a.id) }}</a></template>
+                    </el-table-column>
+                    <el-table-column prop="category" label="品类" width="90" />
+                    <el-table-column prop="model" label="型号" min-width="140" show-overflow-tooltip />
+                    <el-table-column label="台账状态" width="110">
+                      <template #default="{ row: a }"><el-tag v-if="a.status" :type="(assetStatusType[a.status] as any) || 'info'" size="small">{{ a.status }}</el-tag></template>
+                    </el-table-column>
+                    <el-table-column label="单台月租" width="110" align="right">
+                      <template #default="{ row: a }">{{ a.allocRent != null ? money(a.allocRent) : '—' }}</template>
+                    </el-table-column>
+                  </el-table>
+                  <div v-if="!row.assets.length" class="mini" style="padding-left:12px">该合同未挂设备</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="合同编号" min-width="140">
+                <template #default="{ row }"><a class="lnk" @click="goContract(row.id)">{{ row.no }}</a></template>
+              </el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }"><el-tag :type="(contractStatusType[row.status] as any) || 'info'" size="small">{{ row.status }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="设备" width="70" align="center"><template #default="{ row }">{{ row.assets.length }} 台</template></el-table-column>
+              <el-table-column label="月租" width="100" align="right"><template #default="{ row }">{{ row.monthRent != null ? money(row.monthRent) : '—' }}</template></el-table-column>
+              <el-table-column label="租期" width="80" align="center"><template #default="{ row }">{{ row.termMonths ? row.termMonths + ' 月' : '—' }}</template></el-table-column>
+              <el-table-column label="起租 → 到期" width="190"><template #default="{ row }">{{ row.startDate || '—' }} → {{ row.endDate || '—' }}</template></el-table-column>
+            </el-table>
+            <el-empty v-else description="该客户暂无合同" :image-size="60" />
+            <div class="mini">可在租合同 = 状态为「生效」的合同；展开合同可看挂的设备及其在设备租赁台账中的当前状态。</div>
+          </div>
+
           <div class="grid2">
             <div class="panel">
               <h4>信用画像（多维）</h4>
@@ -266,6 +451,52 @@ onMounted(() => { loadPool(); loadPipeline() })
         </template>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 新增 / 编辑客户 -->
+    <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑客户信息' : '新增客户'" width="600px" :close-on-click-modal="false">
+      <el-form :model="form" label-width="110px" size="small" :disabled="saving">
+        <el-form-item label="公司名称" required>
+          <el-input v-model="form.name" maxlength="128" placeholder="工商注册全称" />
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="法人"><el-input v-model="form.legalPerson" maxlength="64" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="注册资本(万元)">
+              <el-input-number v-model="form.registeredCapitalWan" :min="0" :precision="2" :step="100" controls-position="right" style="width:100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="业务范围">
+          <el-checkbox-group v-model="form.businessScope">
+            <el-checkbox v-for="s in CUSTOMER_SCOPES" :key="s" :value="s">{{ s }}</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="主要联系人"><el-input v-model="form.contact" maxlength="64" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="联系方式"><el-input v-model="form.phone" maxlength="32" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="行业"><el-input v-model="form.industry" maxlength="32" placeholder="仓储/电商/物流…" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="阶段">
+              <el-select v-model="form.phase" style="width:100%">
+                <el-option v-for="p in phases" :key="p" :label="p" :value="p" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="saving" @click="formVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitForm">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -289,6 +520,15 @@ onMounted(() => { loadPool(); loadPipeline() })
 .sl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
 .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-top: 1px dashed #eee; }
 .tl-meta { color: #999; font-size: 12px; margin-left: 6px; }
+.scope-tag { margin: 0 4px 2px 0; }
+.mini-line { color: #999; font-size: 12px; }
+.mini-inline { color: #999; font-size: 12px; }
+.contract-kpi { display: flex; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+.contract-kpi > div { flex: 1; min-width: 150px; background: #f6f8fa; border-radius: 6px; padding: 10px 12px; display: flex; align-items: baseline; gap: 6px; }
+.contract-kpi span { color: #666; font-size: 12px; margin-right: auto; }
+.contract-kpi b { font-size: 22px; }
+.contract-kpi em { color: #999; font-size: 12px; font-style: normal; }
+.asset-sub { margin: 0 12px; width: calc(100% - 24px); }
 /* 看板 */
 .kanban { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
 .kcol { background: #f6f8fa; border-radius: 8px; padding: 8px; min-height: 120px; }

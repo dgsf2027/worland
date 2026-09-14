@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 客户池列表行。评级即时算;敏感财务字段按角色投影;下次跟进到期状态亮灯。
@@ -12,7 +13,23 @@ import java.time.LocalDate;
 public class CustomerPoolItem {
 
     private Long id;
+    /** 公司名称 */
     private String name;
+    private String legalPerson;
+    /** 注册资本(元) */
+    private BigDecimal registeredCapital;
+    private List<String> businessScope;
+    private String contact;
+    private String phone;
+    private String industry;
+
+    /** 可在租合同数(状态=生效) */
+    private Integer activeContractCount;
+    /** 合同总数(不含已作废) */
+    private Integer contractTotal;
+    /** 在租设备台数(生效合同挂的设备) */
+    private Integer activeAssetCount;
+
     private String phase;
     private String ownerName;
     private Long ownerUser;

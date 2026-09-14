@@ -14,20 +14,67 @@ import java.util.List;
 public class CustomerDetailResponse {
 
     private Long id;
+    /** 公司名称 */
     private String name;
+    private String legalPerson;
+    /** 注册资本(元) */
+    private BigDecimal registeredCapital;
+    private List<String> businessScope;
     private String contact;
     private String phone;
     private String industry;
     private String phase;
     private String valueTier;
+    private Long ownerUser;
     private String ownerName;
     private Boolean sensitiveMasked;
+
+    /** 关联合同 + 设备租赁台账 */
+    private ContractSummary contracts;
 
     private CreditProfile creditProfile;
     private ValueExposure valueExposure;
     private List<FollowupItem> timeline;
     /** 风控准入结论(建议 + 已落定) */
     private Admission admission;
+
+    @Data
+    public static class ContractSummary {
+        /** 可在租合同数(状态=生效) */
+        private Integer activeCount;
+        /** 合同总数(不含已作废) */
+        private Integer total;
+        /** 在租设备台数(生效合同挂的设备) */
+        private Integer activeAssetCount;
+        /** 合同列表(生效在前,含已作废,按签约倒序) */
+        private List<ContractRow> rows;
+    }
+
+    @Data
+    public static class ContractRow {
+        private Long id;
+        private String no;
+        /** 草稿/生效/到期转让/关闭/已作废 */
+        private String status;
+        private Integer termMonths;
+        private BigDecimal monthRent;
+        private LocalDate signDate;
+        private LocalDate startDate;
+        /** 到期日(即时算 = 起租日 + 租期月数 - 1 天) */
+        private LocalDate endDate;
+        private List<AssetRow> assets;
+    }
+
+    @Data
+    public static class AssetRow {
+        private Long id;
+        private String serialNo;
+        private String category;
+        private String model;
+        /** 设备台账状态 */
+        private String status;
+        private BigDecimal allocRent;
+    }
 
     @Data
     public static class CreditProfile {

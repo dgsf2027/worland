@@ -1,6 +1,7 @@
 package top.aole.rent.modules.customer.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,13 @@ import top.aole.rent.common.auth.DataScope;
 import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
+import top.aole.rent.common.util.BusinessScope;
+import top.aole.rent.modules.asset.domain.Asset;
+import top.aole.rent.modules.asset.mapper.AssetMapper;
+import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.contract.domain.ContractAsset;
+import top.aole.rent.modules.contract.mapper.ContractAssetMapper;
+import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.domain.CustomerFollowup;
 import top.aole.rent.modules.customer.domain.Opportunity;
@@ -32,6 +40,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,7 +71,14 @@ public class CustomerService {
     private final CustomerFollowupMapper followupMapper;
     private final OpportunityMapper opportunityMapper;
     private final RuleConfigService rules;
+    private final ContractMapper contractMapper;
+    private final ContractAssetMapper contractAssetMapper;
+    private final AssetMapper assetMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 可在租合同的状态口径 */
+    private static final String ACTIVE_CONTRACT = "生效";
+    private static final String VOID_CONTRACT = "已作废";
 
     private static final Set<String> VALID_PHASE =
             new HashSet<>(Arrays.asList("线索", "跟进", "商机", "成交", "在租", "流失"));
@@ -91,6 +109,7 @@ public class CustomerService {
         }
 
         List<Customer> all = customerMapper.selectList(qw);
+        ContractStats stats = contractStats(all.stream().map(Customer::getId).collect(Collectors.toSet()));
         List<CustomerPoolItem> items = new ArrayList<>();
         for (Customer c : all) {
             String r = rating(c);
@@ -100,6 +119,15 @@ public class CustomerService {
             CustomerPoolItem it = new CustomerPoolItem();
             it.setId(c.getId());
             it.setName(c.getName());
+            it.setLegalPerson(c.getLegalPerson());
+            it.setRegisteredCapital(c.getRegisteredCapital());
+            it.setBusinessScope(BusinessScope.split(c.getBusinessScope()));
+            it.setContact(c.getContact());
+            it.setPhone(c.getPhone());
+            it.setIndustry(c.getIndustry());
+            it.setActiveContractCount(stats.active.getOrDefault(c.getId(), 0));
+            it.setContractTotal(stats.total.getOrDefault(c.getId(), 0));
+            it.setActiveAssetCount(stats.activeAssets.getOrDefault(c.getId(), 0));
             it.setPhase(c.getPhase());
             it.setOwnerUser(c.getOwnerUser());
             it.setOwnerName(resolveUserName(c.getOwnerUser()));
@@ -197,13 +225,18 @@ public class CustomerService {
         CustomerDetailResponse r = new CustomerDetailResponse();
         r.setId(c.getId());
         r.setName(c.getName());
+        r.setLegalPerson(c.getLegalPerson());
+        r.setRegisteredCapital(c.getRegisteredCapital());
+        r.setBusinessScope(BusinessScope.split(c.getBusinessScope()));
         r.setContact(c.getContact());
         r.setPhone(c.getPhone());
         r.setIndustry(c.getIndustry());
         r.setPhase(c.getPhase());
         r.setValueTier(c.getValueTier());
+        r.setOwnerUser(c.getOwnerUser());
         r.setOwnerName(resolveUserName(c.getOwnerUser()));
         r.setSensitiveMasked(!seeCost);
+        r.setContracts(contractSummary(id));
 
         // 信用画像 + 评级
         if (c.getScoreProfit() != null) {
@@ -284,10 +317,20 @@ public class CustomerService {
             c.setPhase(normalizePhase(req.getPhase(), c.getPhase()));
         }
         customerMapper.updateById(c);
+        // updateById 跳过 null;工商信息允许清空,显式写一次
+        customerMapper.update(null, new LambdaUpdateWrapper<Customer>()
+                .eq(Customer::getId, id)
+                .set(Customer::getLegalPerson, c.getLegalPerson())
+                .set(Customer::getRegisteredCapital, c.getRegisteredCapital())
+                .set(Customer::getBusinessScope, c.getBusinessScope()));
     }
 
     private void applySave(Customer c, CustomerSaveRequest req) {
         c.setName(req.getName().trim());
+        c.setLegalPerson(req.getLegalPerson() == null || req.getLegalPerson().trim().isEmpty()
+                ? null : req.getLegalPerson().trim());
+        c.setRegisteredCapital(req.getRegisteredCapital());
+        c.setBusinessScope(BusinessScope.join(req.getBusinessScope()));
         c.setContact(req.getContact());
         c.setPhone(req.getPhone());
         c.setIndustry(req.getIndustry());
@@ -364,6 +407,108 @@ public class CustomerService {
         ad.setApprovedTargetIrr(seeCost ? c.getTargetIrr() : null);
         ad.setNote(c.getAdmissionNote());
         return ad;
+    }
+
+    // ============ 关联合同 / 设备租赁台账(即时算,不落快照) ============
+
+    /** 按客户批量统计:可在租合同数 / 合同总数(不含作废) / 在租设备台数。 */
+    private static class ContractStats {
+        final Map<Long, Integer> active = new HashMap<>();
+        final Map<Long, Integer> total = new HashMap<>();
+        final Map<Long, Integer> activeAssets = new HashMap<>();
+    }
+
+    private ContractStats contractStats(Set<Long> customerIds) {
+        ContractStats s = new ContractStats();
+        if (customerIds.isEmpty()) {
+            return s;
+        }
+        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .in(Contract::getCustomerId, customerIds)
+                .ne(Contract::getStatus, VOID_CONTRACT));
+        Map<Long, Long> activeContractToCustomer = new HashMap<>();
+        for (Contract c : contracts) {
+            s.total.merge(c.getCustomerId(), 1, Integer::sum);
+            if (ACTIVE_CONTRACT.equals(c.getStatus())) {
+                s.active.merge(c.getCustomerId(), 1, Integer::sum);
+                activeContractToCustomer.put(c.getId(), c.getCustomerId());
+            }
+        }
+        if (!activeContractToCustomer.isEmpty()) {
+            for (ContractAsset ca : contractAssetMapper.selectList(new LambdaQueryWrapper<ContractAsset>()
+                    .in(ContractAsset::getContractId, activeContractToCustomer.keySet()))) {
+                s.activeAssets.merge(activeContractToCustomer.get(ca.getContractId()), 1, Integer::sum);
+            }
+        }
+        return s;
+    }
+
+    /** 客户详情:合同列表(生效在前)+ 每份合同挂的设备(取设备台账当前状态)。 */
+    private CustomerDetailResponse.ContractSummary contractSummary(Long customerId) {
+        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .eq(Contract::getCustomerId, customerId)
+                .orderByDesc(Contract::getId));
+        Map<Long, List<ContractAsset>> linksByContract = new HashMap<>();
+        Map<Long, Asset> assets = new HashMap<>();
+        if (!contracts.isEmpty()) {
+            List<ContractAsset> links = contractAssetMapper.selectList(new LambdaQueryWrapper<ContractAsset>()
+                    .in(ContractAsset::getContractId, contracts.stream().map(Contract::getId).collect(Collectors.toList())));
+            linksByContract = links.stream().collect(Collectors.groupingBy(ContractAsset::getContractId));
+            Set<Long> assetIds = links.stream().map(ContractAsset::getAssetId).collect(Collectors.toSet());
+            if (!assetIds.isEmpty()) {
+                assets = assetMapper.selectBatchIds(assetIds).stream()
+                        .collect(Collectors.toMap(Asset::getId, a -> a));
+            }
+        }
+
+        CustomerDetailResponse.ContractSummary sum = new CustomerDetailResponse.ContractSummary();
+        List<CustomerDetailResponse.ContractRow> rows = new ArrayList<>();
+        int active = 0;
+        int total = 0;
+        int activeAssets = 0;
+        for (Contract c : contracts) {
+            List<ContractAsset> links = linksByContract.getOrDefault(c.getId(), Collections.emptyList());
+            if (!VOID_CONTRACT.equals(c.getStatus())) {
+                total++;
+            }
+            if (ACTIVE_CONTRACT.equals(c.getStatus())) {
+                active++;
+                activeAssets += links.size();
+            }
+            CustomerDetailResponse.ContractRow row = new CustomerDetailResponse.ContractRow();
+            row.setId(c.getId());
+            row.setNo(c.getNo());
+            row.setStatus(c.getStatus());
+            row.setTermMonths(c.getTermMonths());
+            row.setMonthRent(c.getMonthRent());
+            row.setSignDate(c.getSignDate());
+            row.setStartDate(c.getStartDate());
+            row.setEndDate(c.getStartDate() != null && c.getTermMonths() != null
+                    ? c.getStartDate().plusMonths(c.getTermMonths()).minusDays(1) : null);
+            List<CustomerDetailResponse.AssetRow> assetRows = new ArrayList<>();
+            for (ContractAsset link : links) {
+                Asset a = assets.get(link.getAssetId());
+                CustomerDetailResponse.AssetRow ar = new CustomerDetailResponse.AssetRow();
+                ar.setId(link.getAssetId());
+                ar.setAllocRent(link.getAllocRent());
+                if (a != null) {
+                    ar.setSerialNo(a.getSerialNo());
+                    ar.setCategory(a.getCategory());
+                    ar.setModel(a.getModel());
+                    ar.setStatus(a.getStatus());
+                }
+                assetRows.add(ar);
+            }
+            row.setAssets(assetRows);
+            rows.add(row);
+        }
+        // 生效在前,其余保持签约倒序
+        rows.sort(Comparator.comparing((CustomerDetailResponse.ContractRow x) -> !ACTIVE_CONTRACT.equals(x.getStatus())));
+        sum.setActiveCount(active);
+        sum.setTotal(total);
+        sum.setActiveAssetCount(activeAssets);
+        sum.setRows(rows);
+        return sum;
     }
 
     // ============ 派生计算 ============
