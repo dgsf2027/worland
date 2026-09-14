@@ -8,9 +8,10 @@ spring:
     name: worland-rent-backend
   servlet:
     multipart:
-      # 导入中心 Excel + 文件对象上传(应用层再按 rule import_limit 限流)
-      max-file-size: 10MB
-      max-request-size: 12MB
+      # 全局天花板 = 最大业务上限(供应商考察压缩包 1GB);各业务单文件上限在 FileStorageService 分别卡
+      # (未单独配置的仍为 10MB,导入中心再按 rule import_limit 限流)。上传先落临时盘,不占堆内存。
+      max-file-size: 1024MB
+      max-request-size: 1030MB
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver

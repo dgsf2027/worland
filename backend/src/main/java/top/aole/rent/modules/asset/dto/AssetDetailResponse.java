@@ -29,6 +29,8 @@ public class AssetDetailResponse {
     private Long contractId;
     private String remark;
     private Boolean sensitiveMasked;
+    /** 集采价是否已与工程量清单总价联动(清单有计价行时为 true,集采价不可手工改) */
+    private Boolean purchasePriceLinked;
 
     /** 派生·即时算:经营口径账面价(采购价-直线折旧占位·M3精确化) */
     private BigDecimal bookValue;
@@ -72,7 +74,7 @@ public class AssetDetailResponse {
 
     @Data
     public static class CostBreakdown {
-        /** 一级总成成本(名称→小计),敏感 */
+        /** 工程量清单一级项合价(名称→合价),敏感 */
         private List<CostItem> items;
         private BigDecimal total;
         /** 对比集采价识别虚高:集采价 - BOM 合计 */
@@ -99,10 +101,13 @@ public class AssetDetailResponse {
 
     @Data
     public static class FaultItem {
+        /** 对应配件节点 id(编辑入口) */
+        private Long bomId;
         private String name;
         private Integer faultCount;
         private Boolean repairable;
         private LocalDate warrantyUntil;
+        private Long supplierId;
         private String supplierName;
         /** 质保剩余天数(负=已过保) */
         private Long warrantyDaysLeft;

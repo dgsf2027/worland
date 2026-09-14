@@ -26,4 +26,6 @@ public class SupplierPoolItem {
     private BigDecimal firstPayRatio;
     /** 履约加权总分(即时算);无评分=null */
     private Integer scoreTotal;
+    /** 关联的合格考察记录 id;非考察建档=null */
+    private Long inspectionId;
 }

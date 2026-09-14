@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchSupplierPool, fetchSupplierDetail, fetchDependencyAlert, retireSupplier,
@@ -77,7 +78,22 @@ async function onRetire(row: SupplierPoolItem) {
   } catch { /* 取消 */ }
 }
 
-onMounted(() => { loadPool(); loadAlert() })
+// ---- 考察关联 ----
+const route = useRoute()
+const router = useRouter()
+function capitalWan(v?: number) {
+  return v === null || v === undefined ? '—' : (v / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' 万元'
+}
+function goInspection() {
+  router.push('/supplier-inspection')
+}
+
+onMounted(() => {
+  loadPool(); loadAlert()
+  // 从考察页「关联供应商」跳转过来:直接打开详情
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
+})
 </script>
 
 <template>
@@ -114,6 +130,7 @@ onMounted(() => { loadPool(); loadAlert() })
           <el-table-column label="供应商" min-width="130">
             <template #default="{ row }">
               <a class="lnk" @click="openDetail(row.id)">{{ row.name }}</a>
+              <el-tag v-if="row.inspectionId" type="success" size="small" effect="plain" class="insp-tag">考察合格</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="itemDesc" label="品类/配件" min-width="150" />
@@ -181,6 +198,23 @@ onMounted(() => { loadPool(); loadAlert() })
             </div>
           </div>
 
+          <div v-if="detail.inspection" class="panel insp-panel">
+            <h4>
+              考察记录（合格建档）
+              <el-button link type="primary" size="small" @click="goInspection">查看考察 →</el-button>
+            </h4>
+            <el-descriptions :column="3" border size="small">
+              <el-descriptions-item label="公司名称">{{ detail.inspection.companyName }}</el-descriptions-item>
+              <el-descriptions-item label="法人">{{ detail.inspection.legalPerson || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="注册资本">{{ capitalWan(detail.inspection.registeredCapital) }}</el-descriptions-item>
+              <el-descriptions-item label="业务范围">{{ detail.inspection.businessScope.join(' / ') || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="主要联系人">{{ detail.inspection.contact || '—' }} {{ detail.inspection.phone || '' }}</el-descriptions-item>
+              <el-descriptions-item label="考察记录">{{ detail.inspection.archiveCount }} 个压缩包</el-descriptions-item>
+              <el-descriptions-item label="判定">{{ detail.inspection.decidedByName || '—' }} · {{ (detail.inspection.decidedAt || '').replace('T', ' ').slice(0, 16) }}</el-descriptions-item>
+              <el-descriptions-item label="结论" :span="2">{{ detail.inspection.conclusion || '—' }}</el-descriptions-item>
+            </el-descriptions>
+          </div>
+
           <div class="panel">
             <h4>供货矩阵（整机 + 配件）</h4>
             <el-table :data="detail.supplyMatrix" border size="small">
@@ -231,5 +265,7 @@ onMounted(() => { loadPool(); loadAlert() })
 .wf .seg { color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-top: 1px dashed #eee; }
 .up { color: #2f9e44; } .warn { color: #e8a33d; }
+.insp-tag { margin-left: 6px; }
+.insp-panel { margin-bottom: 14px; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 </style>

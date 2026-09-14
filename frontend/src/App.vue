@@ -36,9 +36,10 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
         <el-menu-item index="/workbench">🏠 工作台（首页）</el-menu-item>
         <el-menu-item-group title="业务主线">
           <el-menu-item index="/quote">🧮 报价测算器</el-menu-item>
+          <el-menu-item index="/supplier-inspection">🔍 供应商 · 考察</el-menu-item>
           <el-menu-item index="/supplier">🏭 供应商 · 上游</el-menu-item>
           <el-menu-item index="/customer">🤝 客户 · CRM</el-menu-item>
-          <el-menu-item index="/asset">📦 设备 · 逐件台账</el-menu-item>
+          <el-menu-item index="/asset">📦 设备 · 租赁台账</el-menu-item>
           <el-menu-item index="/contract">📄 合同 · 租金计划</el-menu-item>
         </el-menu-item-group>
         <el-menu-item-group title="收支单据">

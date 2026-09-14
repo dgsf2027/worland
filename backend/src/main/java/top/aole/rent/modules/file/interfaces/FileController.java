@@ -3,7 +3,7 @@ package top.aole.rent.modules.file.interfaces;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -33,7 +33,7 @@ public class FileController {
 
     private final FileStorageService fileStorageService;
 
-    @ApiOperation("上传文件(bizType=contract/site_photo/asset_bom;ownerRole 可限定可见角色)")
+    @ApiOperation("上传文件(bizType=contract/site_photo/asset_bom/supplier_inspection;ownerRole 可限定可见角色)")
     @PostMapping
     public R<FileStorageService.UploadResp> upload(@RequestParam("file") MultipartFile file,
                                                    @RequestParam String bizType,
@@ -57,14 +57,16 @@ public class FileController {
 
     @ApiOperation("签名URL下载代理(验签+服务端鉴权;过期/篡改/越权 → 403)")
     @GetMapping("/download")
-    public ResponseEntity<ByteArrayResource> download(@RequestParam String token) {
+    public ResponseEntity<FileSystemResource> download(@RequestParam String token) {
         FileStorageService.DownloadPayload p = fileStorageService.download(token);
         String fn = p.getFileName() == null ? "file" : p.getFileName();
         ContentDisposition cd = ContentDisposition.attachment()
                 .filename(fn, StandardCharsets.UTF_8).build();
+        // 按文件流式输出(考察压缩包可达 1GB,不整读进内存)
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
                 .contentType(MediaType.parseMediaType(p.getContentType()))
-                .body(new ByteArrayResource(p.getBytes()));
+                .contentLength(p.getSize())
+                .body(new FileSystemResource(p.getPath()));
     }
 }

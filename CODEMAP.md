@@ -43,9 +43,9 @@ worland/
 ├── frontend/                             Vue 3 前端
 │   ├── vite.config.ts                    别名 @ / dev 代理 /api→8082 / 构建版本号注入
 │   └── src/
-│       ├── router/index.ts               22 条路由 + 未登录拦截（见 §4）
+│       ├── router/index.ts               23 条路由 + 未登录拦截（见 §4）
 │       ├── api/                          20 个后端接口封装
-│       ├── views/                        21 个页面组件
+│       ├── views/                        22 个页面组件
 │       └── utils/{request,session}.ts    axios 实例与本地会话
 ├── deploy/                               Docker 与上线产物（见 §6）
 ├── DESIGN_DOC.md  TODO.md  ADR-00{1,4}   设计 / 进度 / 架构决策（见 §8）
@@ -74,7 +74,7 @@ modules/<module>/
 | 模块 | 核心实体 | Controller 路径 | 定时任务 |
 |---|---|---|---|
 | `asset` | Asset / AssetBom / AssetEvent / AssetDepreciationLine | `/rent/assets` | — |
-| `supplier` | Supplier / SupplierSupply | `/rent/suppliers` | — |
+| `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
 | `contract` | Contract / ContractAsset / ContractChange / RentSchedule / DepositLedger | `/rent/contracts` | — |
 | `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase` | — |
@@ -132,6 +132,7 @@ modules/<module>/
 | `/roster` | `Roster.vue` | `roster.ts` | `roster` |
 | `/dashboard` | `Dashboard.vue` | 无（地基自检页） | — |
 | `/quote` | `Quote.vue` | `quote.ts` | `quote` |
+| `/supplier-inspection` | `SupplierInspection.vue` | `supplier.ts` + `asset.ts`（上传校验/下载） | `supplier` + `file` |
 | `/supplier` | `Supplier.vue` | `supplier.ts` | `supplier` |
 | `/customer` | `Customer.vue` | `customer.ts` | `customer` |
 | `/asset` | `Asset.vue` | `asset.ts` + `supplier.ts` | `asset` |
@@ -178,6 +179,8 @@ modules/<module>/
 | `V99__auth_user.sql` | 账号体系（邀请码注册） |
 | `V100__auth_user_portal_uid.sql` | 账号绑定门户 uid |
 | `V101__supplier_bank_details.sql` | 供应商银行账户信息 |
+| `V102__asset_bom_subtotal_override.sql` | 清单项手动合价列 |
+| `V103__supplier_inspection.sql` | 供应商考察（合格自动入供应商池并关联） |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 
@@ -208,6 +211,8 @@ modules/<module>/
 
 - **Flyway 已入库的迁移文件禁止修改**，加字段只能新增版本号。
 - **派生字段必须有唯一写手**：`asset.book_value` 由折旧计提定时任务回填，禁止业务代码直写；设备状态由 `asset_event` 事件流驱动。
+- **集采价随工程量清单联动**：清单一级项有计价时，`asset.purchase_price` 由 `AssetService.syncPurchasePriceFromBom` 回写为清单总价，设备编辑不再接受手填。
+- **上传大小按业务类型卡**：`FileStorageService` 里配置，考察压缩包 1GB、清单附件 50MB、其余 10MB；`application.yml` 与 nginx 的全局上限须不小于最大值。
 - **LLM key 只从 `.env` 注入不入库**；`llm.base-url` / `api-key` / `model` 三项全非空才真调外部模型，否则自动回退 mock，零外呼。
 
 ### 6.4 部署产物

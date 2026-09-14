@@ -19,16 +19,18 @@ import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
+import top.aole.rent.modules.asset.dto.BomFaultRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
+import top.aole.rent.modules.asset.dto.BomPricingRequest;
 import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.service.AssetService;
 
 /**
- * 设备 · 逐件台账(M1-06/07)。台账/详情(配件树BOM/成本拆解/残值/故障档案/单台收益/状态机)/CRUD/状态流转/BOM 维护。
+ * 设备 · 租赁台账(M1-06/07)。台账/详情(工程量清单计价表/成本拆解/残值/故障档案/单台收益/状态机)/CRUD/状态流转/清单维护。
  * 敏感财务字段(集采价/账面价/成本)在 {@link AssetService} 按角色投影(GP/LP 打码)。
  */
-@Api(tags = "设备·逐件台账")
+@Api(tags = "设备·租赁台账")
 @RestController
 @RequestMapping("/rent/assets")
 @RequiredArgsConstructor
@@ -97,6 +99,20 @@ public class AssetController {
     @PutMapping("/bom/{bomId}")
     public R<Void> updateBom(@PathVariable Long bomId, @Validated @RequestBody BomNodeRequest req) {
         assetService.updateBom(bomId, req);
+        return R.ok();
+    }
+
+    @ApiOperation("工程量清单改数量/单价(合价自动计算,集采价随清单总价联动)")
+    @PutMapping("/bom/{bomId}/pricing")
+    public R<Void> updateBomPricing(@PathVariable Long bomId, @Validated @RequestBody BomPricingRequest req) {
+        assetService.updateBomPricing(bomId, req);
+        return R.ok();
+    }
+
+    @ApiOperation("故障档案编辑(按配件:故障次数/可维修/质保到期/质保方)")
+    @PutMapping("/bom/{bomId}/fault")
+    public R<Void> updateBomFault(@PathVariable Long bomId, @Validated @RequestBody BomFaultRequest req) {
+        assetService.updateBomFault(bomId, req);
         return R.ok();
     }
 

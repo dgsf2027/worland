@@ -3,8 +3,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
-  addBom, updateBom, deleteBom, uploadBomAttachment, fetchBomAttachments, downloadBomAttachmentBlob,
-  type AssetListItem, type AssetDetail, type BomNode, type BomAttachment,
+  addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
+  uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile,
+  BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB,
+  type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem,
 } from '@/api/asset'
 import { createSupplier, fetchSupplierPool, type SupplierPoolItem } from '@/api/supplier'
 
@@ -208,7 +210,7 @@ async function submitAsset() {
 const bomDialogVisible = ref(false)
 const bomDialogMode = ref<'create' | 'edit'>('create')
 const bomForm = reactive<Record<string, any>>({
-  id: undefined, parentId: undefined, parentName: '一级总成', name: '', qty: 1,
+  id: undefined, parentId: undefined, parentName: '一级项', name: '', qty: 1,
   unitCost: undefined, subtotalOverride: null, supplierId: undefined, lifeYears: undefined,
   warrantyUntil: undefined, repairable: true, faultCount: 0,
   residualRate: undefined, remark: '',
@@ -238,11 +240,23 @@ async function loadBomAttachments(bomId?: number) {
   }
 }
 
+const bomAttachmentAccept = BOM_ATTACHMENT_EXTS.map((e) => '.' + e).join(',')
+const bomAttachmentHint = `支持 Word/Excel/PPT/PDF/压缩文件（${BOM_ATTACHMENT_EXTS.join('/')}），单个不超过 ${BOM_ATTACHMENT_MAX_MB}MB`
+
+function beforeBomFileUpload(file: File) {
+  const err = checkUploadFile(file, BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB)
+  if (err) {
+    ElMessage.warning(err)
+    return false
+  }
+  return true
+}
+
 async function uploadBomFileRequest(options: any) {
   const file = options.file as File
   if (!bomForm.id) {
     queuedBomFiles.value.push(file)
-    ElMessage.info('文件已暂存，保存 BOM 节点后自动上传')
+    ElMessage.info('文件已暂存，保存清单项后自动上传')
     return
   }
   bomUploadCount.value += 1
@@ -260,25 +274,122 @@ function removeQueuedBomFile(index: number) {
 }
 
 async function downloadBomAttachment(file: BomAttachment) {
-  const blob = await downloadBomAttachmentBlob(file.id)
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = file.fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 60000)
+  await saveFile(file.id, file.fileName)
+}
+
+// ---- 工程量清单：行内改数量/单价 ----
+const pricingRowId = ref<number | null>(null)
+const pricingForm = reactive<Record<string, any>>({ qty: 1, unitCost: undefined })
+const pricingSaving = ref(false)
+
+function startPricing(row: BomNode) {
+  pricingRowId.value = row.id
+  pricingForm.qty = row.qty ?? 1
+  pricingForm.unitCost = row.unitCost ?? undefined
+}
+
+function cancelPricing() {
+  pricingRowId.value = null
+}
+
+async function savePricing(row: BomNode) {
+  if (!detail.value) return
+  if (!Number.isFinite(pricingForm.qty) || pricingForm.qty < 0.01) {
+    ElMessage.warning('数量须大于零')
+    return
+  }
+  if (row.subtotalOverride != null) {
+    await ElMessageBox.confirm('该项当前是手动合价，保存后将改为按「数量 × 单价」自动计算，确认继续？', '改数量/单价', { type: 'warning' })
+  }
+  pricingSaving.value = true
+  try {
+    await updateBomPricing(row.id, { qty: pricingForm.qty, unitCost: pricingForm.unitCost ?? null })
+    pricingRowId.value = null
+    ElMessage.success(row.parentId ? '已保存（清单总价按一级项汇总，下级项不改变总价）' : '已保存，集采价已按清单总价同步')
+    await openDetail(detail.value.id)
+    await loadList()
+  } finally {
+    pricingSaving.value = false
+  }
+}
+
+const pricingPreview = computed(() =>
+  Math.round(Number(pricingForm.qty || 0) * Number(pricingForm.unitCost || 0) * 100) / 100,
+)
+
+// ---- 工程量清单：附件 ----
+const attachDialogVisible = ref(false)
+const attachRow = ref<BomNode | null>(null)
+
+async function openAttachments(row: BomNode) {
+  attachRow.value = row
+  bomAttachments.value = []
+  attachDialogVisible.value = true
+  await loadBomAttachments(row.id)
+}
+
+async function uploadAttachRequest(options: any) {
+  if (!attachRow.value) return
+  bomUploadCount.value += 1
+  try {
+    await uploadBomAttachment(attachRow.value.id, options.file as File)
+    await loadBomAttachments(attachRow.value.id)
+    ElMessage.success('附件上传成功')
+  } finally {
+    bomUploadCount.value -= 1
+  }
+}
+
+// ---- 故障档案：编辑 ----
+const faultDialogVisible = ref(false)
+const faultSaving = ref(false)
+const faultForm = reactive<Record<string, any>>({
+  bomId: undefined, name: '', faultCount: 0, repairable: true, warrantyUntil: undefined, supplierId: undefined,
+})
+
+function openEditFault(row: FaultItem) {
+  Object.assign(faultForm, {
+    bomId: row.bomId,
+    name: row.name,
+    faultCount: row.faultCount ?? 0,
+    repairable: row.repairable ?? true,
+    warrantyUntil: row.warrantyUntil,
+    supplierId: row.supplierId,
+  })
+  faultDialogVisible.value = true
+}
+
+async function submitFault() {
+  if (!detail.value || !faultForm.bomId) return
+  if (!Number.isInteger(faultForm.faultCount) || faultForm.faultCount < 0) {
+    ElMessage.warning('故障次数须为非负整数')
+    return
+  }
+  faultSaving.value = true
+  try {
+    await updateBomFault(faultForm.bomId, {
+      faultCount: faultForm.faultCount,
+      repairable: faultForm.repairable,
+      warrantyUntil: faultForm.warrantyUntil || null,
+      supplierId: faultForm.supplierId || null,
+    })
+    faultDialogVisible.value = false
+    ElMessage.success('故障档案已更新')
+    await openDetail(detail.value.id)
+  } finally {
+    faultSaving.value = false
+  }
 }
 
 function resetBomForm(parent?: BomNode) {
   Object.assign(bomForm, {
     id: undefined,
     parentId: parent?.id,
-    parentName: parent?.name || '一级总成',
+    parentName: parent?.name || '一级项',
     name: '',
     qty: 1,
     unitCost: undefined,
+    subtotalOverride: null,
     supplierId: undefined,
     lifeYears: undefined,
     warrantyUntil: undefined,
@@ -302,7 +413,7 @@ async function openEditBom(row: BomNode) {
   Object.assign(bomForm, {
     id: row.id,
     parentId: row.parentId,
-    parentName: row.parentId ? '上级节点 #' + row.parentId : '一级总成',
+    parentName: row.parentId ? '上级项 #' + row.parentId : '一级项',
     name: row.name,
     qty: row.qty ?? 1,
     unitCost: row.unitCost,
@@ -334,7 +445,7 @@ function applySupplierToBomForm(supplierId?: number) {
 async function submitBom() {
   if (bomSaving.value || bomUploading.value) return
   if (!detail.value || !bomForm.name.trim()) {
-    ElMessage.warning('配件/模块名称必填')
+    ElMessage.warning('项目名称必填')
     return
   }
   if (!Number.isFinite(bomForm.qty) || bomForm.qty < 0.01 || !Number.isInteger(bomForm.faultCount) || bomForm.faultCount < 0) {
@@ -373,9 +484,10 @@ async function submitBom() {
         return
       }
     }
-    ElMessage.success('BOM 已保存')
+    ElMessage.success('清单项已保存')
     bomDialogVisible.value = false
     await openDetail(assetId)
+    await loadList()
   } finally {
     bomSaving.value = false
   }
@@ -384,13 +496,14 @@ async function submitBom() {
 async function removeBom(row: BomNode) {
   if (!detail.value) return
   await ElMessageBox.confirm(
-    '删除「' + row.name + '」将同时删除其全部下级部件，确认继续？',
-    '删除 BOM 节点',
+    '删除「' + row.name + '」将同时删除其全部下级项，确认继续？',
+    '删除清单项',
     { type: 'warning' },
   )
   await deleteBom(row.id)
-  ElMessage.success('BOM 节点已删除')
+  ElMessage.success('清单项已删除')
   await openDetail(detail.value.id)
+  await loadList()
 }
 
 onMounted(() => {
@@ -465,31 +578,57 @@ onMounted(() => {
           <span v-if="!(transitions[detail.status] || []).length" style="color:#999">终态,无可流转</span>
         </div>
 
-        <!-- 配件树 BOM -->
+        <!-- 工程量清单计价表 -->
         <div class="block-title block-title-row">
-          <span>配件树 BOM(成本拆解)</span>
-          <el-button v-if="!detail.sensitiveMasked" type="primary" link size="small" @click="openAddBom()">+ 新增一级部件</el-button>
+          <span>工程量清单计价表</span>
+          <el-button v-if="!detail.sensitiveMasked" type="primary" link size="small" @click="openAddBom()">+ 新增清单项</el-button>
         </div>
         <el-table :data="detail.bom" row-key="id" default-expand-all size="small"
           :tree-props="{ children: 'children' }" border>
-          <el-table-column prop="name" label="配件/模块" min-width="160" />
-          <el-table-column prop="qty" label="数量" width="70" />
-          <el-table-column label="单价🔒" width="100"><template #default="{ row }">{{ money(row.unitCost) }}</template></el-table-column>
-          <el-table-column label="小计🔒" width="100"><template #default="{ row }">{{ money(row.subtotal) }}</template></el-table-column>
-          <el-table-column prop="supplierName" label="供应商" width="110"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
-          <el-table-column prop="faultCount" label="故障" width="70">
-            <template #default="{ row }"><el-tag v-if="row.faultCount > 0" type="danger" size="small">{{ row.faultCount }}</el-tag><span v-else>0</span></template>
-          </el-table-column>
-          <el-table-column prop="warrantyUntil" label="质保到" width="110"><template #default="{ row }">{{ row.warrantyUntil || '—' }}</template></el-table-column>
-          <el-table-column v-if="!detail.sensitiveMasked" label="操作" width="230" fixed="right">
+          <el-table-column prop="name" label="项目名称" min-width="160" />
+          <el-table-column label="数量" width="120">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="openAddBom(row)">新增下级</el-button>
-              <el-button link size="small" @click="openEditBom(row)">编辑</el-button>
-              <el-button link type="success" size="small" @click="openEditBom(row)">上传文件</el-button>
-              <el-button link type="danger" size="small" @click="removeBom(row)">删除</el-button>
+              <el-input-number v-if="pricingRowId === row.id" v-model="pricingForm.qty" :min="0.01" :precision="2" :step="1"
+                size="small" controls-position="right" style="width:100%" />
+              <span v-else>{{ row.qty }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="单价🔒" width="140">
+            <template #default="{ row }">
+              <el-input-number v-if="pricingRowId === row.id" v-model="pricingForm.unitCost" :min="0" :precision="2" :step="100"
+                size="small" controls-position="right" style="width:100%" />
+              <span v-else>{{ money(row.unitCost) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="合价🔒" width="110">
+            <template #default="{ row }">
+              <span v-if="pricingRowId === row.id">{{ money(pricingPreview) }}</span>
+              <span v-else>{{ money(row.subtotal) }}<el-tag v-if="row.subtotalOverride != null" size="small" type="info" class="manual-tag">手动</el-tag></span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="supplierName" label="供应商" width="110"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
+          <el-table-column v-if="!detail.sensitiveMasked" label="操作" width="290" fixed="right">
+            <template #default="{ row }">
+              <template v-if="pricingRowId === row.id">
+                <el-button link type="primary" size="small" :loading="pricingSaving" @click="savePricing(row)">保存</el-button>
+                <el-button link size="small" :disabled="pricingSaving" @click="cancelPricing">取消</el-button>
+              </template>
+              <template v-else>
+                <el-button link type="primary" size="small" :disabled="pricingRowId !== null" @click="startPricing(row)">改数量/单价</el-button>
+                <el-button link type="success" size="small" @click="openAttachments(row)">附件</el-button>
+                <el-button link size="small" @click="openAddBom(row)">新增下级</el-button>
+                <el-button link size="small" @click="openEditBom(row)">编辑</el-button>
+                <el-button link type="danger" size="small" @click="removeBom(row)">删除</el-button>
+              </template>
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="detail.costBreakdown" class="boq-total">
+          清单总价 <b>{{ money(detail.costBreakdown.total) }}</b>
+          <el-tag v-if="detail.purchasePriceLinked" type="success" size="small">已同步为集采价</el-tag>
+          <span v-else class="upload-tip">清单暂无计价项，集采价仍按手工填写</span>
+          <span class="upload-tip">（总价按一级项合价汇总）</span>
+        </div>
 
         <!-- 成本 / 残值 拆解 -->
         <el-row :gutter="12" v-if="detail.costBreakdown || detail.residualBreakdown">
@@ -525,6 +664,11 @@ onMounted(() => {
             <span v-else>—</span>
           </template></el-table-column>
           <el-table-column prop="supplierName" label="质保方" width="110"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
+          <el-table-column v-if="!detail.sensitiveMasked" label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEditFault(row)">编辑</el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <!-- 单台收益 -->
@@ -601,7 +745,11 @@ onMounted(() => {
           <el-input-number v-model="assetForm.marketPrice" :min="0" :step="1000" style="width:100%" />
         </el-form-item>
         <el-form-item label="集采价(元)">
-          <el-input-number v-model="assetForm.purchasePrice" :min="0" :step="1000" style="width:100%" />
+          <el-input-number v-model="assetForm.purchasePrice" :min="0" :step="1000" style="width:100%"
+            :disabled="assetDialogMode === 'edit' && !!detail?.purchasePriceLinked" />
+          <span v-if="assetDialogMode === 'edit' && detail?.purchasePriceLinked" class="upload-tip">
+            已与工程量清单总价联动，请在清单里改数量/单价
+          </span>
         </el-form-item>
         <el-form-item label="月替代人工(元)">
           <el-input-number v-model="assetForm.monthlyLaborValue" :min="0" :step="500" style="width:100%" />
@@ -637,18 +785,18 @@ onMounted(() => {
         <el-button type="primary" :loading="supplierSaving" @click="submitSupplier">保存供应商</el-button>
       </template>
     </el-dialog>
-    <!-- BOM 节点维护弹窗 -->
+    <!-- 清单项维护弹窗 -->
     <el-dialog
       v-model="bomDialogVisible"
-      :title="bomDialogMode === 'edit' ? '编辑 BOM 节点' : '新增 BOM 节点'"
+      :title="bomDialogMode === 'edit' ? '编辑清单项' : '新增清单项'"
       width="680px"
       :close-on-click-modal="false"
       :close-on-press-escape="!bomSaving && !bomUploading"
       :show-close="!bomSaving && !bomUploading"
     >
       <el-form :model="bomForm" label-width="120px" size="small" :disabled="bomSaving || bomUploading">
-        <el-form-item label="父级节点"><el-input :model-value="bomForm.parentName" disabled /></el-form-item>
-        <el-form-item label="配件/模块" required><el-input v-model="bomForm.name" maxlength="128" /></el-form-item>
+        <el-form-item label="上级项"><el-input :model-value="bomForm.parentName" disabled /></el-form-item>
+        <el-form-item label="项目名称" required><el-input v-model="bomForm.name" maxlength="128" /></el-form-item>
         <el-form-item label="供应商">
           <el-select
             v-model="bomForm.supplierId"
@@ -682,10 +830,10 @@ onMounted(() => {
             <el-form-item label="单价(元)"><el-input-number v-model="bomForm.unitCost" :min="0" :precision="2" :step="100" @change="resetBomSubtotal" style="width:100%" /></el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="小计(元)">
+            <el-form-item label="合价(元)">
               <el-input-number v-model="bomSubtotal" :min="0" :precision="2" style="width:100%" />
               <el-button v-if="bomForm.subtotalOverride != null" link type="primary" @click="resetBomSubtotal">恢复自动计算</el-button>
-              <span class="upload-tip">{{ bomForm.subtotalOverride == null ? '自动：数量 × 单价' : '手动小计；修改数量或单价后恢复自动计算' }}</span>
+              <span class="upload-tip">{{ bomForm.subtotalOverride == null ? '自动：数量 × 单价' : '手动合价；修改数量或单价后恢复自动计算' }}</span>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -712,12 +860,14 @@ onMounted(() => {
           <div class="bom-attachment-box">
             <el-upload
               :http-request="uploadBomFileRequest"
+              :before-upload="beforeBomFileUpload"
+              :accept="bomAttachmentAccept"
               :show-file-list="false"
               multiple
             >
-              <el-button type="primary" plain :loading="bomUploading">上传文件</el-button>
+              <el-button type="primary" plain :loading="bomUploading">上传附件</el-button>
             </el-upload>
-            <div class="upload-tip">新建节点可先选文件，保存后自动上传；已建节点会立即上传。</div>
+            <div class="upload-tip">{{ bomAttachmentHint }}。新建清单项可先选文件，保存后自动上传；已建项会立即上传。</div>
             <div v-if="queuedBomFiles.length" class="attachment-list">
               <el-tag v-for="(file, index) in queuedBomFiles" :key="file.name + index" closable @close="removeQueuedBomFile(index)">
                 待上传：{{ file.name }}
@@ -742,6 +892,53 @@ onMounted(() => {
       <template #footer>
         <el-button :disabled="bomSaving || bomUploading" @click="bomDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="bomSaving" :disabled="bomUploading" @click="submitBom">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 清单项附件弹窗 -->
+    <el-dialog v-model="attachDialogVisible" :title="'附件 · ' + (attachRow?.name || '')" width="560px"
+      :close-on-press-escape="!bomUploading" :show-close="!bomUploading">
+      <el-upload
+        :http-request="uploadAttachRequest"
+        :before-upload="beforeBomFileUpload"
+        :accept="bomAttachmentAccept"
+        :show-file-list="false"
+        multiple
+      >
+        <el-button type="primary" :loading="bomUploading">上传附件</el-button>
+      </el-upload>
+      <div class="upload-tip">{{ bomAttachmentHint }}</div>
+      <div v-loading="bomFilesLoading" class="attachment-list attachment-col">
+        <el-button v-for="file in bomAttachments" :key="file.id" link type="primary" @click="downloadBomAttachment(file)">
+          {{ file.fileName }}（{{ Math.max(1, Math.round(file.size / 1024)) }} KB · {{ file.uploaderName || '—' }}）
+        </el-button>
+        <span v-if="!bomFilesLoading && !bomAttachments.length" class="empty-attachment">暂无附件</span>
+      </div>
+      <template #footer>
+        <el-button :disabled="bomUploading" @click="attachDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 故障档案编辑弹窗 -->
+    <el-dialog v-model="faultDialogVisible" :title="'编辑故障档案 · ' + faultForm.name" width="520px">
+      <el-form :model="faultForm" label-width="110px" size="small" :disabled="faultSaving">
+        <el-form-item label="故障次数" required>
+          <el-input-number v-model="faultForm.faultCount" :min="0" :precision="0" :step="1" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="可维修"><el-switch v-model="faultForm.repairable" /></el-form-item>
+        <el-form-item label="质保到期">
+          <el-date-picker v-model="faultForm.warrantyUntil" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="质保方">
+          <el-select v-model="faultForm.supplierId" filterable clearable :loading="suppliersLoading" placeholder="选择供应商" style="width:100%">
+            <el-option v-for="supplier in suppliers" :key="supplier.id" :label="supplier.name" :value="supplier.id" />
+          </el-select>
+        </el-form-item>
+        <div class="upload-tip fault-tip">维保工单完工时也会自动累加故障次数，这里用于人工校正。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="faultSaving" @click="faultDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="faultSaving" @click="submitFault">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -777,4 +974,10 @@ onMounted(() => {
 .upload-tip { margin-top: 6px; color: #909399; font-size: 12px; line-height: 1.5; }
 .attachment-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px; align-items: center; }
 .empty-attachment { color: #c0c4cc; font-size: 12px; }
+.attachment-col { flex-direction: column; align-items: flex-start; }
+.attachment-col .el-button + .el-button { margin-left: 0; }
+.boq-total { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
+.boq-total .upload-tip { margin-top: 0; }
+.manual-tag { margin-left: 4px; }
+.fault-tip { margin-left: 110px; }
 </style>

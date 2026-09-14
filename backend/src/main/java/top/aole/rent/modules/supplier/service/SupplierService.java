@@ -50,6 +50,7 @@ public class SupplierService {
     private final SupplierSupplyMapper supplyMapper;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    private final SupplierInspectionService inspectionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 可用状态(计入单一依赖统计) */
@@ -70,6 +71,7 @@ public class SupplierService {
         List<SupplierSupply> allSupplies = supplyMapper.selectList(new LambdaQueryWrapper<SupplierSupply>());
         Map<Long, List<SupplierSupply>> bySupplier = allSupplies.stream()
                 .collect(Collectors.groupingBy(SupplierSupply::getSupplierId));
+        Map<Long, Long> inspectionBySupplier = inspectionService.passedInspectionIdBySupplier();
 
         List<SupplierPoolItem> items = new ArrayList<>();
         for (Supplier s : suppliers) {
@@ -112,6 +114,7 @@ public class SupplierService {
                 item.setFirstPayRatio(canSeeCost ? primary.getFirstPayRatio() : null);
             }
             item.setScoreTotal(scoreTotal);
+            item.setInspectionId(inspectionBySupplier.get(s.getId()));
             items.add(item);
         }
 
@@ -147,6 +150,7 @@ public class SupplierService {
         r.setMainCategory(s.getMainCategory());
         r.setRemark(s.getRemark());
         r.setCostMasked(!canSeeCost);
+        r.setInspection(inspectionService.latestPassedFor(id));
 
         // 履约雷达
         if (primary != null && primary.getScoreQuality() != null) {

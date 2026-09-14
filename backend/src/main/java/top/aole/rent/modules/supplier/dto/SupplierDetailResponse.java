@@ -33,6 +33,9 @@ public class SupplierDetailResponse {
     /** 敏感字段是否已按角色打码(LP 不可见成本/价格构成) */
     private Boolean costMasked;
 
+    /** 关联的合格考察记录(考察合格建档的供应商才有;否则 null) */
+    private InspectionDtos.Item inspection;
+
     @Data
     public static class ScoreRadar {
         private Integer quality;

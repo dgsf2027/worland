@@ -16,6 +16,7 @@ import top.aole.rent.modules.asset.domain.AssetBom;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
+import top.aole.rent.modules.supplier.service.SupplierInspectionService;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -30,8 +31,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -54,9 +62,25 @@ public class FileStorageService {
     private final FileObjectMapper fileObjectMapper;
     private final AssetBomMapper assetBomMapper;
     private final RuleConfigService ruleConfigService;
+    private final SupplierInspectionService supplierInspectionService;
 
     @Value("${rent.storage.dir:storage}")
     private String storageDir;
+
+    private static final long MB = 1024L * 1024L;
+    /** 未单独配置的业务类型沿用原全局上限 */
+    private static final long DEFAULT_MAX_BYTES = 10 * MB;
+    /** 业务类型 → 单文件上限(字节);spring.servlet.multipart 为全局天花板,须 ≥ 此处最大值 */
+    private static final Map<String, Long> MAX_BYTES = new HashMap<>();
+    /** 业务类型 → 允许的扩展名(小写);未配置 = 不限格式 */
+    private static final Map<String, Set<String>> ALLOWED_EXT = new HashMap<>();
+    static {
+        MAX_BYTES.put("asset_bom", 50 * MB);
+        ALLOWED_EXT.put("asset_bom", new HashSet<>(Arrays.asList(
+                "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "zip", "rar", "7z")));
+        MAX_BYTES.put(SupplierInspectionService.BIZ_TYPE, 1024 * MB);
+        ALLOWED_EXT.put(SupplierInspectionService.BIZ_TYPE, new HashSet<>(Arrays.asList("zip", "rar", "7z")));
+    }
 
     /** 进程内签名密钥(占位期随机;真上线走 KMS)。 */
     private final byte[] signSecret = newSecret();
@@ -89,10 +113,11 @@ public class FileStorageService {
         private int ttlSeconds;
     }
 
-    /** 下载载荷(经服务端鉴权代理返回) */
+    /** 下载载荷(经服务端鉴权代理返回;按路径流式输出,大文件不整读进内存) */
     @Data
     public static class DownloadPayload {
-        private byte[] bytes;
+        private Path path;
+        private long size;
         private String fileName;
         private String contentType;
     }
@@ -105,7 +130,7 @@ public class FileStorageService {
             throw new BizException(400, "请上传文件");
         }
         if (bizType == null || bizType.isEmpty()) {
-            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom)");
+            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom/supplier_inspection)");
         }
         if ("asset_bom".equals(bizType)) {
             if (!DataScope.canSeeCost(u.getRole())) {
@@ -116,6 +141,10 @@ public class FileStorageService {
                 throw new BizException(404, "请先保存有效的 BOM 节点再上传附件");
             }
         }
+        if (SupplierInspectionService.BIZ_TYPE.equals(bizType)) {
+            supplierInspectionService.assertCanAttach(bizId);
+        }
+        checkFormatAndSize(file, bizType);
         String key = UUID.randomUUID().toString().replace("-", "");
         Path dir = Paths.get(storageDir, bizType);
         try {
@@ -203,15 +232,39 @@ public class FileStorageService {
         FileObject fo = require(fileId);
         authorize(fo, UserContext.require()); // token 有效后再过行级/角色隔离
 
-        Path target = Paths.get(storageDir, fo.getStoragePath());
+        Path target = Paths.get(storageDir, fo.getStoragePath()).toAbsolutePath();
+        if (!Files.isRegularFile(target)) {
+            throw new BizException(404, "文件已不存在:" + fo.getStorageKey());
+        }
         try {
             DownloadPayload p = new DownloadPayload();
-            p.setBytes(Files.readAllBytes(target.toAbsolutePath()));
+            p.setPath(target);
+            p.setSize(Files.size(target));
             p.setFileName(fo.getFileName());
             p.setContentType(fo.getContentType() == null ? "application/octet-stream" : fo.getContentType());
             return p;
         } catch (IOException e) {
             throw new BizException(404, "文件已不存在:" + fo.getStorageKey());
+        }
+    }
+
+    // ============================== 格式 / 大小校验 ==============================
+
+    private void checkFormatAndSize(MultipartFile file, String bizType) {
+        long max = MAX_BYTES.getOrDefault(bizType, DEFAULT_MAX_BYTES);
+        if (file.getSize() > max) {
+            throw new BizException(400, "文件超过大小上限 " + (max / MB) + "MB");
+        }
+        Set<String> allowed = ALLOWED_EXT.get(bizType);
+        if (allowed == null) {
+            return;
+        }
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
+        int dot = name.lastIndexOf('.');
+        String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+        if (!allowed.contains(ext)) {
+            throw new BizException(400, "不支持的文件格式「" + (ext.isEmpty() ? "无扩展名" : ext)
+                    + "」,仅支持 " + String.join("/", new TreeSet<>(allowed)));
         }
     }
 

@@ -19,7 +19,9 @@ import top.aole.rent.modules.asset.domain.AssetEvent;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
+import top.aole.rent.modules.asset.dto.BomFaultRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
+import top.aole.rent.modules.asset.dto.BomPricingRequest;
 import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
@@ -62,6 +64,9 @@ import java.util.stream.Collectors;
  *   <li>self_purchase_payback(自购回本期·月) 即时算 = 市场价 / 月替代人工价值。</li>
  * </ul>
  * <p>字段级隔离:集采价/账面价/成本拆解/回报率 对 GP/LP 打码(seeCost=false → null + masked)。
+ * <p><b>集采价 ↔ 工程量清单联动</b>:清单任一一级项已计价时,{@code purchase_price} = Σ一级项合价,
+ * 由 {@link #syncPurchasePriceFromBom} 在清单增删改后回写(@owner=清单维护);此时设备编辑不接受手填集采价。
+ * 清单无计价行时集采价仍手工/采购入库写入。
  */
 @Slf4j
 @Service
@@ -173,6 +178,7 @@ public class AssetService {
                 .eq(AssetBom::getAssetId, id)
                 .orderByAsc(AssetBom::getId));
         r.setBom(buildBomTree(boms, seeCost));
+        r.setPurchasePriceLinked(bomTotalIfPriced(boms) != null);
         r.setCostBreakdown(seeCost ? costBreakdown(a, boms) : null);
         r.setResidualBreakdown(residualBreakdown(a, boms));
         r.setFaultArchive(faultArchive(boms));
@@ -209,6 +215,11 @@ public class AssetService {
             }
         }
         applySave(a, req);
+        // 清单已计价 → 集采价由清单总价决定,忽略手填值
+        BigDecimal linked = bomTotalIfPriced(loadBoms(id));
+        if (linked != null) {
+            a.setPurchasePrice(linked);
+        }
         assetMapper.update(a, new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, id)
                 .set(req.getSupplierId() == null, Asset::getSupplierId, null));
@@ -553,6 +564,7 @@ public class AssetService {
         b.setAssetId(assetId);
         applyBom(b, req);
         bomMapper.insert(b);
+        syncPurchasePriceFromBom(assetId);
         return b.getId();
     }
 
@@ -596,6 +608,33 @@ public class AssetService {
                 .set(AssetBom::getWarrantyUntil, b.getWarrantyUntil())
                 .set(AssetBom::getResidualRate, b.getResidualRate())
                 .set(AssetBom::getRemark, b.getRemark()));
+        syncPurchasePriceFromBom(b.getAssetId());
+    }
+
+    /** 工程量清单行内改价:只改数量/单价,合价恢复自动计算,并回写集采价。 */
+    @Transactional
+    public void updateBomPricing(Long bomId, BomPricingRequest req) {
+        requireCostRole("修改工程量清单数量/单价");
+        AssetBom b = loadBom(bomId);
+        bomMapper.update(null, new LambdaUpdateWrapper<AssetBom>()
+                .eq(AssetBom::getId, bomId)
+                .set(AssetBom::getQty, req.getQty())
+                .set(AssetBom::getUnitCost, req.getUnitCost())
+                .set(AssetBom::getSubtotalOverride, null));
+        syncPurchasePriceFromBom(b.getAssetId());
+    }
+
+    /** 故障档案编辑(按配件):故障次数/可维修/质保到期/质保方。 */
+    @Transactional
+    public void updateBomFault(Long bomId, BomFaultRequest req) {
+        requireCostRole("编辑故障档案");
+        loadBom(bomId);
+        bomMapper.update(null, new LambdaUpdateWrapper<AssetBom>()
+                .eq(AssetBom::getId, bomId)
+                .set(AssetBom::getFaultCount, req.getFaultCount())
+                .set(AssetBom::getRepairable, req.getRepairable() == null || req.getRepairable() ? 1 : 0)
+                .set(AssetBom::getWarrantyUntil, req.getWarrantyUntil())
+                .set(AssetBom::getSupplierId, req.getSupplierId()));
     }
 
     @Transactional
@@ -609,6 +648,63 @@ public class AssetService {
         toDelete.add(bomId);
         for (Long delId : toDelete) {
             bomMapper.deleteById(delId);
+        }
+        syncPurchasePriceFromBom(b.getAssetId());
+    }
+
+    /**
+     * 集采价 ← 工程量清单总价(Σ一级项合价)。清单无计价行时不动集采价(保留手填/采购入库值)。
+     * 集采价是折旧基数,变更只影响之后的折旧计提,已计提凭证不追溯。
+     */
+    private void syncPurchasePriceFromBom(Long assetId) {
+        BigDecimal total = bomTotalIfPriced(loadBoms(assetId));
+        if (total == null) {
+            return;
+        }
+        Asset a = load(assetId);
+        if (a.getPurchasePrice() != null && a.getPurchasePrice().compareTo(total) == 0) {
+            return;
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getPurchasePrice, total));
+        log.info("集采价随工程量清单联动: assetId={}, {} → {}", assetId, a.getPurchasePrice(), total);
+    }
+
+    /** 一级项任一已计价(单价或手动合价非空)→ 返回 Σ一级项合价;否则 null(未联动)。 */
+    private BigDecimal bomTotalIfPriced(List<AssetBom> boms) {
+        List<AssetBom> topLevel = boms.stream()
+                .filter(x -> x.getParentId() == null)
+                .collect(Collectors.toList());
+        boolean priced = topLevel.stream()
+                .anyMatch(x -> x.getUnitCost() != null || x.getSubtotalOverride() != null);
+        if (!priced) {
+            return null;
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        for (AssetBom x : topLevel) {
+            total = total.add(subtotal(x));
+        }
+        return total.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private List<AssetBom> loadBoms(Long assetId) {
+        return bomMapper.selectList(new LambdaQueryWrapper<AssetBom>()
+                .eq(AssetBom::getAssetId, assetId)
+                .orderByAsc(AssetBom::getId));
+    }
+
+    private AssetBom loadBom(Long bomId) {
+        AssetBom b = bomMapper.selectById(bomId);
+        if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
+            throw new BizException(404, "配件不存在: id=" + bomId);
+        }
+        return b;
+    }
+
+    private void requireCostRole(String action) {
+        if (!DataScope.canSeeCost(UserContext.getRole())) {
+            throw new BizException(403, "当前角色无权" + action);
         }
     }
 
@@ -808,10 +904,12 @@ public class AssetService {
         List<AssetDetailResponse.FaultItem> out = new ArrayList<>();
         for (AssetBom b : boms) {
             AssetDetailResponse.FaultItem fi = new AssetDetailResponse.FaultItem();
+            fi.setBomId(b.getId());
             fi.setName(b.getName());
             fi.setFaultCount(b.getFaultCount() != null ? b.getFaultCount() : 0);
             fi.setRepairable(b.getRepairable() != null && b.getRepairable() == 1);
             fi.setWarrantyUntil(b.getWarrantyUntil());
+            fi.setSupplierId(b.getSupplierId());
             fi.setSupplierName(supplierName(b.getSupplierId()));
             fi.setWarrantyDaysLeft(b.getWarrantyUntil() != null
                     ? ChronoUnit.DAYS.between(LocalDate.now(), b.getWarrantyUntil()) : null);
