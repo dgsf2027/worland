@@ -553,6 +553,7 @@ public class AssetService {
 
     @Transactional
     public Long addBom(Long assetId, BomNodeRequest req) {
+        requireCostRole("新增工程量清单配件");
         load(assetId);
         if (req.getParentId() != null) {
             AssetBom parent = bomMapper.selectById(req.getParentId());
@@ -570,6 +571,7 @@ public class AssetService {
 
     @Transactional
     public void updateBom(Long bomId, BomNodeRequest req) {
+        requireCostRole("编辑工程量清单配件");
         AssetBom b = bomMapper.selectById(bomId);
         if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
             throw new BizException(404, "配件不存在: id=" + bomId);
@@ -639,6 +641,7 @@ public class AssetService {
 
     @Transactional
     public void deleteBom(Long bomId) {
+        requireCostRole("删除工程量清单配件");
         AssetBom b = bomMapper.selectById(bomId);
         if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
             throw new BizException(404, "配件不存在: id=" + bomId);
