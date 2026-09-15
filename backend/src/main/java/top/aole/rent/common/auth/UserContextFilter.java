@@ -45,7 +45,7 @@ public class UserContextFilter extends OncePerRequestFilter {
     private boolean placeholderHeadersEnabled;
 
     private static final String[] PUBLIC_PREFIXES = {
-            "/auth/", "/v1/sso/", "/v1/health", "/doc.html", "/webjars/", "/swagger-resources", "/v2/api-docs", "/v3/api-docs", "/swagger-ui", "/favicon.ico", "/error", "/actuator"
+            "/auth/", "/v1/sso/", "/v1/health", "/rent/inv-public/", "/doc.html", "/webjars/", "/swagger-resources", "/v2/api-docs", "/v3/api-docs", "/swagger-ui", "/favicon.ico", "/error", "/actuator"
     };
 
     private static boolean isPublic(String path) {

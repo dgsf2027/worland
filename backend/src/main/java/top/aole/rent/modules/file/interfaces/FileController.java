@@ -8,6 +8,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,6 +48,13 @@ public class FileController {
     public R<List<FileStorageService.FileItemResp>> list(@RequestParam String bizType,
                                                          @RequestParam Long bizId) {
         return R.ok(fileStorageService.list(bizType, bizId));
+    }
+
+    @ApiOperation("删除资产照片/出入库现场照片(上传人或老板)")
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        fileStorageService.delete(id);
+        return R.ok();
     }
 
     @ApiOperation("获取短时效签名URL(先过一次鉴权;URL 内嵌 token·TTL 走 rule)")

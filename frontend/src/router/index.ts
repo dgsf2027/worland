@@ -22,7 +22,11 @@ const router = createRouter({
     { path: '/rent', name: 'rent', meta: { title: '收租 · 收租单与逾期' }, component: () => import('@/views/Rent.vue') },
     { path: '/transfer', name: 'transfer', meta: { title: '转让·处置 · 到期转让/复投飞轮' }, component: () => import('@/views/Transfer.vue') },
     { path: '/maintenance', name: 'maintenance', meta: { title: '维保工单 · 报修/派工/回写' }, component: () => import('@/views/Maintenance.vue') },
-    { path: '/stocktake', name: 'stocktake', meta: { title: '盘点 · 扫码差异/盘盈亏调整' }, component: () => import('@/views/Stocktake.vue') },
+    { path: '/inventory', name: 'inventory', meta: { title: '资产管理 · 出租/出入库/损坏赔偿/提醒' }, component: () => import('@/views/Inventory.vue') },
+    // 资产二维码扫码页(手机):public 放行,未登录只见企业信息与名称规格,登录后可出库/归还
+    { path: '/scan/:token', name: 'inventory-scan', meta: { title: '资产扫码', public: true }, component: () => import('@/views/InventoryScan.vue') },
+    // 原「盘点」入口已替换为资产管理,旧书签跳转过去
+    { path: '/stocktake', redirect: '/inventory' },
     { path: '/voucher', name: 'voucher', meta: { title: '凭证中心 · 双账/折旧/500万红线' }, component: () => import('@/views/Voucher.vue') },
     { path: '/cashflow', name: 'cashflow', meta: { title: '现金流/分配驾驶舱 · 兑付缺口/回报四源' }, component: () => import('@/views/Cashflow.vue') },
     { path: '/monthly', name: 'monthly', meta: { title: '月度报表 · 六件套/七节报告/财务日历' }, component: () => import('@/views/Monthly.vue') },

@@ -85,7 +85,7 @@ modules/<module>/
 | `monthly` | MonthlyReport | `/rent/monthly-report` | 报表包生成 每月 2 日 02:00 |
 | `transfer` | TransferOrder / TransferOrderLine | `/rent/transfer` | — |
 | `maintenance` | Maintenance | `/rent/maintenance` | — |
-| `stocktake` | Stocktake / StockDiff | `/rent/stocktake` | — |
+| `inventory` | InvItem / InvRental / InvMovement / InvDamage / InvCompPrice / InvCompany | `/rent/inventory`、`/rent/inv-public`（扫码免登） | — |
 | `reminder` | Reminder | `/rent/reminders` | 合同到期提醒 06:00；跟进到期提醒 07:00 |
 | `task` | Task | `/rent/tasks` | 任务派发 03:00 |
 | `approval` | Approval | `/rent/approvals` | — |
@@ -140,7 +140,8 @@ modules/<module>/
 | `/rent` | `Rent.vue` | `rent.ts` | `billing` |
 | `/transfer` | `Transfer.vue` | `transfer.ts` | `transfer` |
 | `/maintenance` | `Maintenance.vue` | `maintenance.ts` | `maintenance` |
-| `/stocktake` | `Stocktake.vue` | `stocktake.ts` | `stocktake` |
+| `/inventory` | `Inventory.vue` | `inventory.ts` | `inventory` |
+| `/scan/:token`（public） | `InventoryScan.vue` | `inventory.ts` | `inventory-scan` |
 | `/voucher` | `Voucher.vue` | `voucher.ts` | `finance` |
 | `/cashflow` | `Cashflow.vue` | `distribution.ts` | `analytics` + `distribution` |
 | `/monthly` | `Monthly.vue` | `monthly.ts` | `monthly` |
@@ -173,7 +174,7 @@ modules/<module>/
 | `V9__voucher_double_book.sql` | 双账凭证 / 账套 |
 | `V10__distribution_investor.sql` | 分配 / 投资人 |
 | `V11__monthly_report_llm.sql` | 月报与 LLM 产出 |
-| `V12__transfer_maintenance_stocktake.sql` | 转让 / 维保 / 盘点 |
+| `V12__transfer_maintenance_stocktake.sql` | 转让 / 维保 / 盘点（盘点功能已于 V108 移除，表保留） |
 | `V13__task_approval_roster_commission.sql` | 任务 / 审批 / 花名册 / 提成 |
 | `V14__pdca_import_file_audit_append.sql` | PDCA / 导入 / 文件 / 审计 |
 | `V99__auth_user.sql` | 账号体系（邀请码注册） |
@@ -185,6 +186,7 @@ modules/<module>/
 | `V105__supplier_inspection_sheet.sql` | 供应商考察对齐汇总表（序号/成立时间/地址，注册资本改万元原文） |
 | `V106__asset_override_intended_customer_followup_contract.sql` | 单台收益手工覆盖、意向承接客户、跟进关联合同 |
 | `V107__asset_payment_term.sql` | 设备合同付款条件（自定义多段）、应付逐台生成 |
+| `V108__inventory_asset_management.sql` | 资产管理（替代盘点）：资产批次/出租单/出入库/损坏缺件/赔偿价目/标签企业信息 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

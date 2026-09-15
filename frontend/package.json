@@ -13,10 +13,12 @@
     "axios": "^1.7.2",
     "element-plus": "^2.6.3",
     "pinia": "^2.1.7",
+    "qrcode": "1.5.4",
     "vue": "^3.4.27",
     "vue-router": "^4.3.2"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.5",
     "@vitejs/plugin-vue": "^5.0.4",
     "typescript": "~5.4.5",
     "unocss": "^0.58.9",

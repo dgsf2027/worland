@@ -18,6 +18,7 @@ import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
+import top.aole.rent.modules.inventory.service.InvService;
 import top.aole.rent.modules.supplier.service.SupplierInspectionService;
 
 import javax.crypto.Mac;
@@ -66,6 +67,7 @@ public class FileStorageService {
     private final RuleConfigService ruleConfigService;
     private final SupplierInspectionService supplierInspectionService;
     private final ContractMapper contractMapper;
+    private final InvService invService;
 
     @Value("${rent.storage.dir:storage}")
     private String storageDir;
@@ -87,6 +89,11 @@ public class FileStorageService {
         // 合同附件:压缩包(合同扫描件/补充协议打包),与考察压缩包同上限
         MAX_BYTES.put(CONTRACT, 1024 * MB);
         ALLOWED_EXT.put(CONTRACT, new HashSet<>(Arrays.asList("zip", "rar", "7z")));
+        // 资产照片 / 出入库现场照片:手机拍照直传
+        for (String inv : Arrays.asList(InvService.BIZ_ITEM, InvService.BIZ_MOVEMENT)) {
+            MAX_BYTES.put(inv, 20 * MB);
+            ALLOWED_EXT.put(inv, new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "webp", "gif", "heic", "heif")));
+        }
     }
 
 
@@ -151,6 +158,9 @@ public class FileStorageService {
         }
         if (SupplierInspectionService.BIZ_TYPE.equals(bizType)) {
             supplierInspectionService.assertCanAttach(bizId);
+        }
+        if (InvService.BIZ_ITEM.equals(bizType) || InvService.BIZ_MOVEMENT.equals(bizType)) {
+            invService.assertCanAttach(bizType, bizId);
         }
         if (CONTRACT.equals(bizType)) {
             if (!DataScope.canSeeCost(u.getRole())) {
@@ -361,6 +371,23 @@ public class FileStorageService {
                 && !DataScope.canSeeCost(u.getRole())) {
             throw new BizException(403, "越权:文件含成本/价条款,当前角色(不可见成本)无权");
         }
+    }
+
+    // ============================== 删除(仅资产照片) ==============================
+
+    /** 删除资产/出入库照片(逻辑删除):上传人本人或老板。其它业务附件不开放删除。 */
+    public void delete(Long fileId) {
+        FileObject fo = require(fileId);
+        CurrentUser u = UserContext.require();
+        if (!InvService.BIZ_ITEM.equals(fo.getBizType()) && !InvService.BIZ_MOVEMENT.equals(fo.getBizType())) {
+            throw new BizException(403, "该类附件不支持删除");
+        }
+        authorize(fo, u);
+        boolean owner = fo.getUploaderId() != null && fo.getUploaderId().equals(u.getUserId());
+        if (!owner && !"老板".equals(u.getRole())) {
+            throw new BizException(403, "只能删除自己上传的照片");
+        }
+        fileObjectMapper.deleteById(fileId);
     }
 
     private FileObject require(Long id) {
