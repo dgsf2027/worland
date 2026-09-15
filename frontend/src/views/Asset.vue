@@ -3,10 +3,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
+import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
 import {
   fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
   addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
   updateSingleUnitReturn, updateIntendedCustomer,
+  updatePaymentTerms, toTermInputs, toTermRows, checkTermRows, type TermRow,
   uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile,
   BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB,
   type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem,
@@ -440,6 +442,52 @@ async function submitSur() {
   }
 }
 
+// ---- 合同付款条件 ----
+const payVisible = ref(false)
+const paySaving = ref(false)
+const payRows = ref<TermRow[]>([])
+const payStatusType: Record<string, string> = { 待付: 'warning', 已付: 'success', 红冲: 'danger' }
+function openPayEdit() {
+  const plan = detail.value?.paymentPlan
+  if (!plan) return
+  payRows.value = toTermRows(plan.terms.length ? plan.terms : plan.defaultTemplate)
+  payVisible.value = true
+}
+async function submitPay() {
+  if (!detail.value) return
+  const err = checkTermRows(payRows.value)
+  if (err) {
+    ElMessage.warning(err)
+    return
+  }
+  const plan = detail.value.paymentPlan
+  if (plan.purchaseInId && plan.purchaseStatus !== '已红冲') {
+    try {
+      await ElMessageBox.confirm(
+        `该设备来自采购单 ${plan.purchaseNo}，保存后会按新条件重算本设备的「待付」应付（已付阶段不变），采购入库应付模块同步更新。确认保存？`,
+        '更新付款条件', { type: 'warning', confirmButtonText: '确认保存' },
+      )
+    } catch {
+      return
+    }
+  }
+  paySaving.value = true
+  try {
+    await updatePaymentTerms(detail.value.id, toTermInputs(payRows.value))
+    payVisible.value = false
+    ElMessage.success('合同付款条件已保存')
+    await openDetail(detail.value.id)
+  } finally {
+    paySaving.value = false
+  }
+}
+function goPurchase() {
+  if (detail.value?.paymentPlan.purchaseInId) router.push({ path: '/purchase', query: { id: String(detail.value.paymentPlan.purchaseInId) } })
+}
+function pctText(r?: number | null) {
+  return r == null ? '—' : (Math.round(r * 1000000) / 10000) + '%'
+}
+
 // ---- 故障档案：编辑 ----
 const faultDialogVisible = ref(false)
 const faultSaving = ref(false)
@@ -816,6 +864,38 @@ onMounted(() => {
           </el-descriptions-item>
         </el-descriptions>
 
+        <!-- 合同付款条件 -->
+        <div class="block-title block-title-row">
+          <span>合同付款条件（预计付款 = 集采价 × 比例）</span>
+          <el-button v-if="!detail.sensitiveMasked" type="primary" link size="small" @click="openPayEdit">
+            {{ detail.paymentPlan.terms.length ? '编辑' : '设置付款条件' }}
+          </el-button>
+        </div>
+        <div class="pay-head">
+          <span>集采价 <b>{{ money(detail.paymentPlan.basePrice) }}</b></span>
+          <span v-if="detail.paymentPlan.purchaseInId">采购单 <a class="lnk" @click="goPurchase">{{ detail.paymentPlan.purchaseNo }}</a>
+            <el-tag size="small" class="manual-tag">{{ detail.paymentPlan.purchaseStatus }}</el-tag></span>
+          <span v-if="detail.paymentPlan.terms.length">待付应付 <b class="warn-text">{{ money(detail.paymentPlan.pendingTotal) }}</b></span>
+          <span v-if="detail.paymentPlan.terms.length">已付 <b>{{ money(detail.paymentPlan.paidTotal) }}</b></span>
+        </div>
+        <el-table v-if="detail.paymentPlan.terms.length" :data="detail.paymentPlan.terms" size="small" border>
+          <el-table-column prop="stageName" label="阶段" width="100" />
+          <el-table-column label="比例" width="80" align="right"><template #default="{ row }">{{ pctText(row.ratio) }}</template></el-table-column>
+          <el-table-column label="触发 / 到期" width="130"><template #default="{ row }">{{ row.triggerPoint }} + {{ row.dueDays }} 天</template></el-table-column>
+          <el-table-column label="预计付款金额" width="130" align="right"><template #default="{ row }">{{ money(row.expectedAmount) }}</template></el-table-column>
+          <el-table-column label="采购应付" min-width="200">
+            <template #default="{ row }">
+              <template v-if="row.payableId">
+                {{ money(row.payableAmount) }} · 到期 {{ row.payableDueDate || '—' }}
+                <el-tag size="small" :type="(payStatusType[row.payableStatus] as any) || 'info'" class="manual-tag">{{ row.payableStatus }}</el-tag>
+              </template>
+              <span v-else class="upload-tip inline-tip">{{ detail.paymentPlan.purchaseInId ? '触发后自动生成' : '未关联采购单' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else :description="detail.sensitiveMasked ? '当前角色不可见' : '尚未设置付款条件，点「设置付款条件」'" :image-size="50" />
+        <div v-if="detail.paymentPlan.note" class="upload-tip">{{ detail.paymentPlan.note }}</div>
+
         <!-- 状态机时间轴 -->
         <div class="block-title">状态机时间轴</div>
         <el-timeline>
@@ -1051,6 +1131,17 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <!-- 合同付款条件 -->
+    <el-dialog v-model="payVisible" title="合同付款条件" width="760px" :close-on-click-modal="false">
+      <el-alert v-if="detail?.paymentPlan.purchaseInId" type="info" :closable="false" show-icon style="margin-bottom:10px"
+        :title="`来自采购单 ${detail?.paymentPlan.purchaseNo}：保存后按新条件重算本设备待付应付，已付阶段锁定不可改。`" />
+      <PaymentTermsEditor v-model="payRows" :base-price="detail?.paymentPlan.basePrice ?? null" :disabled="paySaving" />
+      <template #footer>
+        <el-button :disabled="paySaving" @click="payVisible = false">取消</el-button>
+        <el-button type="primary" :loading="paySaving" @click="submitPay">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 意向承接客户 -->
     <el-dialog v-model="intendedVisible" title="设置意向承接客户" width="460px">
       <el-form label-width="100px" size="small" :disabled="intendedSaving">
@@ -1143,6 +1234,8 @@ onMounted(() => {
 .boq-total .upload-tip { margin-top: 0; }
 .manual-tag { margin-left: 4px; }
 .inline-tip { margin: 0 0 0 8px; display: inline; }
+.pay-head { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; font-size: 13px; margin-bottom: 8px; }
+.warn-text { color: #e8a33d; }
 .lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
 .lnk:hover { text-decoration: underline; }
 .fault-tip { margin-left: 110px; }

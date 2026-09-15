@@ -18,6 +18,7 @@ import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetLinkDtos;
+import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
@@ -108,6 +109,13 @@ public class AssetController {
     public R<Void> updateSingleUnitReturn(@PathVariable Long id,
                                           @Validated @RequestBody AssetLinkDtos.SingleUnitReturnRequest req) {
         assetService.updateSingleUnitReturn(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("设置合同付款条件(自定义多段合计100%;预计付款=集采价×比例;采购入库设备同步重算待付应付,已付阶段锁定)")
+    @PutMapping("/{id}/payment-terms")
+    public R<Void> updatePaymentTerms(@PathVariable Long id, @Validated @RequestBody PaymentTermDtos.SaveRequest req) {
+        assetService.updatePaymentTerms(id, req);
         return R.ok();
     }
 

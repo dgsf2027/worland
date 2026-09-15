@@ -64,6 +64,9 @@ public class PurchaseDetailResponse {
     @Data
     public static class PayableLine {
         private Long id;
+        /** 逐台应付对应的设备(旧版整单应付为 null) */
+        private Long assetId;
+        private String serialNo;
         private String stage;
         private LocalDate dueDate;
         /** 金额(敏感·GP/LP 为 null) */

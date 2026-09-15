@@ -18,6 +18,7 @@ import top.aole.rent.modules.asset.domain.AssetDepreciationLine;
 import top.aole.rent.modules.asset.domain.AssetEvent;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
 import top.aole.rent.modules.asset.dto.AssetLinkDtos;
+import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
@@ -87,6 +88,7 @@ public class AssetService {
     private final RentScheduleMapper rentScheduleMapper;
     private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
+    private final AssetPaymentService paymentService;
 
     /** 状态机:from → 允许的 to 集合。已转让/报废为终态。 */
     private static final Map<String, Set<String>> TRANSITIONS = new HashMap<>();
@@ -196,6 +198,7 @@ public class AssetService {
         r.setResidualBreakdown(residualBreakdown(a, boms));
         r.setFaultArchive(faultArchive(boms));
         r.setSingleUnitReturn(singleUnitReturn(a, seeCost));
+        r.setPaymentPlan(paymentService.plan(a, seeCost));
         r.setTimeline(timeline(id));
         return r;
     }
@@ -227,6 +230,7 @@ public class AssetService {
                 throw new BizException(400, "序列号已存在: " + req.getSerialNo());
             }
         }
+        BigDecimal oldPrice = a.getPurchasePrice();
         applySave(a, req);
         // 清单已计价 → 集采价由清单总价决定,忽略手填值
         BigDecimal linked = bomTotalIfPriced(loadBoms(id));
@@ -236,6 +240,18 @@ public class AssetService {
         assetMapper.update(a, new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, id)
                 .set(req.getSupplierId() == null, Asset::getSupplierId, null));
+        boolean priceChanged = a.getPurchasePrice() == null ? oldPrice != null
+                : (oldPrice == null || a.getPurchasePrice().compareTo(oldPrice) != 0);
+        if (priceChanged && a.getPurchasePrice() != null) {
+            paymentService.resyncPending(a);
+        }
+    }
+
+    /** 设置设备合同付款条件(自定义多段);采购入库设备同步重算待付应付。 */
+    @Transactional
+    public void updatePaymentTerms(Long id, PaymentTermDtos.SaveRequest req) {
+        requireCostRole("设置合同付款条件");
+        paymentService.updateTerms(load(id), req.getTerms());
     }
 
     private void applySave(Asset a, AssetSaveRequest req) {
@@ -730,6 +746,9 @@ public class AssetService {
                 .eq(Asset::getId, assetId)
                 .set(Asset::getPurchasePrice, total));
         log.info("集采价随工程量清单联动: assetId={}, {} → {}", assetId, a.getPurchasePrice(), total);
+        // 预计付款 / 待付应付随集采价重算
+        a.setPurchasePrice(total);
+        paymentService.resyncPending(a);
     }
 
     /** 一级项任一已计价(单价或手动合价非空)→ 返回 Σ一级项合价;否则 null(未联动)。 */

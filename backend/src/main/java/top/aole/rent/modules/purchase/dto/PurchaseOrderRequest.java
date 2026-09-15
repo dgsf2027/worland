@@ -34,6 +34,10 @@ public class PurchaseOrderRequest {
 
     private String remark;
 
+    /** 整单默认付款条件(自定义多段,合计 100%);空=默认 首付/验收/尾款 */
+    @Valid
+    private List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> paymentTerms;
+
     @NotEmpty(message = "至少 1 件采购明细")
     @Valid
     private List<Item> items;
@@ -59,5 +63,9 @@ public class PurchaseOrderRequest {
         private BigDecimal replaceHeadcount;
 
         private String remark;
+
+        /** 本件付款条件;空=沿用整单付款条件 */
+        @Valid
+        private List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> paymentTerms;
     }
 }

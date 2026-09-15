@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchPurchases, fetchPurchaseDetail, createPurchaseOrder, receivePurchase, returnPurchase,
   type PurchaseListItem, type PurchaseDetail,
 } from '@/api/purchase'
+import { toTermInputs, checkTermRows, type TermRow } from '@/api/asset'
+import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 const activeTab = ref('list')
 const list = ref<PurchaseListItem[]>([])
@@ -30,8 +36,16 @@ async function openDetail(id: number) {
 // ---- 下单 ----
 const orderDlg = ref(false)
 const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, supplierId: undefined, items: [] })
+const defaultTermRows = (): TermRow[] => [
+  { stageName: '首付', ratioPct: 30, triggerPoint: '下单', dueDays: 0 },
+  { stageName: '验收', ratioPct: 60, triggerPoint: '入库', dueDays: 0 },
+  { stageName: '尾款', ratioPct: 10, triggerPoint: '入库', dueDays: 90 },
+]
+const orderTermRows = ref<TermRow[]>(defaultTermRows())
+const orderTotal = computed(() => oForm.items.reduce((s: number, it: any) => s + Number(it.purchasePrice || 0), 0))
 function openOrder() {
   Object.assign(oForm, { no: '', contractId: undefined, supplierId: undefined, items: [{ serialNo: '', category: '货架', model: '', marketPrice: undefined, purchasePrice: undefined }] })
+  orderTermRows.value = defaultTermRows()
   orderDlg.value = true
 }
 function addItem() { oForm.items.push({ serialNo: '', category: '货架', model: '', marketPrice: undefined, purchasePrice: undefined }) }
@@ -39,15 +53,17 @@ function removeItem(i: number) { oForm.items.splice(i, 1) }
 async function submitOrder() {
   if (!oForm.no || !oForm.contractId) { ElMessage.warning('单号与合同ID必填（先签约后采购）'); return }
   if (!oForm.items.length || oForm.items.some((it: any) => !it.serialNo || !it.category)) { ElMessage.warning('每件需序列号+品类'); return }
+  const termErr = checkTermRows(orderTermRows.value)
+  if (termErr) { ElMessage.warning('付款条件：' + termErr); return }
   try {
-    await createPurchaseOrder({ ...oForm })
-    ElMessage.success('采购下单成功（已生成首付应付）')
+    await createPurchaseOrder({ ...oForm, paymentTerms: toTermInputs(orderTermRows.value) })
+    ElMessage.success('采购下单成功（已按付款条件逐台生成「下单」阶段应付）')
     orderDlg.value = false
     loadList()
   } catch { /* 无合同拒绝已提示 */ }
 }
 async function doReceive(row: PurchaseListItem) {
-  await ElMessageBox.confirm(`入库将逐件生成设备并生成验收/尾款应付，确认？`, '采购入库', { type: 'warning' })
+  await ElMessageBox.confirm(`入库将逐件生成设备，并按付款条件逐台生成「入库」阶段应付，确认？`, '采购入库', { type: 'warning' })
   await receivePurchase(row.id)
   ElMessage.success('已入库（逐件生成设备+应付凭证）')
   loadList()
@@ -62,13 +78,22 @@ async function doReturn(row: PurchaseListItem) {
 }
 function money(v?: number) { return v == null ? '🔒' : '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 
-onMounted(loadList)
+function goAsset(id?: number) {
+  if (id) router.push({ path: '/asset', query: { id: String(id) } })
+}
+
+onMounted(() => {
+  loadList()
+  // 从设备详情「采购单」跳转过来(?id=):直接打开采购详情
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
+})
 </script>
 
 <template>
   <div>
     <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
-      title="先签约后采购：下单必绑存续合同（无合同拒建单）→ 入库逐件生成设备 + 首付/验收/尾款应付（=负债，进现金流驾驶舱）→ 退货红冲。成本对 GP/LP 打码 🔒。" />
+      title="先签约后采购：下单必绑存续合同（无合同拒建单）→ 按合同付款条件逐台生成应付（下单阶段下单即生成、入库阶段入库生成；=负债，进现金流驾驶舱）→ 退货红冲。成本对 GP/LP 打码 🔒。" />
     <el-tabs v-model="activeTab">
       <el-tab-pane label="采购单列表" name="list">
         <div class="bar">
@@ -127,8 +152,15 @@ onMounted(loadList)
             </el-table-column>
           </el-table>
 
-          <h4>应付计划（首付/验收/尾款 = 负债）</h4>
+          <h4>应付计划（按设备付款条件逐台生成 = 负债）</h4>
           <el-table :data="detail.payables" size="small" border>
+            <el-table-column label="设备" width="140">
+              <template #default="{ row }">
+                <a v-if="row.assetId" class="lnk" @click="goAsset(row.assetId)">{{ row.serialNo || ('#' + row.assetId) }}</a>
+                <span v-else-if="row.serialNo">{{ row.serialNo }}（未入库）</span>
+                <span v-else class="muted">整单</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="stage" label="阶段" width="100" />
             <el-table-column prop="dueDate" label="到期日" width="120" />
             <el-table-column label="金额" width="130"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
@@ -142,7 +174,7 @@ onMounted(loadList)
     </el-tabs>
 
     <!-- 下单弹窗 -->
-    <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="720px">
+    <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="800px">
       <el-form :inline="true">
         <el-form-item label="采购单号"><el-input v-model="oForm.no" placeholder="CG-2026-xxx" /></el-form-item>
         <el-form-item label="合同ID"><el-input-number v-model="oForm.contractId" :min="1" /></el-form-item>
@@ -157,6 +189,9 @@ onMounted(loadList)
         <el-table-column label="操作" width="60"><template #default="{ $index }"><el-button link type="danger" size="small" @click="removeItem($index)">删</el-button></template></el-table-column>
       </el-table>
       <el-button size="small" style="margin-top:8px" @click="addItem">＋ 加一件</el-button>
+      <h4>合同付款条件（整单默认，逐台按各自集采价 × 比例生成应付）</h4>
+      <PaymentTermsEditor v-model="orderTermRows" :base-price="orderTotal || null" />
+      <div class="muted">上方预计付款按本单集采价合计展示；入库后可在设备详情里单独调整某台设备的付款条件。</div>
       <template #footer><el-button @click="orderDlg = false">取消</el-button><el-button type="primary" @click="submitOrder">下单</el-button></template>
     </el-dialog>
   </div>
@@ -165,4 +200,7 @@ onMounted(loadList)
 <style scoped>
 .bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
 h4 { margin: 16px 0 8px; }
+.lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
+.lnk:hover { text-decoration: underline; }
+.muted { color: #909399; font-size: 12px; }
 </style>

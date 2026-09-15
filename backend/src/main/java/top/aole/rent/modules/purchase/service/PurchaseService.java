@@ -12,6 +12,8 @@ import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
+import top.aole.rent.modules.asset.dto.PaymentTermDtos;
+import top.aole.rent.modules.asset.service.AssetPaymentService;
 import top.aole.rent.modules.asset.service.AssetService;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
@@ -47,8 +49,8 @@ import java.util.List;
  *   <li>应付计划 {@code payable} 待付=层级②"负债"口径(M3 兑付缺口扫描读此·为其留字段)。</li>
  *   <li>先签约后采购:下单必绑一份存续合同(草稿/生效),已作废合同拒绝建单。</li>
  * </ul>
- * <p>应付分段:首付(下单付·到期=下单日)/验收(入库付·到期=入库日)/尾款(账期后付·到期=入库日+账期天数),
- * 三段合计=采购总额;比例走 rule_config[payable_stage_ratio],禁硬编码。
+ * <p>应付按设备逐台生成({@link AssetPaymentService}):每台设备的付款条件自定义多段(下单/入库触发 + 到期天数),
+ * 各段合计=该设备集采价;未指定条件时默认 首付(下单)/验收(入库)/尾款(入库+账期),比例走 rule_config[payable_stage_ratio]。
  * 敏感成本(集采价/应付金额)对 GP/LP 打码。
  */
 @Slf4j
@@ -64,6 +66,7 @@ public class PurchaseService {
     private final SupplierMapper supplierMapper;
     private final AssetMapper assetMapper;
     private final AssetService assetService;
+    private final AssetPaymentService paymentService;
     private final VoucherService voucherService;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
@@ -157,6 +160,9 @@ public class PurchaseService {
         p.setRemark(req.getRemark());
         purchaseInMapper.insert(p);
 
+        // 付款条件:明细级 > 整单级 > 默认三段(首付取整单首付比例);逐台生成 触发=下单 的应付
+        List<PaymentTermDtos.TermInput> orderTerms = req.getPaymentTerms() != null && !req.getPaymentTerms().isEmpty()
+                ? req.getPaymentTerms() : paymentService.defaultTerms(req.getFirstPayRatio(), req.getAccountDays());
         for (PurchaseOrderRequest.Item item : req.getItems()) {
             PurchaseItem pi = new PurchaseItem();
             pi.setPurchaseInId(p.getId());
@@ -170,15 +176,12 @@ public class PurchaseService {
             pi.setReplaceHeadcount(item.getReplaceHeadcount());
             pi.setRemark(item.getRemark());
             purchaseItemMapper.insert(pi);
+            paymentService.onOrder(p, pi, item.getPaymentTerms() != null && !item.getPaymentTerms().isEmpty()
+                    ? item.getPaymentTerms() : orderTerms);
         }
 
-        // 应付计划:首付(下单付·到期=下单日)
-        BigDecimal firstRatio = p.getFirstPayRatio() != null ? p.getFirstPayRatio() : stageRatio("首付");
-        BigDecimal firstAmt = total.multiply(firstRatio).setScale(2, RoundingMode.HALF_UP);
-        insertPayable(p.getId(), "首付", orderDate, firstAmt, "下单首付 " + pct(firstRatio));
-
-        log.info("采购下单: no={}, id={}, contract={}, items={}, total={}, 首付={}",
-                p.getNo(), p.getId(), c.getNo(), req.getItems().size(), total, firstAmt);
+        log.info("采购下单: no={}, id={}, contract={}, items={}, total={}, 下单应付={}",
+                p.getNo(), p.getId(), c.getNo(), req.getItems().size(), total, outstanding(p.getId()));
         return p.getId();
     }
 
@@ -195,7 +198,12 @@ public class PurchaseService {
         if (items.isEmpty()) {
             throw new BizException(400, "采购单无明细,不可入库");
         }
-        // 逐件生成设备(状态机 owner=AssetService),回填 asset_id
+        p.setStatus("已入库");
+        p.setReceiveDate(receiveDate);
+        purchaseInMapper.updateById(p);
+
+        // 逐件生成设备(状态机 owner=AssetService),回填 asset_id;
+        // 付款条件回填设备并逐台生成 触发=入库 的应付(到期=入库日+N 天),各段合计=该设备集采价
         for (PurchaseItem pi : items) {
             Long assetId = assetService.createForPurchase(
                     pi.getSerialNo(), pi.getCategory(), pi.getModel(),
@@ -203,27 +211,14 @@ public class PurchaseService {
                     pi.getMonthlyLaborValue(), pi.getReplaceHeadcount(), id, "采购入库");
             pi.setAssetId(assetId);
             purchaseItemMapper.updateById(pi);
+            paymentService.onReceive(p, pi, assetId);
         }
-        // 验收(入库付·到期=入库日)+ 尾款(账期后·到期=入库日+账期天数);Σ 与首付合计=采购总额
         BigDecimal total = p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO;
-        BigDecimal firstRatio = p.getFirstPayRatio() != null ? p.getFirstPayRatio() : stageRatio("首付");
-        BigDecimal firstAmt = total.multiply(firstRatio).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal accAmt = total.multiply(stageRatio("验收")).setScale(2, RoundingMode.HALF_UP);
-        // 尾款=余额(补差,保证三段合计精确=总额)
-        BigDecimal tailAmt = total.subtract(firstAmt).subtract(accAmt).setScale(2, RoundingMode.HALF_UP);
-        int accountDays = p.getAccountDays() != null ? p.getAccountDays() : tailDays();
-        insertPayable(id, "验收", receiveDate, accAmt, "到货验收付 " + pct(stageRatio("验收")));
-        insertPayable(id, "尾款", receiveDate.plusDays(accountDays), tailAmt,
-                "质保尾款(账期 " + accountDays + " 天)");
-
-        p.setStatus("已入库");
-        p.setReceiveDate(receiveDate);
-        purchaseInMapper.updateById(p);
 
         // M3-01 钩子:采购入库 → 应付凭证(税务账·dr 固定资产 / cr 应付账款·借贷平衡·幂等)
         voucherService.postPayable(id, total, receiveDate,
                 "采购入库应付 " + p.getNo() + " " + total + "元");
-        log.info("采购入库: id={}, 生成设备{}件, 验收={}, 尾款={}", id, items.size(), accAmt, tailAmt);
+        log.info("采购入库: id={}, 生成设备{}件, 待付应付={}", id, items.size(), outstanding(id));
     }
 
     // ============ 退货红冲(整单红冲·设备报废释放·应付红字) ============
@@ -310,10 +305,14 @@ public class PurchaseService {
         }
         r.setItems(itemLines);
 
+        java.util.Map<Long, String> serialByItem = new java.util.HashMap<>();
+        itemsOf(id).forEach(pi -> serialByItem.put(pi.getId(), pi.getSerialNo()));
         List<PurchaseDetailResponse.PayableLine> payLines = new ArrayList<>();
         for (Payable pay : payablesOf(id)) {
             PurchaseDetailResponse.PayableLine pl = new PurchaseDetailResponse.PayableLine();
             pl.setId(pay.getId());
+            pl.setAssetId(pay.getAssetId());
+            pl.setSerialNo(serialByItem.get(pay.getPurchaseItemId()));
             pl.setStage(pay.getStage());
             pl.setDueDate(pay.getDueDate());
             pl.setAmount(seeCost ? pay.getAmount() : null);
@@ -364,31 +363,6 @@ public class PurchaseService {
             throw new BizException(404, "采购单不存在: id=" + id);
         }
         return p;
-    }
-
-    private BigDecimal stageRatio(String stage) {
-        BigDecimal v = safeValue("payable_stage_ratio", stage);
-        return v != null ? v : BigDecimal.ZERO;
-    }
-
-    private int tailDays() {
-        BigDecimal v = safeValue("payable_tail_days", "");
-        return v != null && v.intValue() > 0 ? v.intValue() : 90;
-    }
-
-    private String pct(BigDecimal ratio) {
-        if (ratio == null) {
-            return "";
-        }
-        return ratio.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString() + "%";
-    }
-
-    private BigDecimal safeValue(String ruleKey, String scopeKey) {
-        try {
-            return rules.getValue(ruleKey, scopeKey, LocalDate.now());
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private String contractNo(Long contractId) {

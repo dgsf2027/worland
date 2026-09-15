@@ -31,6 +31,9 @@ export interface PurchaseItemLine {
 }
 
 export interface PayableLine {
+  /** 逐台应付对应的设备(旧版整单应付为空) */
+  assetId?: number
+  serialNo?: string
   id: number
   stage: string
   dueDate?: string

@@ -24,6 +24,15 @@ public class Payable {
 
     private Long purchaseInId;
 
+    /** 设备(逐台应付;旧整单应付为 null) */
+    private Long assetId;
+
+    /** 采购明细(逐台应付;旧整单应付为 null) */
+    private Long purchaseItemId;
+
+    /** 来源付款条件 */
+    private Long termId;
+
     /** 阶段:首付/验收/尾款/退款红字 */
     private String stage;
 

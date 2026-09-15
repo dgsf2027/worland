@@ -55,6 +55,39 @@ export interface SignedUrl {
 }
 
 export interface CostItem { name: string; amount: number; ratio: number }
+export interface PaymentTermInput {
+  stageName: string
+  /** 0-1 */
+  ratio: number
+  triggerPoint: '下单' | '入库'
+  dueDays: number
+}
+export interface PaymentTermLine {
+  id: number
+  seq: number
+  stageName: string
+  ratio: number
+  triggerPoint: '下单' | '入库'
+  dueDays: number
+  expectedAmount?: number
+  payableId?: number
+  payableAmount?: number
+  payableDueDate?: string
+  payableStatus?: string
+}
+export interface PaymentPlan {
+  purchaseInId?: number
+  purchaseNo?: string
+  purchaseStatus?: string
+  basePrice?: number
+  terms: PaymentTermLine[]
+  ratioTotal: number
+  expectedTotal?: number
+  pendingTotal?: number
+  paidTotal?: number
+  defaultTemplate: PaymentTermInput[]
+  note?: string
+}
 export interface FaultItem {
   bomId: number
   name: string
@@ -108,6 +141,8 @@ export interface AssetDetail {
   costBreakdown?: { items: CostItem[]; total: number; purchasePrice?: number; gapVsPurchase?: number }
   residualBreakdown?: { items?: CostItem[]; bomResidualTotal?: number; categoryResidual?: number }
   faultArchive: FaultItem[]
+  /** 合同付款条件 + 预计付款 + 逐台应付 */
+  paymentPlan: PaymentPlan
   singleUnitReturn: {
     cumulativeRent?: number; allocRent?: number; inServiceDays?: number; idleDays?: number; returnRate?: number; idleAlert?: boolean
     /** 手工覆盖的字段:allocRent/cumulativeRent/returnRate/inServiceDays/idleDays */
@@ -144,6 +179,50 @@ export function deleteBom(bomId: number): Promise<void> {
 export function updateBomPricing(bomId: number, body: { qty: number; unitCost: number | null }): Promise<void> {
   return request.put(`/rent/assets/bom/${bomId}/pricing`, body)
 }
+/** 设置合同付款条件(自定义多段,合计 100%) */
+export function updatePaymentTerms(id: number, terms: PaymentTermInput[]): Promise<void> {
+  return request.put(`/rent/assets/${id}/payment-terms`, { terms })
+}
+/** 编辑器行(比例以百分数编辑) */
+export interface TermRow {
+  stageName: string
+  ratioPct: number | null
+  triggerPoint: '下单' | '入库'
+  dueDays: number | null
+}
+/** 编辑器行 → 接口入参(比例转 0-1) */
+export function toTermInputs(rows: TermRow[]): PaymentTermInput[] {
+  return rows.map((r) => ({
+    stageName: String(r.stageName || '').trim(),
+    ratio: Math.round(Number(r.ratioPct || 0) * 1000000) / 100000000,
+    triggerPoint: r.triggerPoint,
+    dueDays: Number(r.dueDays || 0),
+  }))
+}
+export function toTermRows(terms: { stageName: string; ratio: number; triggerPoint: string; dueDays?: number | null }[]): TermRow[] {
+  return terms.map((t) => ({
+    stageName: t.stageName,
+    ratioPct: Math.round(t.ratio * 1000000) / 10000,
+    triggerPoint: (t.triggerPoint === '下单' ? '下单' : '入库'),
+    dueDays: t.dueDays ?? 0,
+  }))
+}
+/** 校验编辑器行:返回错误文案或 null */
+export function checkTermRows(rows: TermRow[]): string | null {
+  if (!rows.length) return '至少设置一段付款条件'
+  const names = new Set<string>()
+  for (const r of rows) {
+    const n = String(r.stageName || '').trim()
+    if (!n) return '阶段名称不能为空'
+    if (names.has(n)) return `阶段名称重复：${n}`
+    names.add(n)
+    if (!r.ratioPct || r.ratioPct <= 0) return `阶段「${n}」比例须大于 0`
+  }
+  const total = Math.round(rows.reduce((s, r) => s + Number(r.ratioPct || 0), 0) * 100) / 100
+  if (Math.abs(total - 100) >= 0.01) return `比例合计须为 100%，当前 ${total}%`
+  return null
+}
+
 /** 单台收益手工覆盖(某项传 null = 恢复自动计算) */
 export function updateSingleUnitReturn(id: number, body: Record<string, number | null>): Promise<void> {
   return request.put(`/rent/assets/${id}/single-unit-return`, body)

@@ -54,6 +54,8 @@ public class AssetDetailResponse {
     private List<FaultItem> faultArchive;
     /** 单台收益 */
     private SingleUnitReturn singleUnitReturn;
+    /** 合同付款条件 + 预计付款金额 + 逐台应付 */
+    private PaymentTermDtos.PaymentPlan paymentPlan;
     /** 状态机事件时间轴(倒序) */
     private List<EventItem> timeline;
 
