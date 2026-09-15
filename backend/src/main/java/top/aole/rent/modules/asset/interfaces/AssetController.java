@@ -17,6 +17,7 @@ import top.aole.rent.common.auth.RequireRole;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
+import top.aole.rent.modules.asset.dto.AssetLinkDtos;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
@@ -99,6 +100,21 @@ public class AssetController {
     @PutMapping("/bom/{bomId}")
     public R<Void> updateBom(@PathVariable Long bomId, @Validated @RequestBody BomNodeRequest req) {
         assetService.updateBom(bomId, req);
+        return R.ok();
+    }
+
+    @ApiOperation("单台收益手工覆盖(某项传 null = 恢复自动计算;只影响设备展示)")
+    @PutMapping("/{id}/single-unit-return")
+    public R<Void> updateSingleUnitReturn(@PathVariable Long id,
+                                          @Validated @RequestBody AssetLinkDtos.SingleUnitReturnRequest req) {
+        assetService.updateSingleUnitReturn(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("设置意向承接客户(未签约设备;customerId=null 清除;签约后以合同客户为准)")
+    @PutMapping("/{id}/intended-customer")
+    public R<Void> updateIntendedCustomer(@PathVariable Long id, @RequestBody AssetLinkDtos.IntendedCustomerRequest req) {
+        assetService.updateIntendedCustomer(id, req);
         return R.ok();
     }
 

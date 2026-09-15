@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +22,7 @@ import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.customer.dto.AdmissionRequest;
 import top.aole.rent.modules.customer.dto.CustomerDetailResponse;
+import top.aole.rent.modules.customer.dto.CustomerEditDtos;
 import top.aole.rent.modules.customer.dto.CustomerPoolItem;
 import top.aole.rent.modules.customer.dto.CustomerSaveRequest;
 import top.aole.rent.modules.customer.dto.FollowupRequest;
@@ -103,6 +105,34 @@ public class CustomerController {
     @PostMapping("/{id}/followup")
     public R<Long> followup(@PathVariable Long id, @Validated @RequestBody FollowupRequest req) {
         return R.ok(customerService.addFollowup(id, req));
+    }
+
+    @ApiOperation("编辑跟进(本人或老板;可关联本客户合同)")
+    @PutMapping("/followups/{followupId}")
+    public R<Void> updateFollowup(@PathVariable Long followupId, @Validated @RequestBody FollowupRequest req) {
+        customerService.updateFollowup(followupId, req);
+        return R.ok();
+    }
+
+    @ApiOperation("删除跟进(本人或老板)")
+    @DeleteMapping("/followups/{followupId}")
+    public R<Void> deleteFollowup(@PathVariable Long followupId) {
+        customerService.deleteFollowup(followupId);
+        return R.ok();
+    }
+
+    @ApiOperation("编辑信用画像五维(0-100;评级与准入建议随之即时重算)")
+    @PutMapping("/{id}/credit")
+    public R<Void> updateCredit(@PathVariable Long id, @Validated @RequestBody CustomerEditDtos.CreditRequest req) {
+        customerService.updateCredit(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("编辑客户价值手工项(累计利润/续租率;其余指标按合同与收租单实时算)")
+    @PutMapping("/{id}/value")
+    public R<Void> updateValue(@PathVariable Long id, @Validated @RequestBody CustomerEditDtos.ValueRequest req) {
+        customerService.updateValue(id, req);
+        return R.ok();
     }
 
     @ApiOperation("风控准入结论:按评级出授信/押金/目标IRR(可覆盖;拒绝留痕)")

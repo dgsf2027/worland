@@ -26,6 +26,9 @@ public class AssetListItem {
     private String supplierName;
     private Long currentHolderCustomerId;
     private String currentHolderName;
+    /** 意向承接客户(未签约设备预设) */
+    private Long intendedCustomerId;
+    private String intendedCustomerName;
     /** 敏感字段是否已打码(GP/LP=true) */
     private Boolean sensitiveMasked;
 }

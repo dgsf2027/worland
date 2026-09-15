@@ -183,6 +183,7 @@ modules/<module>/
 | `V103__supplier_inspection.sql` | 供应商考察（合格自动入供应商池并关联） |
 | `V104__customer_company_info.sql` | 客户工商信息（法人/注册资本/业务范围） |
 | `V105__supplier_inspection_sheet.sql` | 供应商考察对齐汇总表（序号/成立时间/地址，注册资本改万元原文） |
+| `V106__asset_override_intended_customer_followup_contract.sql` | 单台收益手工覆盖、意向承接客户、跟进关联合同 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

@@ -59,6 +59,16 @@ public class Asset {
     /** 采购入库单(M1-12 采购模块回填) */
     private Long purchaseInId;
 
+    /** 意向承接客户(未签约设备预设;签约起租后清空,以合同客户为准) */
+    private Long intendedCustomerId;
+
+    // ---- 单台收益手工覆盖(NULL=自动计算;只影响展示) ----
+    private BigDecimal overrideAllocRent;
+    private BigDecimal overrideCumulativeRent;
+    private BigDecimal overrideReturnRate;
+    private Integer overrideInServiceDays;
+    private Integer overrideIdleDays;
+
     private String remark;
 
     private LocalDateTime createTime;

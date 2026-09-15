@@ -36,10 +36,11 @@ public class RentBillController {
     public R<PageResult<BillDtos.BillItem>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long contractId,
+            @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) String billKind,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return R.ok(rentBillService.list(status, contractId, billKind, page, size));
+        return R.ok(rentBillService.list(status, contractId, customerId, billKind, page, size));
     }
 
     @ApiOperation("收租单详情:主单 + 红冲/退款关联单 + 逾期案")

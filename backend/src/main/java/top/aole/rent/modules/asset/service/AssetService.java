@@ -17,6 +17,7 @@ import top.aole.rent.modules.asset.domain.AssetBom;
 import top.aole.rent.modules.asset.domain.AssetDepreciationLine;
 import top.aole.rent.modules.asset.domain.AssetEvent;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
+import top.aole.rent.modules.asset.dto.AssetLinkDtos;
 import top.aole.rent.modules.asset.dto.AssetListItem;
 import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
@@ -28,9 +29,11 @@ import top.aole.rent.modules.asset.mapper.AssetBomMapper;
 import top.aole.rent.modules.asset.mapper.AssetDepreciationLineMapper;
 import top.aole.rent.modules.asset.mapper.AssetEventMapper;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
+import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.domain.ContractAsset;
 import top.aole.rent.modules.contract.domain.RentSchedule;
 import top.aole.rent.modules.contract.mapper.ContractAssetMapper;
+import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.mapper.RentScheduleMapper;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
@@ -82,6 +85,7 @@ public class AssetService {
     private final CustomerMapper customerMapper;
     private final ContractAssetMapper contractAssetMapper;
     private final RentScheduleMapper rentScheduleMapper;
+    private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
 
     /** 状态机:from → 允许的 to 集合。已转让/报废为终态。 */
@@ -137,6 +141,8 @@ public class AssetService {
             it.setSupplierName(supplierName(a.getSupplierId()));
             it.setCurrentHolderCustomerId(a.getCurrentHolderCustomerId());
             it.setCurrentHolderName(customerName(a.getCurrentHolderCustomerId()));
+            it.setIntendedCustomerId(a.getIntendedCustomerId());
+            it.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
             it.setSensitiveMasked(!seeCost);
             items.add(it);
         }
@@ -166,8 +172,15 @@ public class AssetService {
         r.setReplaceHeadcount(a.getReplaceHeadcount());
         r.setSupplierId(a.getSupplierId());
         r.setSupplierName(supplierName(a.getSupplierId()));
+        r.setCurrentHolderCustomerId(a.getCurrentHolderCustomerId());
         r.setCurrentHolderName(customerName(a.getCurrentHolderCustomerId()));
+        r.setIntendedCustomerId(a.getIntendedCustomerId());
+        r.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
         r.setContractId(a.getContractId());
+        if (a.getContractId() != null) {
+            Contract ct = contractMapper.selectById(a.getContractId());
+            r.setContractNo(ct == null ? null : ct.getNo());
+        }
         r.setRemark(a.getRemark());
         r.setSensitiveMasked(!seeCost);
         r.setBookValue(seeCost ? bookValue(a) : null);
@@ -287,7 +300,52 @@ public class AssetService {
         a.setCurrentHolderCustomerId(customerId);
         a.setContractId(contractId);
         assetMapper.updateById(a);
+        // 签约后以合同客户为准,清空意向承接客户
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId).set(Asset::getIntendedCustomerId, null));
         writeEvent(assetId, "在租", "contract", contractId, "签约起租");
+    }
+
+    /** 合同改客户:在租设备的承租客户同步为新客户(合同状态 owner 调用)。 */
+    @Transactional
+    public void changeHolder(Long assetId, Long customerId) {
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId).set(Asset::getCurrentHolderCustomerId, customerId));
+    }
+
+    // ============ 单台收益手工覆盖 / 意向承接客户 ============
+
+    @Transactional
+    public void updateSingleUnitReturn(Long assetId, AssetLinkDtos.SingleUnitReturnRequest req) {
+        requireCostRole("编辑单台收益");
+        load(assetId);
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getOverrideAllocRent, req.getAllocRent())
+                .set(Asset::getOverrideCumulativeRent, req.getCumulativeRent())
+                .set(Asset::getOverrideReturnRate, req.getReturnRate())
+                .set(Asset::getOverrideInServiceDays, req.getInServiceDays())
+                .set(Asset::getOverrideIdleDays, req.getIdleDays()));
+        auditLogService.record("单台收益手工覆盖", "asset", assetId, AuditLogService.EXECUTED,
+                "月租分摊=" + req.getAllocRent() + " 累计收租=" + req.getCumulativeRent() + " 回报率=" + req.getReturnRate()
+                        + " 在租天数=" + req.getInServiceDays() + " 空置天数=" + req.getIdleDays());
+    }
+
+    @Transactional
+    public void updateIntendedCustomer(Long assetId, AssetLinkDtos.IntendedCustomerRequest req) {
+        requireCostRole("设置意向承接客户");
+        Asset a = load(assetId);
+        if (req.getCustomerId() != null) {
+            Customer c = customerMapper.selectById(req.getCustomerId());
+            if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
+                throw new BizException(404, "客户不存在: id=" + req.getCustomerId());
+            }
+            if (a.getCurrentHolderCustomerId() != null) {
+                throw new BizException(400, "设备已签约在租,承接客户以合同客户为准,不能再设意向客户");
+            }
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId).set(Asset::getIntendedCustomerId, req.getCustomerId()));
     }
 
     /** 合同作废:释放设备(在租→投放·再投放),清承租关系(走事件流)。 */
@@ -931,12 +989,20 @@ public class AssetService {
                 .orderByDesc(ContractAsset::getId)
                 .last("limit 1"));
         BigDecimal allocRent = ca != null ? ca.getAllocRent() : null;
+        if (a.getOverrideAllocRent() != null) {
+            allocRent = a.getOverrideAllocRent();
+            sr.getManualFields().add("allocRent");
+        }
         sr.setAllocRent(allocRent);
 
         int inServiceDays = 0;
         LocalDateTime rentStart = firstEventTime(a.getId(), "在租");
         if (rentStart != null) {
             inServiceDays = (int) Math.max(0, ChronoUnit.DAYS.between(rentStart.toLocalDate(), LocalDate.now()));
+        }
+        if (a.getOverrideInServiceDays() != null) {
+            inServiceDays = a.getOverrideInServiceDays();
+            sr.getManualFields().add("inServiceDays");
         }
         sr.setInServiceDays(inServiceDays);
 
@@ -947,6 +1013,10 @@ public class AssetService {
             if (deploy != null) {
                 idleDays = (int) Math.max(0, ChronoUnit.DAYS.between(deploy.toLocalDate(), LocalDate.now()));
             }
+        }
+        if (a.getOverrideIdleDays() != null) {
+            idleDays = a.getOverrideIdleDays();
+            sr.getManualFields().add("idleDays");
         }
         sr.setIdleDays(idleDays);
         sr.setIdleAlert(idleDays > 30);
@@ -960,10 +1030,17 @@ public class AssetService {
                     .size();
             cumulativeRent = allocRent.multiply(BigDecimal.valueOf(elapsedPeriods)).setScale(2, RoundingMode.HALF_UP);
         }
+        if (a.getOverrideCumulativeRent() != null) {
+            cumulativeRent = a.getOverrideCumulativeRent();
+            sr.getManualFields().add("cumulativeRent");
+        }
         sr.setCumulativeRent(seeCost ? cumulativeRent : null);
 
-        // 单台回报率 =(累计收租 + 残值 - 集采)/ 集采
-        if (seeCost && cumulativeRent != null && a.getPurchasePrice() != null
+        // 单台回报率 =(累计收租 + 残值 - 集采)/ 集采;手工覆盖优先
+        if (a.getOverrideReturnRate() != null) {
+            sr.getManualFields().add("returnRate");
+            sr.setReturnRate(seeCost ? a.getOverrideReturnRate() : null);
+        } else if (seeCost && cumulativeRent != null && a.getPurchasePrice() != null
                 && a.getPurchasePrice().signum() > 0) {
             BigDecimal residual = residualValue(a);
             BigDecimal gain = cumulativeRent.add(residual != null ? residual : BigDecimal.ZERO)

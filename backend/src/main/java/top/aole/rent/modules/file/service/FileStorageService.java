@@ -14,6 +14,8 @@ import top.aole.rent.common.exception.BizException;
 import top.aole.rent.modules.file.domain.FileObject;
 import top.aole.rent.modules.asset.domain.AssetBom;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
+import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 import top.aole.rent.modules.supplier.service.SupplierInspectionService;
@@ -63,6 +65,7 @@ public class FileStorageService {
     private final AssetBomMapper assetBomMapper;
     private final RuleConfigService ruleConfigService;
     private final SupplierInspectionService supplierInspectionService;
+    private final ContractMapper contractMapper;
 
     @Value("${rent.storage.dir:storage}")
     private String storageDir;
@@ -71,6 +74,7 @@ public class FileStorageService {
     /** 未单独配置的业务类型沿用原全局上限 */
     private static final long DEFAULT_MAX_BYTES = 10 * MB;
     /** 业务类型 → 单文件上限(字节);spring.servlet.multipart 为全局天花板,须 ≥ 此处最大值 */
+    private static final String CONTRACT = "contract";
     private static final Map<String, Long> MAX_BYTES = new HashMap<>();
     /** 业务类型 → 允许的扩展名(小写);未配置 = 不限格式 */
     private static final Map<String, Set<String>> ALLOWED_EXT = new HashMap<>();
@@ -80,7 +84,11 @@ public class FileStorageService {
                 "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "zip", "rar", "7z")));
         MAX_BYTES.put(SupplierInspectionService.BIZ_TYPE, 1024 * MB);
         ALLOWED_EXT.put(SupplierInspectionService.BIZ_TYPE, new HashSet<>(Arrays.asList("zip", "rar", "7z")));
+        // 合同附件:压缩包(合同扫描件/补充协议打包),与考察压缩包同上限
+        MAX_BYTES.put(CONTRACT, 1024 * MB);
+        ALLOWED_EXT.put(CONTRACT, new HashSet<>(Arrays.asList("zip", "rar", "7z")));
     }
+
 
     /** 进程内签名密钥(占位期随机;真上线走 KMS)。 */
     private final byte[] signSecret = newSecret();
@@ -143,6 +151,15 @@ public class FileStorageService {
         }
         if (SupplierInspectionService.BIZ_TYPE.equals(bizType)) {
             supplierInspectionService.assertCanAttach(bizId);
+        }
+        if (CONTRACT.equals(bizType)) {
+            if (!DataScope.canSeeCost(u.getRole())) {
+                throw new BizException(403, "当前角色无权上传合同附件");
+            }
+            Contract ct = bizId == null ? null : contractMapper.selectById(bizId);
+            if (ct == null || Integer.valueOf(1).equals(ct.getIsDeleted())) {
+                throw new BizException(404, "请先保存合同再上传附件");
+            }
         }
         checkFormatAndSize(file, bizType);
         String key = UUID.randomUUID().toString().replace("-", "");

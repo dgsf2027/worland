@@ -32,6 +32,9 @@ public class CustomerDetailResponse {
     /** 关联合同 + 设备租赁台账 */
     private ContractSummary contracts;
 
+    /** 意向承接设备(未签约,已在设备台账预设本客户) */
+    private List<IntendedAsset> intendedAssets;
+
     private CreditProfile creditProfile;
     private ValueExposure valueExposure;
     private List<FollowupItem> timeline;
@@ -91,12 +94,17 @@ public class CustomerDetailResponse {
 
     @Data
     public static class ValueExposure {
+        /** 【实时】合同数(不含已作废) */
         private Integer contractCount;
+        /** 【实时】累计收租 = Σ 收租单实收(红冲/退款为负数自动抵减) */
         private BigDecimal cumulativeRent;
-        /** 累计利润 LTV(敏感) */
+        /** 【手工】累计利润 LTV(敏感) */
         private BigDecimal cumulativeProfit;
+        /** 【手工】续租率(0-1) */
         private BigDecimal renewRate;
+        /** 【实时】在租敞口 = 生效合同未到期计划合计 */
         private BigDecimal exposureAmount;
+        /** 【实时】逾期应收 = 已过到期日未收清的收租单(应收−实收) */
         private BigDecimal receivableOverdue;
         /** 占总应收集中度(即时算 = 本客户在租敞口/全量在租敞口) */
         private BigDecimal concentration;
@@ -104,12 +112,27 @@ public class CustomerDetailResponse {
 
     @Data
     public static class FollowupItem {
+        private Long id;
         private String method;
         private String content;
         private String result;
+        private Long userId;
         private String userName;
         private LocalDateTime followTime;
         private LocalDate nextFollowDate;
+        /** 关联合同 */
+        private Long contractId;
+        private String contractNo;
+    }
+
+    /** 意向承接设备(设备台账里意向客户为本客户、尚未签约的设备) */
+    @Data
+    public static class IntendedAsset {
+        private Long id;
+        private String serialNo;
+        private String category;
+        private String model;
+        private String status;
     }
 
     @Data

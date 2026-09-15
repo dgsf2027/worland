@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchBills, matchBill, batchMatch, reverseBill, refundBill, runGen, fetchCashCheck,
@@ -18,7 +19,17 @@ const kindType: Record<string, string> = { 正常: '', 红冲: 'warning', 退款
 const stepType: Record<string, string> = { 延期: 'info', 罚息: 'warning', 锁机: 'danger', 收回: 'danger', 关闭: 'success' }
 
 // ---- 收租单列表 ----
-const filters = reactive<{ status: string; billKind: string; contractId?: number }>({ status: '', billKind: '' })
+const filters = reactive<{ status: string; billKind: string; contractId?: number; customerId?: number }>({ status: '', billKind: '' })
+// 从客户详情「查看收租」跳转过来(?customerId=):只看该客户合同下的收租单
+const route = useRoute()
+const router = useRouter()
+const customerName = ref('')
+function clearCustomer() {
+  filters.customerId = undefined
+  customerName.value = ''
+  router.replace({ path: '/rent' })
+  loadBills()
+}
 const statuses = ['待收', '已核销', '逾期', '红冲']
 const kinds = ['正常', '红冲', '退款', '罚息']
 const bills = ref<BillItem[]>([])
@@ -32,6 +43,7 @@ async function loadBills() {
     if (filters.status) params.status = filters.status
     if (filters.billKind) params.billKind = filters.billKind
     if (filters.contractId) params.contractId = filters.contractId
+    if (filters.customerId) params.customerId = filters.customerId
     const res = await fetchBills(params)
     bills.value = res.records
     total.value = res.total
@@ -138,7 +150,14 @@ async function stepRepay(c: OverdueItem) {
   loadOverdue(); loadBills(); loadCashCheck()
 }
 
-onMounted(() => { loadBills(); loadCashCheck(); loadOverdue() })
+onMounted(() => {
+  const cid = Number(route.query.customerId)
+  if (cid) {
+    filters.customerId = cid
+    customerName.value = String(route.query.customerName || `客户#${cid}`)
+  }
+  loadBills(); loadCashCheck(); loadOverdue()
+})
 </script>
 
 <template>
@@ -171,6 +190,7 @@ onMounted(() => { loadBills(); loadCashCheck(); loadOverdue() })
             <el-option v-for="k in kinds" :key="k" :label="k" :value="k" />
           </el-select>
           <el-button size="small" @click="loadBills">查询</el-button>
+          <el-tag v-if="filters.customerId" size="small" closable @close="clearCustomer">只看客户：{{ customerName }}</el-tag>
           <el-button size="small" type="primary" @click="doGen">⏱ 生成到期收租单(T-3)</el-button>
           <el-button size="small" type="success" :disabled="!selectableCount" @click="doBatchMatch">
             ✓ 批量核销{{ selectableCount ? `(${selectableCount}张 · ${money(selectedSum)})` : '' }}

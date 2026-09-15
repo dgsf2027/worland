@@ -7,6 +7,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,6 +17,7 @@ import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.contract.dto.ContractChangeRequest;
 import top.aole.rent.modules.contract.dto.ContractDetailResponse;
+import top.aole.rent.modules.contract.dto.ContractEditRequest;
 import top.aole.rent.modules.contract.dto.ContractListItem;
 import top.aole.rent.modules.contract.dto.ContractSignRequest;
 import top.aole.rent.modules.contract.service.ContractService;
@@ -52,6 +54,14 @@ public class ContractController {
     @GetMapping("/{id}")
     public R<ContractDetailResponse> detail(@PathVariable Long id) {
         return R.ok(contractService.detail(id));
+    }
+
+    @ApiOperation("编辑合同要素(敏感·财务+老板·留痕):草稿直接改;生效合同保留已出单期次、其余期次重排、押金差额补收/退回")
+    @RequireRole(value = {"财务", "老板"}, action = "合同编辑", targetType = "contract")
+    @PutMapping("/{id}")
+    public R<Void> edit(@PathVariable Long id, @Validated @RequestBody ContractEditRequest req) {
+        contractService.edit(id, req);
+        return R.ok();
     }
 
     @ApiOperation("作废(敏感·财务+老板·限未采购·整份红冲:计划删/押金退/设备释放)")

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import {
   fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
   addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
+  updateSingleUnitReturn, updateIntendedCustomer,
   uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile,
   BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB,
   type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem,
@@ -341,6 +343,103 @@ async function uploadAttachRequest(options: any) {
   }
 }
 
+// ---- 承接客户(承租客户跳转 / 意向承接客户) ----
+const router = useRouter()
+function goCustomer(id?: number) {
+  if (id) router.push({ path: '/customer', query: { id: String(id) } })
+}
+function goContract(id?: number) {
+  if (id) router.push({ path: '/contract', query: { id: String(id) } })
+}
+const customers = ref<CustomerPoolItem[]>([])
+const customersLoading = ref(false)
+async function loadCustomers() {
+  if (customers.value.length) return
+  customersLoading.value = true
+  try {
+    customers.value = (await fetchCustomerPool({ page: 1, size: 1000 })).records
+  } finally {
+    customersLoading.value = false
+  }
+}
+const intendedVisible = ref(false)
+const intendedSaving = ref(false)
+const intendedCustomerId = ref<number | undefined>()
+async function openIntended() {
+  if (!detail.value) return
+  intendedCustomerId.value = detail.value.intendedCustomerId
+  intendedVisible.value = true
+  await loadCustomers()
+}
+async function submitIntended() {
+  if (!detail.value) return
+  intendedSaving.value = true
+  try {
+    await updateIntendedCustomer(detail.value.id, intendedCustomerId.value ?? null)
+    intendedVisible.value = false
+    ElMessage.success(intendedCustomerId.value ? '已设置意向承接客户' : '已清除意向承接客户')
+    await openDetail(detail.value.id)
+    loadList()
+  } finally {
+    intendedSaving.value = false
+  }
+}
+
+// ---- 单台收益：手工覆盖 ----
+const surDims = [
+  { key: 'allocRent', label: '单台月租分摊(元)', precision: 2, step: 500, max: undefined as number | undefined },
+  { key: 'cumulativeRent', label: '累计收租(元)', precision: 2, step: 1000, max: undefined },
+  { key: 'returnRatePct', label: '单台回报率(%)', precision: 2, step: 1, max: undefined },
+  { key: 'inServiceDays', label: '在租天数', precision: 0, step: 1, max: undefined },
+  { key: 'idleDays', label: '空置天数', precision: 0, step: 1, max: undefined },
+]
+const surVisible = ref(false)
+const surSaving = ref(false)
+const surForm = reactive<Record<string, any>>({})
+function isManual(field: string) {
+  return !!detail.value?.singleUnitReturn.manualFields?.includes(field)
+}
+function openSurEdit() {
+  const sr = detail.value?.singleUnitReturn
+  if (!sr) return
+  const m = (f: string) => sr.manualFields?.includes(f)
+  Object.keys(surForm).forEach((k) => delete surForm[k])
+  Object.assign(surForm, {
+    allocRent: m('allocRent') ? sr.allocRent : null,
+    cumulativeRent: m('cumulativeRent') ? sr.cumulativeRent : null,
+    returnRatePct: m('returnRate') && sr.returnRate != null ? Math.round(sr.returnRate * 10000) / 100 : null,
+    inServiceDays: m('inServiceDays') ? sr.inServiceDays : null,
+    idleDays: m('idleDays') ? sr.idleDays : null,
+  })
+  surVisible.value = true
+}
+function surAutoValue(key: string) {
+  const sr = detail.value?.singleUnitReturn as any
+  if (!sr) return '—'
+  if (key === 'returnRatePct') return isManual('returnRate') ? '（当前为手工值）' : (sr.returnRate != null ? (sr.returnRate * 100).toFixed(1) + '%' : '—')
+  if (isManual(key)) return '（当前为手工值）'
+  const v = sr[key]
+  return v == null ? '—' : (key.endsWith('Days') ? v + ' 天' : money(v))
+}
+async function submitSur() {
+  if (!detail.value) return
+  surSaving.value = true
+  try {
+    await updateSingleUnitReturn(detail.value.id, {
+      allocRent: surForm.allocRent ?? null,
+      cumulativeRent: surForm.cumulativeRent ?? null,
+      returnRate: surForm.returnRatePct == null ? null : Math.round(Number(surForm.returnRatePct) * 100) / 10000,
+      inServiceDays: surForm.inServiceDays ?? null,
+      idleDays: surForm.idleDays ?? null,
+    })
+    surVisible.value = false
+    ElMessage.success('单台收益已保存')
+    await openDetail(detail.value.id)
+  } finally {
+    surSaving.value = false
+  }
+}
+
 // ---- 故障档案：编辑 ----
 const faultDialogVisible = ref(false)
 const faultSaving = ref(false)
@@ -551,7 +650,16 @@ onMounted(() => {
       <el-table-column label="集采价🔒" width="100"><template #default="{ row }">{{ money(row.purchasePrice) }}</template></el-table-column>
       <el-table-column label="账面价🔒" width="100"><template #default="{ row }">{{ money(row.bookValue) }}</template></el-table-column>
       <el-table-column label="残值" width="90"><template #default="{ row }">{{ money(row.residualValue) }}</template></el-table-column>
-      <el-table-column prop="currentHolderName" label="承租客户" width="120"><template #default="{ row }">{{ row.currentHolderName || '—' }}</template></el-table-column>
+      <el-table-column label="承接客户" width="150">
+        <template #default="{ row }">
+          <a v-if="row.currentHolderCustomerId" class="lnk" @click.stop="goCustomer(row.currentHolderCustomerId)">{{ row.currentHolderName }}</a>
+          <template v-else-if="row.intendedCustomerId">
+            <a class="lnk" @click.stop="goCustomer(row.intendedCustomerId)">{{ row.intendedCustomerName }}</a>
+            <el-tag size="small" type="warning" effect="plain" class="manual-tag">意向</el-tag>
+          </template>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
     </el-table>
 
     <!-- 详情抽屉 -->
@@ -574,6 +682,21 @@ onMounted(() => {
           <el-descriptions-item label="残值(市场价×转让率)">{{ money(detail.residualValue) }}</el-descriptions-item>
           <el-descriptions-item label="月替代人工">{{ money(detail.monthlyLaborValue) }}</el-descriptions-item>
           <el-descriptions-item label="自购回本(月)">{{ detail.selfPurchasePayback ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="承接客户" :span="3">
+            <template v-if="detail.currentHolderCustomerId">
+              <a class="lnk" @click="goCustomer(detail.currentHolderCustomerId)">{{ detail.currentHolderName }}</a>
+              <el-tag size="small" type="success" class="manual-tag">在租</el-tag>
+              <span v-if="detail.contractNo" class="upload-tip inline-tip">合同 <a class="lnk" @click="goContract(detail.contractId)">{{ detail.contractNo }}</a></span>
+            </template>
+            <template v-else-if="detail.intendedCustomerId">
+              <a class="lnk" @click="goCustomer(detail.intendedCustomerId)">{{ detail.intendedCustomerName }}</a>
+              <el-tag size="small" type="warning" effect="plain" class="manual-tag">意向</el-tag>
+            </template>
+            <span v-else class="upload-tip inline-tip">未签约，暂无承接客户</span>
+            <el-button v-if="!detail.sensitiveMasked && !detail.currentHolderCustomerId" link type="primary" size="small" class="manual-tag" @click="openIntended">
+              {{ detail.intendedCustomerId ? '更换意向客户' : '设置意向客户' }}
+            </el-button>
+          </el-descriptions-item>
         </el-descriptions>
 
         <!-- 状态机流转 -->
@@ -677,15 +800,19 @@ onMounted(() => {
         </el-table>
 
         <!-- 单台收益 -->
-        <div class="block-title">单台收益</div>
+        <div class="block-title block-title-row">
+          <span>单台收益</span>
+          <el-button v-if="!detail.sensitiveMasked" type="primary" link size="small" @click="openSurEdit">编辑</el-button>
+        </div>
         <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="单台月租分摊">{{ money(detail.singleUnitReturn.allocRent) }}</el-descriptions-item>
-          <el-descriptions-item label="累计收租">{{ money(detail.singleUnitReturn.cumulativeRent) }}</el-descriptions-item>
-          <el-descriptions-item label="单台回报率">{{ detail.singleUnitReturn.returnRate != null ? (detail.singleUnitReturn.returnRate * 100).toFixed(1) + '%' : '🔒' }}</el-descriptions-item>
-          <el-descriptions-item label="在租天数">{{ detail.singleUnitReturn.inServiceDays ?? 0 }}</el-descriptions-item>
+          <el-descriptions-item label="单台月租分摊">{{ money(detail.singleUnitReturn.allocRent) }}<el-tag v-if="isManual('allocRent')" size="small" type="warning" class="manual-tag">手工</el-tag></el-descriptions-item>
+          <el-descriptions-item label="累计收租">{{ money(detail.singleUnitReturn.cumulativeRent) }}<el-tag v-if="isManual('cumulativeRent')" size="small" type="warning" class="manual-tag">手工</el-tag></el-descriptions-item>
+          <el-descriptions-item label="单台回报率">{{ detail.singleUnitReturn.returnRate != null ? (detail.singleUnitReturn.returnRate * 100).toFixed(1) + '%' : '🔒' }}<el-tag v-if="isManual('returnRate')" size="small" type="warning" class="manual-tag">手工</el-tag></el-descriptions-item>
+          <el-descriptions-item label="在租天数">{{ detail.singleUnitReturn.inServiceDays ?? 0 }}<el-tag v-if="isManual('inServiceDays')" size="small" type="warning" class="manual-tag">手工</el-tag></el-descriptions-item>
           <el-descriptions-item label="空置天数">
             <el-tag v-if="detail.singleUnitReturn.idleAlert" type="danger" size="small">{{ detail.singleUnitReturn.idleDays }} ⚠</el-tag>
             <span v-else>{{ detail.singleUnitReturn.idleDays ?? 0 }}</span>
+            <el-tag v-if="isManual('idleDays')" size="small" type="warning" class="manual-tag">手工</el-tag>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -924,6 +1051,37 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <!-- 意向承接客户 -->
+    <el-dialog v-model="intendedVisible" title="设置意向承接客户" width="460px">
+      <el-form label-width="100px" size="small" :disabled="intendedSaving">
+        <el-form-item label="意向客户">
+          <el-select v-model="intendedCustomerId" filterable clearable :loading="customersLoading" placeholder="选择客户 CRM 中的客户" style="width:100%">
+            <el-option v-for="c in customers" :key="c.id" :label="c.name + (c.contact ? ' · ' + c.contact : '')" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <div class="upload-tip fault-tip">未签约设备可先预设意向客户，客户详情里能看到；签约起租后自动以合同客户为准。清空后保存即取消。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="intendedSaving" @click="intendedVisible = false">取消</el-button>
+        <el-button type="primary" :loading="intendedSaving" @click="submitIntended">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 单台收益手工覆盖 -->
+    <el-dialog v-model="surVisible" title="编辑单台收益" width="540px">
+      <el-form label-width="130px" size="small" :disabled="surSaving">
+        <el-form-item v-for="d in surDims" :key="d.key" :label="d.label">
+          <el-input-number v-model="surForm[d.key]" :min="0" :precision="d.precision" :step="d.step" controls-position="right" placeholder="自动" style="width:180px" />
+          <span class="upload-tip inline-tip">自动值 {{ surAutoValue(d.key) }}</span>
+        </el-form-item>
+        <div class="upload-tip fault-tip">填写即按手工值展示并标记「手工」；清空保存即恢复系统自动计算。只影响本设备展示，不改合同和收租单。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="surSaving" @click="surVisible = false">取消</el-button>
+        <el-button type="primary" :loading="surSaving" @click="submitSur">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 故障档案编辑弹窗 -->
     <el-dialog v-model="faultDialogVisible" :title="'编辑故障档案 · ' + faultForm.name" width="520px">
       <el-form :model="faultForm" label-width="110px" size="small" :disabled="faultSaving">
@@ -984,5 +1142,8 @@ onMounted(() => {
 .boq-total { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .boq-total .upload-tip { margin-top: 0; }
 .manual-tag { margin-left: 4px; }
+.inline-tip { margin: 0 0 0 8px; display: inline; }
+.lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
+.lnk:hover { text-decoration: underline; }
 .fault-tip { margin-left: 110px; }
 </style>

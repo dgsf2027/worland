@@ -35,6 +35,9 @@ public class CustomerFollowup {
 
     private LocalDate nextFollowDate;
 
+    /** 关联合同(可空) */
+    private Long contractId;
+
     private LocalDateTime createTime;
 
     private Integer isDeleted;

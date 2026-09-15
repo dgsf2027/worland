@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import top.aole.rent.common.audit.AuditLogService;
 import top.aole.rent.common.auth.CurrentUser;
 import top.aole.rent.common.auth.DataScope;
 import top.aole.rent.common.auth.UserContext;
@@ -18,13 +19,18 @@ import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.domain.ContractAsset;
+import top.aole.rent.modules.contract.domain.RentSchedule;
+import top.aole.rent.modules.billing.domain.RentBill;
+import top.aole.rent.modules.billing.mapper.RentBillMapper;
 import top.aole.rent.modules.contract.mapper.ContractAssetMapper;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
+import top.aole.rent.modules.contract.mapper.RentScheduleMapper;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.domain.CustomerFollowup;
 import top.aole.rent.modules.customer.domain.Opportunity;
 import top.aole.rent.modules.customer.dto.AdmissionRequest;
 import top.aole.rent.modules.customer.dto.CustomerDetailResponse;
+import top.aole.rent.modules.customer.dto.CustomerEditDtos;
 import top.aole.rent.modules.customer.dto.CustomerPoolItem;
 import top.aole.rent.modules.customer.dto.CustomerSaveRequest;
 import top.aole.rent.modules.customer.dto.FollowupRequest;
@@ -74,6 +80,9 @@ public class CustomerService {
     private final ContractMapper contractMapper;
     private final ContractAssetMapper contractAssetMapper;
     private final AssetMapper assetMapper;
+    private final RentScheduleMapper rentScheduleMapper;
+    private final RentBillMapper rentBillMapper;
+    private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 可在租合同的状态口径 */
@@ -136,9 +145,10 @@ public class CustomerService {
             it.setRatingPredicted(r != null && PRE_DEAL.contains(c.getPhase()));
             it.setInPublicPool(c.getOwnerUser() == null);
             // 敏感财务字段投影
-            BigDecimal amount = pickAmount(c);
+            BigDecimal amount = pickAmount(c, stats.exposure.get(c.getId()));
             it.setExposureOrOppAmount(seeCost ? amount : null);
-            it.setReceivableOverdue(seeCost ? c.getReceivableOverdue() : null);
+            BigDecimal overdue = stats.overdue.get(c.getId());
+            it.setReceivableOverdue(seeCost && overdue != null ? money2(overdue) : null);
             it.setSensitiveMasked(!seeCost);
             it.setNextFollowDate(c.getNextFollowDate());
             it.setFollowStatus(followStatus(c.getNextFollowDate()));
@@ -165,6 +175,7 @@ public class CustomerService {
             qw.and(w -> w.eq(Customer::getOwnerUser, myId).or().isNull(Customer::getOwnerUser));
         }
         List<Customer> all = customerMapper.selectList(qw);
+        ContractStats pipeStats = contractStats(all.stream().map(Customer::getId).collect(Collectors.toSet()));
 
         // 加权预测:open 商机 est×prob(受行级隔离范围约束)
         Set<Long> visibleIds = all.stream().map(Customer::getId).collect(Collectors.toSet());
@@ -196,7 +207,7 @@ public class CustomerService {
                 card.setCustomerId(c.getId());
                 card.setName(c.getName());
                 card.setOwnerName(resolveUserName(c.getOwnerUser()));
-                card.setAmount(seeCost ? pickAmount(c) : null);
+                card.setAmount(seeCost ? pickAmount(c, pipeStats.exposure.get(c.getId())) : null);
                 card.setTag(c.getValueTier() != null ? c.getValueTier() : c.getPhase());
                 cards.add(card);
             }
@@ -251,30 +262,55 @@ public class CustomerService {
             r.setCreditProfile(cp);
         }
 
-        // 价值 & 敞口
+        // 价值 & 敞口:合同数/累计收租/在租敞口/逾期应收 实时算;累计利润/续租率 手工维护
+        ContractStats stats = contractStats(Collections.singleton(id));
         CustomerDetailResponse.ValueExposure ve = new CustomerDetailResponse.ValueExposure();
-        ve.setContractCount(c.getContractCount());
-        ve.setCumulativeRent(c.getCumulativeRent());
+        BigDecimal exposure = money2(stats.exposure.get(id));
+        ve.setContractCount(stats.total.getOrDefault(id, 0));
+        ve.setCumulativeRent(money2(stats.cumulativeRent.get(id)));
         ve.setCumulativeProfit(seeCost ? c.getCumulativeProfit() : null);
         ve.setRenewRate(c.getRenewRate());
-        ve.setExposureAmount(c.getExposureAmount());
-        ve.setReceivableOverdue(c.getReceivableOverdue());
-        ve.setConcentration(concentration(c));
+        ve.setExposureAmount(exposure);
+        ve.setReceivableOverdue(money2(stats.overdue.get(id)));
+        ve.setConcentration(concentration(exposure));
         r.setValueExposure(ve);
+
+        // 意向承接设备
+        List<CustomerDetailResponse.IntendedAsset> intended = new ArrayList<>();
+        for (Asset a : assetMapper.selectList(new LambdaQueryWrapper<Asset>()
+                .eq(Asset::getIntendedCustomerId, id).orderByAsc(Asset::getId))) {
+            CustomerDetailResponse.IntendedAsset ia = new CustomerDetailResponse.IntendedAsset();
+            ia.setId(a.getId());
+            ia.setSerialNo(a.getSerialNo());
+            ia.setCategory(a.getCategory());
+            ia.setModel(a.getModel());
+            ia.setStatus(a.getStatus());
+            intended.add(ia);
+        }
+        r.setIntendedAssets(intended);
 
         // 跟进时间线
         List<CustomerFollowup> fus = followupMapper.selectList(new LambdaQueryWrapper<CustomerFollowup>()
                 .eq(CustomerFollowup::getCustomerId, id)
-                .orderByDesc(CustomerFollowup::getFollowTime));
+                .orderByDesc(CustomerFollowup::getFollowTime).orderByDesc(CustomerFollowup::getId));
+        Set<Long> fuContractIds = fus.stream().map(CustomerFollowup::getContractId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> contractNos = fuContractIds.isEmpty() ? new HashMap<>()
+                : contractMapper.selectBatchIds(fuContractIds).stream()
+                .collect(Collectors.toMap(Contract::getId, Contract::getNo));
         List<CustomerDetailResponse.FollowupItem> timeline = new ArrayList<>();
         for (CustomerFollowup f : fus) {
             CustomerDetailResponse.FollowupItem fi = new CustomerDetailResponse.FollowupItem();
+            fi.setId(f.getId());
             fi.setMethod(f.getMethod());
             fi.setContent(f.getContent());
             fi.setResult(f.getResult());
+            fi.setUserId(f.getUserId());
             fi.setUserName(f.getUserName());
             fi.setFollowTime(f.getFollowTime());
             fi.setNextFollowDate(f.getNextFollowDate());
+            fi.setContractId(f.getContractId());
+            fi.setContractNo(f.getContractId() == null ? null : contractNos.get(f.getContractId()));
             timeline.add(fi);
         }
         r.setTimeline(timeline);
@@ -348,7 +384,9 @@ public class CustomerService {
     @Transactional
     public Long addFollowup(Long customerId, FollowupRequest req) {
         Customer c = load(customerId);
+        checkVisible(c);
         CurrentUser me = UserContext.require();
+        checkFollowupContract(customerId, req.getContractId());
 
         CustomerFollowup f = new CustomerFollowup();
         f.setCustomerId(customerId);
@@ -359,12 +397,113 @@ public class CustomerService {
         f.setResult(req.getResult());
         f.setFollowTime(LocalDateTime.now());
         f.setNextFollowDate(req.getNextFollowDate());
+        f.setContractId(req.getContractId());
         followupMapper.insert(f);
 
-        // 同步客户 next_follow_date(followup 是该派生字段的写手)
-        c.setNextFollowDate(req.getNextFollowDate());
-        customerMapper.updateById(c);
+        syncNextFollowDate(customerId);
         return f.getId();
+    }
+
+    @Transactional
+    public void updateFollowup(Long followupId, FollowupRequest req) {
+        CustomerFollowup f = loadFollowup(followupId);
+        checkVisible(load(f.getCustomerId()));
+        checkFollowupOwner(f, "编辑");
+        checkFollowupContract(f.getCustomerId(), req.getContractId());
+        followupMapper.update(null, new LambdaUpdateWrapper<CustomerFollowup>()
+                .eq(CustomerFollowup::getId, followupId)
+                .set(CustomerFollowup::getMethod, req.getMethod() == null || req.getMethod().isEmpty() ? "电话" : req.getMethod())
+                .set(CustomerFollowup::getContent, req.getContent())
+                .set(CustomerFollowup::getResult, req.getResult())
+                .set(CustomerFollowup::getNextFollowDate, req.getNextFollowDate())
+                .set(CustomerFollowup::getContractId, req.getContractId()));
+        syncNextFollowDate(f.getCustomerId());
+    }
+
+    @Transactional
+    public void deleteFollowup(Long followupId) {
+        CustomerFollowup f = loadFollowup(followupId);
+        checkVisible(load(f.getCustomerId()));
+        checkFollowupOwner(f, "删除");
+        followupMapper.deleteById(followupId);
+        syncNextFollowDate(f.getCustomerId());
+    }
+
+    /** 客户 next_follow_date = 最近一条跟进的下次跟进日(followup 是该派生字段的写手)。 */
+    private void syncNextFollowDate(Long customerId) {
+        CustomerFollowup latest = followupMapper.selectOne(new LambdaQueryWrapper<CustomerFollowup>()
+                .eq(CustomerFollowup::getCustomerId, customerId)
+                .orderByDesc(CustomerFollowup::getFollowTime).orderByDesc(CustomerFollowup::getId)
+                .last("LIMIT 1"));
+        customerMapper.update(null, new LambdaUpdateWrapper<Customer>()
+                .eq(Customer::getId, customerId)
+                .set(Customer::getNextFollowDate, latest == null ? null : latest.getNextFollowDate()));
+    }
+
+    private CustomerFollowup loadFollowup(Long id) {
+        CustomerFollowup f = id == null ? null : followupMapper.selectById(id);
+        if (f == null || Integer.valueOf(1).equals(f.getIsDeleted())) {
+            throw new BizException(404, "跟进记录不存在: id=" + id);
+        }
+        return f;
+    }
+
+    /** 跟进只能由记录人本人或老板修改/删除。 */
+    private void checkFollowupOwner(CustomerFollowup f, String action) {
+        CurrentUser me = UserContext.require();
+        if (!"老板".equals(me.getRole()) && (f.getUserId() == null || !f.getUserId().equals(me.getUserId()))) {
+            throw new BizException(403, "只能" + action + "自己记录的跟进(老板除外)");
+        }
+    }
+
+    private void checkFollowupContract(Long customerId, Long contractId) {
+        if (contractId == null) {
+            return;
+        }
+        Contract ct = contractMapper.selectById(contractId);
+        if (ct == null || !customerId.equals(ct.getCustomerId())) {
+            throw new BizException(400, "关联的合同不存在或不属于该客户");
+        }
+    }
+
+    /** 行级可见域:业务只能操作自己名下或公海客户。 */
+    private void checkVisible(Customer c) {
+        CurrentUser me = UserContext.require();
+        if (DataScope.isOwnerScoped(me.getRole())
+                && c.getOwnerUser() != null && !c.getOwnerUser().equals(me.getUserId())) {
+            throw new BizException(403, "无权限:该客户属其他业务名下,不在你的可见域");
+        }
+    }
+
+    // ============ 信用画像 / 客户价值 手工编辑 ============
+
+    @Transactional
+    public void updateCredit(Long customerId, CustomerEditDtos.CreditRequest req) {
+        Customer c = load(customerId);
+        checkVisible(c);
+        customerMapper.update(null, new LambdaUpdateWrapper<Customer>()
+                .eq(Customer::getId, customerId)
+                .set(Customer::getScoreProfit, req.getProfit())
+                .set(Customer::getScoreCashflow, req.getCashflow())
+                .set(Customer::getScoreStability, req.getStability())
+                .set(Customer::getScoreHistory, req.getHistory())
+                .set(Customer::getScoreIndustry, req.getIndustry()));
+        auditLogService.record("客户信用画像", "customer", customerId, AuditLogService.EXECUTED,
+                "盈利" + req.getProfit() + "/现金流" + req.getCashflow() + "/稳定" + req.getStability()
+                        + "/履约" + req.getHistory() + "/行业" + req.getIndustry());
+    }
+
+    @Transactional
+    public void updateValue(Long customerId, CustomerEditDtos.ValueRequest req) {
+        Customer c = load(customerId);
+        checkVisible(c);
+        if (!DataScope.canSeeCost(UserContext.getRole())) {
+            throw new BizException(403, "当前角色无权编辑客户价值(含累计利润)");
+        }
+        customerMapper.update(null, new LambdaUpdateWrapper<Customer>()
+                .eq(Customer::getId, customerId)
+                .set(Customer::getCumulativeProfit, req.getCumulativeProfit() == null ? BigDecimal.ZERO : req.getCumulativeProfit())
+                .set(Customer::getRenewRate, req.getRenewRate()));
     }
 
     // ============ 风控准入结论 ============
@@ -411,11 +550,17 @@ public class CustomerService {
 
     // ============ 关联合同 / 设备租赁台账(即时算,不落快照) ============
 
-    /** 按客户批量统计:可在租合同数 / 合同总数(不含作废) / 在租设备台数。 */
+    /**
+     * 按客户批量统计(实时,按合同 + 租金计划 + 收租单):
+     * 可在租合同数 / 合同总数(不含作废) / 在租设备台数 / 累计收租 / 在租敞口 / 逾期应收。
+     */
     private static class ContractStats {
         final Map<Long, Integer> active = new HashMap<>();
         final Map<Long, Integer> total = new HashMap<>();
         final Map<Long, Integer> activeAssets = new HashMap<>();
+        final Map<Long, BigDecimal> cumulativeRent = new HashMap<>();
+        final Map<Long, BigDecimal> exposure = new HashMap<>();
+        final Map<Long, BigDecimal> overdue = new HashMap<>();
     }
 
     private ContractStats contractStats(Set<Long> customerIds) {
@@ -424,10 +569,14 @@ public class CustomerService {
             return s;
         }
         List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
-                .in(Contract::getCustomerId, customerIds)
-                .ne(Contract::getStatus, VOID_CONTRACT));
+                .in(Contract::getCustomerId, customerIds));
+        Map<Long, Long> contractToCustomer = new HashMap<>();
         Map<Long, Long> activeContractToCustomer = new HashMap<>();
         for (Contract c : contracts) {
+            contractToCustomer.put(c.getId(), c.getCustomerId());
+            if (VOID_CONTRACT.equals(c.getStatus())) {
+                continue;
+            }
             s.total.merge(c.getCustomerId(), 1, Integer::sum);
             if (ACTIVE_CONTRACT.equals(c.getStatus())) {
                 s.active.merge(c.getCustomerId(), 1, Integer::sum);
@@ -439,8 +588,52 @@ public class CustomerService {
                     .in(ContractAsset::getContractId, activeContractToCustomer.keySet()))) {
                 s.activeAssets.merge(activeContractToCustomer.get(ca.getContractId()), 1, Integer::sum);
             }
+            LocalDate today = LocalDate.now();
+            for (RentSchedule rs : rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()
+                    .in(RentSchedule::getContractId, activeContractToCustomer.keySet())
+                    .gt(RentSchedule::getDueDate, today))) {
+                if (rs.getAmount() != null) {
+                    s.exposure.merge(activeContractToCustomer.get(rs.getContractId()), rs.getAmount(), BigDecimal::add);
+                }
+            }
+        }
+        if (!contractToCustomer.isEmpty()) {
+            LocalDate today = LocalDate.now();
+            for (RentBill b : rentBillMapper.selectList(new LambdaQueryWrapper<RentBill>()
+                    .in(RentBill::getContractId, contractToCustomer.keySet()))) {
+                Long cid = contractToCustomer.get(b.getContractId());
+                BigDecimal received = b.getReceivedAmount() == null ? BigDecimal.ZERO : b.getReceivedAmount();
+                // 红冲/退款单为负数,直接合计即自动抵减
+                s.cumulativeRent.merge(cid, received, BigDecimal::add);
+                boolean open = "待收".equals(b.getStatus()) || "逾期".equals(b.getStatus());
+                if (open && b.getDueDate() != null && b.getDueDate().isBefore(today) && b.getAmount() != null) {
+                    BigDecimal unpaid = b.getAmount().subtract(received);
+                    if (unpaid.signum() > 0) {
+                        s.overdue.merge(cid, unpaid, BigDecimal::add);
+                    }
+                }
+            }
         }
         return s;
+    }
+
+    /** 全部客户的在租敞口合计(集中度分母)。 */
+    private BigDecimal totalExposure() {
+        Set<Long> activeIds = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getStatus, ACTIVE_CONTRACT)).stream()
+                .map(Contract::getId).collect(Collectors.toSet());
+        if (activeIds.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        return rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()
+                        .in(RentSchedule::getContractId, activeIds)
+                        .gt(RentSchedule::getDueDate, LocalDate.now())).stream()
+                .map(RentSchedule::getAmount).filter(java.util.Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private static BigDecimal money2(BigDecimal v) {
+        return (v == null ? BigDecimal.ZERO : v).setScale(2, RoundingMode.HALF_UP);
     }
 
     /** 客户详情:合同列表(生效在前)+ 每份合同挂的设备(取设备台账当前状态)。 */
@@ -544,26 +737,21 @@ public class CustomerService {
     }
 
     /** 集中度(即时算):本客户在租敞口 / 全量在租敞口。 */
-    private BigDecimal concentration(Customer c) {
-        if (c.getExposureAmount() == null || c.getExposureAmount().signum() == 0) {
+    private BigDecimal concentration(BigDecimal exposure) {
+        if (exposure == null || exposure.signum() == 0) {
             return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
         }
-        List<Customer> all = customerMapper.selectList(new LambdaQueryWrapper<>());
-        double totalExposure = all.stream()
-                .map(Customer::getExposureAmount)
-                .filter(x -> x != null)
-                .mapToDouble(BigDecimal::doubleValue).sum();
-        if (totalExposure <= 0) {
+        BigDecimal total = totalExposure();
+        if (total.signum() <= 0) {
             return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
         }
-        return BigDecimal.valueOf(c.getExposureAmount().doubleValue() / totalExposure)
-                .setScale(4, RoundingMode.HALF_UP);
+        return exposure.divide(total, 4, RoundingMode.HALF_UP);
     }
 
-    /** 列表金额:在租看敞口,否则看名下 open 商机额合计。 */
-    private BigDecimal pickAmount(Customer c) {
-        if (c.getExposureAmount() != null && c.getExposureAmount().signum() > 0) {
-            return c.getExposureAmount();
+    /** 列表金额:在租看敞口(实时),否则看名下 open 商机额合计。 */
+    private BigDecimal pickAmount(Customer c, BigDecimal exposure) {
+        if (exposure != null && exposure.signum() > 0) {
+            return money2(exposure);
         }
         List<Opportunity> opps = opportunityMapper.selectList(new LambdaQueryWrapper<Opportunity>()
                 .eq(Opportunity::getCustomerId, c.getId())

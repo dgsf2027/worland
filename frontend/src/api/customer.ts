@@ -51,12 +51,23 @@ export interface ValueExposure {
   concentration: number
 }
 export interface FollowupItem {
+  id: number
   method: string
   content: string
   result?: string
+  userId?: number
   userName?: string
   followTime: string
   nextFollowDate?: string
+  contractId?: number
+  contractNo?: string
+}
+export interface IntendedAsset {
+  id: number
+  serialNo: string
+  category?: string
+  model?: string
+  status?: string
 }
 export interface Admission {
   suggestCreditLimit?: number
@@ -107,6 +118,8 @@ export interface CustomerDetail {
   ownerName?: string
   sensitiveMasked?: boolean
   contracts: CustomerContractSummary
+  /** 意向承接设备(未签约) */
+  intendedAssets: IntendedAsset[]
   creditProfile?: CreditProfile
   valueExposure: ValueExposure
   timeline: FollowupItem[]
@@ -131,6 +144,18 @@ export function fetchCustomerDetail(id: number): Promise<CustomerDetail> {
 }
 export function fetchPipeline(): Promise<Pipeline> {
   return request.get('/rent/customers/pipeline')
+}
+export function updateFollowup(followupId: number, body: Record<string, any>): Promise<void> {
+  return request.put(`/rent/customers/followups/${followupId}`, body)
+}
+export function deleteFollowup(followupId: number): Promise<void> {
+  return request.delete(`/rent/customers/followups/${followupId}`)
+}
+export function updateCredit(id: number, body: Record<string, number | null>): Promise<void> {
+  return request.put(`/rent/customers/${id}/credit`, body)
+}
+export function updateCustomerValue(id: number, body: Record<string, number | null>): Promise<void> {
+  return request.put(`/rent/customers/${id}/value`, body)
 }
 export function addFollowup(id: number, body: Record<string, any>): Promise<number> {
   return request.post(`/rent/customers/${id}/followup`, body)

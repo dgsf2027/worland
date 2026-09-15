@@ -25,8 +25,13 @@ public class AssetDetailResponse {
     private BigDecimal replaceHeadcount;
     private Long supplierId;
     private String supplierName;
+    private Long currentHolderCustomerId;
     private String currentHolderName;
+    /** 意向承接客户(未签约设备预设;签约后以合同客户为准) */
+    private Long intendedCustomerId;
+    private String intendedCustomerName;
     private Long contractId;
+    private String contractNo;
     private String remark;
     private Boolean sensitiveMasked;
     /** 集采价是否已与工程量清单总价联动(清单有计价行时为 true,集采价不可手工改) */
@@ -124,6 +129,8 @@ public class AssetDetailResponse {
         private BigDecimal returnRate;
         /** 空置亮灯 */
         private Boolean idleAlert;
+        /** 手工覆盖的字段名(allocRent/cumulativeRent/returnRate/inServiceDays/idleDays) */
+        private java.util.List<String> manualFields = new java.util.ArrayList<>();
     }
 
     @Data

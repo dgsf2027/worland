@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCustomerPool, fetchCustomerDetail, fetchPipeline, addFollowup, runAdmission,
   createCustomer, updateCustomer, exportCustomers, CUSTOMER_SCOPES,
-  type CustomerPoolItem, type CustomerDetail, type Pipeline,
+  updateFollowup, deleteFollowup, updateCredit, updateCustomerValue,
+  type CustomerPoolItem, type CustomerDetail, type Pipeline, type FollowupItem,
 } from '@/api/customer'
 
 const router = useRouter()
+const route = useRoute()
 
 const activeTab = ref('pool')
 
@@ -88,18 +90,111 @@ function ratingType(r?: string) {
   return r === 'A' ? 'success' : r === 'B' ? 'warning' : r === 'C' ? 'danger' : 'info'
 }
 
-async function onFollowup() {
+// ---- 跟进:新增 / 编辑 / 删除 ----
+const followMethods = ['电话', '拜访', '微信']
+const followVisible = ref(false)
+const followSaving = ref(false)
+const followForm = reactive<Record<string, any>>({})
+function openFollowup(ev?: FollowupItem) {
+  Object.keys(followForm).forEach((k) => delete followForm[k])
+  Object.assign(followForm, ev
+    ? { id: ev.id, method: ev.method || '电话', content: ev.content, result: ev.result || '', nextFollowDate: ev.nextFollowDate, contractId: ev.contractId }
+    : { id: undefined, method: '电话', content: '', result: '', nextFollowDate: undefined, contractId: undefined })
+  followVisible.value = true
+}
+async function submitFollowup() {
+  if (!detail.value) return
+  if (!String(followForm.content || '').trim()) {
+    ElMessage.warning('跟进内容必填')
+    return
+  }
+  const body = {
+    method: followForm.method,
+    content: String(followForm.content).trim(),
+    result: String(followForm.result || '').trim() || null,
+    nextFollowDate: followForm.nextFollowDate || null,
+    contractId: followForm.contractId || null,
+  }
+  followSaving.value = true
+  try {
+    if (followForm.id) await updateFollowup(followForm.id, body)
+    else await addFollowup(detail.value.id, body)
+    followVisible.value = false
+    ElMessage.success(followForm.id ? '跟进已更新' : '跟进已记录')
+    await openDetail(detail.value.id)
+    loadPool()
+  } finally {
+    followSaving.value = false
+  }
+}
+async function removeFollowup(ev: FollowupItem) {
   if (!detail.value) return
   try {
-    const { value } = await ElMessageBox.prompt('跟进内容', `记一次跟进 · ${detail.value.name}`, {
-      confirmButtonText: '保存', cancelButtonText: '取消',
-      inputValidator: (v) => (v && v.trim() ? true : '内容必填'),
-    })
-    await addFollowup(detail.value.id, { method: '电话', content: value })
-    ElMessage.success('跟进已记录')
-    openDetail(detail.value.id)
-  } catch { /* 取消 */ }
+    await ElMessageBox.confirm(`确认删除这条跟进记录？「${ev.content}」`, '删除跟进', { type: 'warning' })
+  } catch {
+    return
+  }
+  await deleteFollowup(ev.id)
+  ElMessage.success('已删除')
+  await openDetail(detail.value.id)
+  loadPool()
 }
+
+// ---- 信用画像:编辑 ----
+const creditVisible = ref(false)
+const creditSaving = ref(false)
+const creditForm = reactive<Record<string, number | null>>({ profit: null, cashflow: null, stability: null, history: null, industry: null })
+function openCreditEdit() {
+  const cp = detail.value?.creditProfile as any
+  for (const d of creditDims) creditForm[d.key] = cp ? (cp[d.key] ?? null) : null
+  creditVisible.value = true
+}
+async function submitCredit() {
+  if (!detail.value) return
+  creditSaving.value = true
+  try {
+    await updateCredit(detail.value.id, { ...creditForm })
+    creditVisible.value = false
+    ElMessage.success('信用画像已保存，评级与准入建议已重算')
+    await openDetail(detail.value.id)
+    loadPool()
+  } finally {
+    creditSaving.value = false
+  }
+}
+
+// ---- 客户价值:手工项编辑 + 关联跳转 ----
+const valueVisible = ref(false)
+const valueSaving = ref(false)
+const valueForm = reactive<Record<string, number | null>>({ cumulativeProfit: null, renewRatePct: null })
+function openValueEdit() {
+  const ve = detail.value?.valueExposure
+  valueForm.cumulativeProfit = ve?.cumulativeProfit ?? null
+  valueForm.renewRatePct = ve?.renewRate == null ? null : Math.round(ve.renewRate * 10000) / 100
+  valueVisible.value = true
+}
+async function submitValue() {
+  if (!detail.value) return
+  valueSaving.value = true
+  try {
+    await updateCustomerValue(detail.value.id, {
+      cumulativeProfit: valueForm.cumulativeProfit ?? null,
+      renewRate: valueForm.renewRatePct == null ? null : Math.round(Number(valueForm.renewRatePct) * 100) / 10000,
+    })
+    valueVisible.value = false
+    ElMessage.success('客户价值已保存')
+    await openDetail(detail.value.id)
+  } finally {
+    valueSaving.value = false
+  }
+}
+function goContracts() {
+  if (detail.value) router.push({ path: '/contract', query: { customerId: String(detail.value.id) } })
+}
+function goBills() {
+  if (detail.value) router.push({ path: '/rent', query: { customerId: String(detail.value.id), customerName: detail.value.name } })
+}
+const followContracts = computed(() => detail.value?.contracts.rows || [])
 async function onAdmission() {
   if (!detail.value) return
   try {
@@ -220,7 +315,12 @@ function goAsset(id: number) {
   router.push({ path: '/asset', query: { id: String(id) } })
 }
 
-onMounted(() => { loadPool(); loadPipeline() })
+onMounted(() => {
+  loadPool(); loadPipeline()
+  // 从设备台账「承接客户」等处跳转过来(?id=):直接打开客户详情
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
+})
 </script>
 
 <template>
@@ -390,11 +490,26 @@ onMounted(() => { loadPool(); loadPipeline() })
             </el-table>
             <el-empty v-else description="该客户暂无合同" :image-size="60" />
             <div class="mini">可在租合同 = 状态为「生效」的合同；展开合同可看挂的设备及其在设备租赁台账中的当前状态。</div>
+            <template v-if="detail.intendedAssets?.length">
+              <div class="sub-title">意向承接设备（未签约，已在设备租赁台账预设本客户）</div>
+              <el-table :data="detail.intendedAssets" size="small" border>
+                <el-table-column label="设备序列号" min-width="130">
+                  <template #default="{ row: a }"><a class="lnk" @click="goAsset(a.id)">{{ a.serialNo }}</a></template>
+                </el-table-column>
+                <el-table-column prop="category" label="品类" width="90" />
+                <el-table-column prop="model" label="型号" min-width="150" show-overflow-tooltip />
+                <el-table-column label="台账状态" width="110">
+                  <template #default="{ row: a }"><el-tag v-if="a.status" :type="(assetStatusType[a.status] as any) || 'info'" size="small">{{ a.status }}</el-tag></template>
+                </el-table-column>
+              </el-table>
+            </template>
           </div>
 
           <div class="grid2">
             <div class="panel">
-              <h4>信用画像（多维）</h4>
+              <h4>信用画像（多维）
+                <el-button link type="primary" size="small" style="float:right" @click="openCreditEdit">编辑</el-button>
+              </h4>
               <div v-if="detail.creditProfile">
                 <div v-for="d in creditDims" :key="d.key" class="scr">
                   <div class="sl"><span>{{ d.label }}</span><b :style="{ color: scoreColor((detail.creditProfile as any)[d.key]) }">{{ (detail.creditProfile as any)[d.key] }}</b></div>
@@ -405,7 +520,7 @@ onMounted(() => { loadPool(); loadPipeline() })
                 </div>
                 <div class="mini">评级由 rule_config 权重+阶梯即时算</div>
               </div>
-              <el-empty v-else description="尚未评分" :image-size="60" />
+              <el-empty v-else description="尚未评分，点「编辑」录入五维评分" :image-size="60" />
 
               <template v-if="detail.admission">
                 <div class="kv"><span>准入建议(授信/押金/目标IRR)</span>
@@ -418,13 +533,18 @@ onMounted(() => { loadPool(); loadPipeline() })
             </div>
 
             <div class="panel">
-              <h4>客户价值 & 风险敞口</h4>
-              <div class="kv"><span>累计合同 / 累计收租</span><b>{{ detail.valueExposure.contractCount }} 份 / {{ money(detail.valueExposure.cumulativeRent) }}</b></div>
-              <div class="kv"><span>累计利润(LTV)</span><b class="up">{{ money(detail.valueExposure.cumulativeProfit) }}</b></div>
-              <div class="kv"><span>续租率</span><b>{{ detail.valueExposure.renewRate != null ? (detail.valueExposure.renewRate * 100).toFixed(0) + '%' : '—' }}</b></div>
-              <div class="kv"><span>在租敞口 / 逾期应收</span><b>{{ money(detail.valueExposure.exposureAmount) }} / <span class="down">{{ detail.valueExposure.receivableOverdue ? money(detail.valueExposure.receivableOverdue) : '—' }}</span></b></div>
-              <div class="kv"><span>占总应收集中度</span><b class="warn">{{ (detail.valueExposure.concentration * 100).toFixed(2) }}%</b></div>
+              <h4>客户价值 & 风险敞口
+                <el-button v-if="!detail.sensitiveMasked" link type="primary" size="small" style="float:right" @click="openValueEdit">编辑</el-button>
+              </h4>
+              <div class="kv"><span>累计合同 / 累计收租 <em class="src">实时</em></span><b>{{ detail.valueExposure.contractCount }} 份 / {{ money(detail.valueExposure.cumulativeRent) }}</b></div>
+              <div class="kv"><span>累计利润(LTV) <em class="src manual">手工</em></span><b class="up">{{ money(detail.valueExposure.cumulativeProfit) }}</b></div>
+              <div class="kv"><span>续租率 <em class="src manual">手工</em></span><b>{{ detail.valueExposure.renewRate != null ? (detail.valueExposure.renewRate * 100).toFixed(0) + '%' : '—' }}</b></div>
+              <div class="kv"><span>在租敞口 / 逾期应收 <em class="src">实时</em></span><b>{{ money(detail.valueExposure.exposureAmount) }} / <span class="down">{{ detail.valueExposure.receivableOverdue ? money(detail.valueExposure.receivableOverdue) : '—' }}</span></b></div>
+              <div class="kv"><span>占总应收集中度 <em class="src">实时</em></span><b class="warn">{{ (detail.valueExposure.concentration * 100).toFixed(2) }}%</b></div>
+              <div class="mini">实时项按合同、租金计划和收租单计算：在租敞口 = 生效合同未到期租金；逾期应收 = 已过到期日未收清的收租单。</div>
               <div style="margin-top:12px">
+                <el-button size="small" @click="goContracts">查看合同</el-button>
+                <el-button size="small" @click="goBills">查看收租</el-button>
                 <el-button size="small" type="primary" @click="onAdmission">风控准入结论</el-button>
               </div>
             </div>
@@ -432,17 +552,22 @@ onMounted(() => { loadPool(); loadPipeline() })
 
           <div class="panel">
             <h4>跟进时间线（业务长期跟进）
-              <el-button link type="primary" size="small" style="float:right" @click="onFollowup">＋ 记一次跟进</el-button>
+              <el-button link type="primary" size="small" style="float:right" @click="openFollowup()">＋ 记一次跟进</el-button>
             </h4>
             <el-timeline>
               <el-timeline-item
-                v-for="(ev, idx) in detail.timeline" :key="idx"
+                v-for="ev in detail.timeline" :key="ev.id"
                 :timestamp="(ev.followTime || '').replace('T', ' ').slice(0, 16)" placement="top">
                 <b>{{ ev.content }}</b>
                 <span class="tl-meta">
                   {{ ev.method }} · {{ ev.userName }}
                   <template v-if="ev.result"> · {{ ev.result }}</template>
                   <template v-if="ev.nextFollowDate"> · 下次 {{ ev.nextFollowDate }}</template>
+                </span>
+                <span v-if="ev.contractId" class="tl-meta">· 关联合同 <a class="lnk" @click="goContract(ev.contractId)">{{ ev.contractNo || ('#' + ev.contractId) }}</a></span>
+                <span class="tl-ops">
+                  <el-button link type="primary" size="small" @click="openFollowup(ev)">编辑</el-button>
+                  <el-button link type="danger" size="small" @click="removeFollowup(ev)">删除</el-button>
                 </span>
               </el-timeline-item>
             </el-timeline>
@@ -451,6 +576,59 @@ onMounted(() => { loadPool(); loadPipeline() })
         </template>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 记一次跟进 / 编辑跟进 -->
+    <el-dialog v-model="followVisible" :title="followForm.id ? '编辑跟进' : '记一次跟进 · ' + (detail?.name || '')" width="560px">
+      <el-form :model="followForm" label-width="100px" size="small" :disabled="followSaving">
+        <el-form-item label="方式">
+          <el-radio-group v-model="followForm.method">
+            <el-radio-button v-for="m in followMethods" :key="m" :value="m">{{ m }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="跟进内容" required><el-input v-model="followForm.content" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
+        <el-form-item label="结果"><el-input v-model="followForm.result" maxlength="255" placeholder="如 已报价 / 约下周拜访" /></el-form-item>
+        <el-form-item label="下次跟进">
+          <el-date-picker v-model="followForm.nextFollowDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="关联合同">
+          <el-select v-model="followForm.contractId" clearable placeholder="可选，关联本客户的一份合同" style="width:100%">
+            <el-option v-for="ct in followContracts" :key="ct.id" :label="ct.no + ' · ' + ct.status" :value="ct.id" />
+          </el-select>
+        </el-form-item>
+        <div class="mini form-tip">只能编辑、删除自己记录的跟进（老板除外）。客户的「下次跟进日」取最近一条跟进。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="followSaving" @click="followVisible = false">取消</el-button>
+        <el-button type="primary" :loading="followSaving" @click="submitFollowup">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑信用画像 -->
+    <el-dialog v-model="creditVisible" title="编辑信用画像（多维）" width="460px">
+      <el-form label-width="100px" size="small" :disabled="creditSaving">
+        <el-form-item v-for="d in creditDims" :key="d.key" :label="d.label">
+          <el-input-number v-model="creditForm[d.key]" :min="0" :max="100" :precision="0" controls-position="right" placeholder="0-100" style="width:160px" />
+        </el-form-item>
+        <div class="mini form-tip">五维齐全才计算加权信用分和评级，评级决定准入建议（授信/押金/目标 IRR）。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="creditSaving" @click="creditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creditSaving" @click="submitCredit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑客户价值手工项 -->
+    <el-dialog v-model="valueVisible" title="编辑客户价值" width="460px">
+      <el-form label-width="110px" size="small" :disabled="valueSaving">
+        <el-form-item label="累计利润(元)"><el-input-number v-model="valueForm.cumulativeProfit" :precision="2" :step="10000" controls-position="right" style="width:100%" /></el-form-item>
+        <el-form-item label="续租率(%)"><el-input-number v-model="valueForm.renewRatePct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item>
+        <div class="mini form-tip">合同数、累计收租、在租敞口、逾期应收、集中度按合同和收租单实时计算，无需手填。</div>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="valueSaving" @click="valueVisible = false">取消</el-button>
+        <el-button type="primary" :loading="valueSaving" @click="submitValue">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新增 / 编辑客户 -->
     <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑客户信息' : '新增客户'" width="600px" :close-on-click-modal="false">
@@ -520,6 +698,11 @@ onMounted(() => { loadPool(); loadPipeline() })
 .sl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
 .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-top: 1px dashed #eee; }
 .tl-meta { color: #999; font-size: 12px; margin-left: 6px; }
+.tl-ops { margin-left: 8px; }
+.src { font-style: normal; font-size: 11px; color: #2f9e44; border: 1px solid #b7e1c1; border-radius: 3px; padding: 0 3px; margin-left: 4px; }
+.src.manual { color: #e8a33d; border-color: #f3d19e; }
+.sub-title { font-size: 13px; font-weight: 600; margin: 14px 0 8px; }
+.form-tip { margin: 0 0 0 100px; white-space: normal; }
 .scope-tag { margin: 0 4px 2px 0; }
 .mini-line { color: #999; font-size: 12px; }
 .mini-inline { color: #999; font-size: 12px; }

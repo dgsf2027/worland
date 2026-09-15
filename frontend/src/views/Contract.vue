@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchContracts, fetchContractDetail, signContract, voidContract, renewContract, changeContract,
-  type ContractListItem, type ContractDetail,
+  editContract, fetchContractFiles, uploadContractFile, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB,
+  type ContractListItem, type ContractDetail, type ContractFile,
 } from '@/api/contract'
+import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
+import { fetchAssets, checkUploadFile, saveFile, type AssetListItem } from '@/api/asset'
+
+const route = useRoute()
+const router = useRouter()
 
 // ---- 身份切换(占位头,验证字段级隔离) ----
 const identities = [
@@ -25,8 +31,38 @@ function switchIdentity(name: string) {
   ElMessage.success(`已切换为 ${id.name}（${id.role}）· 观察单笔P&L/每期构成字段级隔离`)
 }
 
+// ---- 客户(客户 CRM) / 设备(设备租赁台账) 选项 ----
+const customers = ref<CustomerPoolItem[]>([])
+const customersLoading = ref(false)
+async function loadCustomers() {
+  customersLoading.value = true
+  try {
+    customers.value = (await fetchCustomerPool({ page: 1, size: 1000 })).records
+  } finally {
+    customersLoading.value = false
+  }
+}
+const assetOptions = ref<AssetListItem[]>([])
+const assetsLoading = ref(false)
+async function loadAssets() {
+  assetsLoading.value = true
+  try {
+    assetOptions.value = (await fetchAssets({ page: 1, size: 1000 })).records
+  } finally {
+    assetsLoading.value = false
+  }
+}
+/** 可签约设备:台账状态为 采购/投放(未在租) */
+const signableAssets = computed(() => assetOptions.value.filter((a) => a.status === '采购' || a.status === '投放'))
+function goCustomer(id?: number) {
+  if (id) router.push({ path: '/customer', query: { id: String(id) } })
+}
+function goAsset(id?: number) {
+  if (id) router.push({ path: '/asset', query: { id: String(id) } })
+}
+
 // ---- 列表 ----
-const filters = reactive<{ status: string; keyword: string }>({ status: '', keyword: '' })
+const filters = reactive<{ status: string; keyword: string; customerId?: number }>({ status: '', keyword: '' })
 const statuses = ['草稿', '生效', '到期转让', '关闭', '已作废']
 const list = ref<ContractListItem[]>([])
 const total = ref(0)
@@ -34,9 +70,10 @@ const loading = ref(false)
 async function loadList() {
   loading.value = true
   try {
-    const params: Record<string, any> = { page: 1, size: 50 }
+    const params: Record<string, any> = { page: 1, size: 200 }
     if (filters.status) params.status = filters.status
     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.customerId) params.customerId = filters.customerId
     const res = await fetchContracts(params)
     list.value = res.records
     total.value = res.total
@@ -56,31 +93,166 @@ const drawer = ref(false)
 async function openDetail(id: number) {
   detail.value = await fetchContractDetail(id)
   drawer.value = true
+  loadFiles()
 }
 
 // ---- 签约 ----
 const signVisible = ref(false)
-const signForm = reactive<Record<string, any>>({
-  no: '', customerId: undefined, termMonths: undefined, monthRent: undefined,
-  endTransferPrice: undefined, targetIrr: undefined, startDate: '', remark: '',
-  assets: [{ assetId: undefined, allocRent: undefined }],
-})
+const signSaving = ref(false)
+const signForm = reactive<Record<string, any>>({})
+function resetSign() {
+  Object.keys(signForm).forEach((k) => delete signForm[k])
+  Object.assign(signForm, {
+    no: '', customerId: filters.customerId, termMonths: undefined, monthRent: undefined, deposit: undefined,
+    endTransferPrice: undefined, targetIrrPct: undefined, signDate: '', startDate: '', remark: '',
+    assets: [{ assetId: undefined, allocRent: undefined }],
+  })
+}
+async function openSign() {
+  resetSign()
+  signVisible.value = true
+  await Promise.all([customers.value.length ? null : loadCustomers(), loadAssets()])
+}
 function addAssetRow() { signForm.assets.push({ assetId: undefined, allocRent: undefined }) }
 function removeAssetRow(i: number) { signForm.assets.splice(i, 1) }
+function assetLabel(a: AssetListItem) {
+  return `${a.serialNo} · ${a.category}${a.model ? ' · ' + a.model : ''} · ${a.status}`
+    + (a.intendedCustomerName ? ` · 意向:${a.intendedCustomerName}` : '')
+}
 async function submitSign() {
   const assets = signForm.assets.filter((a: any) => a.assetId)
   if (!signForm.no || !signForm.customerId || !assets.length) {
-    ElMessage.warning('合同编号/客户/至少1台设备必填'); return
+    ElMessage.warning('合同编号、客户、至少 1 台设备必填'); return
+  }
+  if (new Set(assets.map((a: any) => a.assetId)).size !== assets.length) {
+    ElMessage.warning('同一台设备不能重复挂载'); return
   }
   const body: Record<string, any> = { no: signForm.no, customerId: signForm.customerId, assets }
-  for (const k of ['termMonths', 'monthRent', 'endTransferPrice', 'targetIrr', 'startDate', 'remark']) {
-    if (signForm[k] !== undefined && signForm[k] !== '') body[k] = signForm[k]
+  for (const k of ['termMonths', 'monthRent', 'deposit', 'endTransferPrice', 'signDate', 'startDate', 'remark']) {
+    if (signForm[k] !== undefined && signForm[k] !== '' && signForm[k] !== null) body[k] = signForm[k]
   }
-  await signContract(body)
-  ElMessage.success('签约成功 · 已自动生成 N 期租金计划')
-  signVisible.value = false
-  signForm.assets = [{ assetId: undefined, allocRent: undefined }]
-  loadList()
+  if (signForm.targetIrrPct != null) body.targetIrr = Math.round(Number(signForm.targetIrrPct) * 100) / 10000
+  signSaving.value = true
+  try {
+    const id = await signContract(body)
+    ElMessage.success('签约成功 · 已自动生成 N 期租金计划，可在详情里上传合同压缩包')
+    signVisible.value = false
+    await loadList()
+    openDetail(id)
+  } finally {
+    signSaving.value = false
+  }
+}
+
+// ---- 编辑合同要素 ----
+const editVisible = ref(false)
+const editSaving = ref(false)
+const editForm = reactive<Record<string, any>>({})
+const canEdit = computed(() => !!detail.value && !detail.value.sensitiveMasked
+  && (detail.value.status === '草稿' || detail.value.status === '生效'))
+async function openEdit() {
+  const d = detail.value
+  if (!d) return
+  Object.keys(editForm).forEach((k) => delete editForm[k])
+  Object.assign(editForm, {
+    customerId: d.customerId,
+    nature: d.nature || '分期收款销售',
+    targetIrrPct: d.targetIrr == null ? null : Math.round(d.targetIrr * 10000) / 100,
+    termMonths: d.termMonths,
+    monthRent: d.monthRent,
+    endTransferPrice: d.endTransferPrice,
+    deposit: d.deposit,
+    startDate: d.startDate,
+    signDate: d.signDate,
+    remark: d.remark || '',
+    detail: '',
+  })
+  editVisible.value = true
+  if (!customers.value.length) await loadCustomers()
+}
+const billedPeriods = computed(() => detail.value?.schedule.filter((s) => s.planStatus === '已生成单').length || 0)
+async function submitEdit() {
+  const d = detail.value
+  if (!d) return
+  if (!editForm.customerId || !editForm.termMonths || editForm.monthRent == null || !editForm.startDate) {
+    ElMessage.warning('客户、租期、月租、起租日必填'); return
+  }
+  if (d.status === '生效') {
+    try {
+      await ElMessageBox.confirm(
+        `生效合同的修改会：保留已生成收租单的 ${billedPeriods.value} 期，其余期次按新租期、月租、起租日重新生成；押金有变化时自动记补收或退回；改客户会同步在租设备的承租客户。全部写入变更留痕。确认保存？`,
+        '修改生效合同', { type: 'warning', confirmButtonText: '确认修改' },
+      )
+    } catch {
+      return
+    }
+  }
+  editSaving.value = true
+  try {
+    await editContract(d.id, {
+      customerId: editForm.customerId,
+      nature: editForm.nature,
+      targetIrr: editForm.targetIrrPct == null ? null : Math.round(Number(editForm.targetIrrPct) * 100) / 10000,
+      termMonths: editForm.termMonths,
+      monthRent: editForm.monthRent,
+      endTransferPrice: editForm.endTransferPrice ?? null,
+      deposit: editForm.deposit ?? null,
+      startDate: editForm.startDate,
+      signDate: editForm.signDate || null,
+      remark: editForm.remark,
+      detail: editForm.detail,
+    })
+    editVisible.value = false
+    ElMessage.success('合同已更新')
+    await openDetail(d.id)
+    loadList()
+  } finally {
+    editSaving.value = false
+  }
+}
+
+// ---- 合同附件(压缩文件) ----
+const files = ref<ContractFile[]>([])
+const filesLoading = ref(false)
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const fileAccept = CONTRACT_ATTACHMENT_EXTS.map((e) => '.' + e).join(',')
+async function loadFiles() {
+  if (!detail.value || detail.value.sensitiveMasked) {
+    files.value = []
+    return
+  }
+  filesLoading.value = true
+  try {
+    files.value = await fetchContractFiles(detail.value.id)
+  } catch {
+    files.value = []
+  } finally {
+    filesLoading.value = false
+  }
+}
+function beforeUpload(file: File) {
+  const err = checkUploadFile(file, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB)
+  if (err) {
+    ElMessage.warning(err)
+    return false
+  }
+  return true
+}
+async function uploadRequest(options: any) {
+  if (!detail.value) return
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    await uploadContractFile(detail.value.id, options.file as File, (p) => { uploadPercent.value = p })
+    ElMessage.success('合同附件已上传')
+    await loadFiles()
+  } finally {
+    uploading.value = false
+  }
+}
+function fileSize(bytes: number) {
+  return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB'
 }
 
 // ---- 逆向操作 ----
@@ -106,10 +278,20 @@ async function doChange() {
   openDetail(detail.value.id); loadList()
 }
 
-// 从客户详情「关联合同」跳转过来(?id=):直接打开该合同详情
-const route = useRoute()
-onMounted(() => {
+const filterCustomerName = computed(() =>
+  filters.customerId ? (customers.value.find((c) => c.id === filters.customerId)?.name || `客户#${filters.customerId}`) : '')
+function clearCustomerFilter() {
+  filters.customerId = undefined
+  router.replace({ path: '/contract' })
   loadList()
+}
+
+// 从客户详情跳转过来:?id= 打开合同详情;?customerId= 只看该客户的合同
+onMounted(() => {
+  const cid = Number(route.query.customerId)
+  if (cid) filters.customerId = cid
+  loadList()
+  loadCustomers()
   const id = Number(route.query.id)
   if (id) openDetail(id)
 })
@@ -122,21 +304,28 @@ onMounted(() => {
         <el-radio-button v-for="i in identities" :key="i.name" :value="i.name">{{ i.name }}</el-radio-button>
       </el-radio-group>
       <span class="hint">投资人(GP/LP)看不到单笔P&L/每期构成/集采成本 🔒</span>
-      <el-button type="primary" size="small" style="margin-left:auto" @click="signVisible = true">+ 签约</el-button>
+      <el-button type="primary" size="small" style="margin-left:auto" @click="openSign">+ 签约</el-button>
     </div>
 
     <el-card shadow="never" class="filter-card">
       <el-select v-model="filters.status" placeholder="状态" clearable size="small" style="width:130px" @change="loadList">
         <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
       </el-select>
+      <el-select v-model="filters.customerId" placeholder="客户" clearable filterable size="small" style="width:200px;margin-left:8px"
+        :loading="customersLoading" @change="loadList" @clear="clearCustomerFilter">
+        <el-option v-for="c in customers" :key="c.id" :label="c.name" :value="c.id" />
+      </el-select>
       <el-input v-model="filters.keyword" placeholder="合同编号" clearable size="small" style="width:180px;margin-left:8px" @keyup.enter="loadList" />
       <el-button size="small" style="margin-left:8px" @click="loadList">查询</el-button>
+      <el-tag v-if="filters.customerId" size="small" closable style="margin-left:8px" @close="clearCustomerFilter">只看：{{ filterCustomerName }}</el-tag>
       <span class="total">共 {{ total }} 份</span>
     </el-card>
 
     <el-table :data="list" v-loading="loading" size="small" @row-click="(r:any) => openDetail(r.id)" style="cursor:pointer">
       <el-table-column prop="no" label="合同编号" width="150" />
-      <el-table-column prop="customerName" label="客户" min-width="130" />
+      <el-table-column label="客户" min-width="140">
+        <template #default="{ row }"><a class="lnk" @click.stop="goCustomer(row.customerId)">{{ row.customerName }}</a></template>
+      </el-table-column>
       <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="statusType[row.status] || 'info'" size="small">{{ row.status }}</el-tag></template></el-table-column>
       <el-table-column prop="termMonths" label="租期(月)" width="90" />
       <el-table-column label="月租" width="100"><template #default="{ row }">{{ money(row.monthRent) }}</template></el-table-column>
@@ -153,8 +342,9 @@ onMounted(() => {
         <el-alert v-if="detail.sensitiveMasked" type="info" :closable="false" show-icon
           title="投资人视角:单笔P&L/每期构成/集采成本已打码 🔒(勾稽与客户总付仍可见)" style="margin-bottom:12px" />
 
-        <!-- 逆向操作 -->
+        <!-- 操作 -->
         <div style="margin-bottom:12px">
+          <el-button size="small" type="primary" :disabled="!canEdit" @click="openEdit">编辑合同</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doRenew">续租</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doChange">提前结清</el-button>
           <el-button size="small" type="danger" :disabled="detail.status === '已作废' || detail.status === '关闭'" @click="doVoid">作废(红冲)</el-button>
@@ -162,16 +352,39 @@ onMounted(() => {
 
         <!-- 要点 -->
         <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="客户">{{ detail.customerName }}</el-descriptions-item>
+          <el-descriptions-item label="客户"><a class="lnk" @click="goCustomer(detail.customerId)">{{ detail.customerName }}</a></el-descriptions-item>
           <el-descriptions-item label="性质">{{ detail.nature }}</el-descriptions-item>
-          <el-descriptions-item label="目标IRR">{{ detail.targetIrr != null ? (detail.targetIrr * 100).toFixed(0) + '%' : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="目标IRR">{{ detail.targetIrr != null ? (detail.targetIrr * 100).toFixed(2).replace(/\.?0+$/, '') + '%' : '—' }}</el-descriptions-item>
           <el-descriptions-item label="租期">{{ detail.termMonths }} 月</el-descriptions-item>
           <el-descriptions-item label="月租">{{ money(detail.monthRent) }}</el-descriptions-item>
           <el-descriptions-item label="期末转让价">{{ money(detail.endTransferPrice) }}</el-descriptions-item>
           <el-descriptions-item label="押金">{{ money(detail.deposit) }}</el-descriptions-item>
           <el-descriptions-item label="起租日">{{ detail.startDate || '—' }}</el-descriptions-item>
           <el-descriptions-item label="签约日">{{ detail.signDate || '—' }}</el-descriptions-item>
+          <el-descriptions-item v-if="detail.remark" label="备注" :span="3">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
+
+        <!-- 合同附件 -->
+        <div class="block-title block-title-row">
+          <span>合同附件（压缩文件）</span>
+          <el-upload v-if="!detail.sensitiveMasked" :http-request="uploadRequest" :before-upload="beforeUpload" :accept="fileAccept"
+            :show-file-list="false" :disabled="uploading">
+            <el-button type="primary" link size="small" :loading="uploading">上传压缩包</el-button>
+          </el-upload>
+        </div>
+        <div v-if="detail.sensitiveMasked" class="sub">当前角色不可查看合同附件 🔒</div>
+        <template v-else>
+          <div class="sub">仅支持 {{ CONTRACT_ATTACHMENT_EXTS.join('/') }}，单个不超过 {{ CONTRACT_ATTACHMENT_MAX_MB / 1024 }}GB。</div>
+          <el-progress v-if="uploading" :percentage="uploadPercent" :stroke-width="10" style="margin:6px 0" />
+          <el-table v-loading="filesLoading" :data="files" size="small" border style="margin-top:6px">
+            <el-table-column prop="fileName" label="文件" min-width="200" show-overflow-tooltip />
+            <el-table-column label="大小" width="90"><template #default="{ row }">{{ fileSize(row.size) }}</template></el-table-column>
+            <el-table-column label="上传人" width="90"><template #default="{ row }">{{ row.uploaderName || '—' }}</template></el-table-column>
+            <el-table-column label="" width="70">
+              <template #default="{ row }"><el-button link type="primary" size="small" @click="saveFile(row.id, row.fileName)">下载</el-button></template>
+            </el-table-column>
+          </el-table>
+        </template>
 
         <!-- 勾稽校验行 -->
         <div class="block-title">勾稽校验(期数×月租 + 转让价 = 客户总付,不含押金)</div>
@@ -213,12 +426,15 @@ onMounted(() => {
         </el-descriptions>
 
         <!-- 挂设备 -->
-        <div class="block-title">挂载设备(单台分摊)</div>
+        <div class="block-title">挂载设备(单台分摊 · 关联设备租赁台账)</div>
         <el-table :data="detail.assets" size="small" border>
-          <el-table-column prop="serialNo" label="序列号" width="130" />
+          <el-table-column label="序列号" width="150">
+            <template #default="{ row }"><a class="lnk" @click="goAsset(row.assetId)">{{ row.serialNo || ('#' + row.assetId) }}</a></template>
+          </el-table-column>
           <el-table-column prop="category" label="品类" width="90" />
-          <el-table-column prop="assetStatus" label="设备状态" width="100" />
-          <el-table-column label="单台月租分摊"><template #default="{ row }">{{ money(row.allocRent) }}</template></el-table-column>
+          <el-table-column prop="model" label="型号" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="assetStatus" label="台账状态" width="100" />
+          <el-table-column label="单台月租分摊" width="130"><template #default="{ row }">{{ money(row.allocRent) }}</template></el-table-column>
         </el-table>
 
         <!-- 租金计划逐期 -->
@@ -254,27 +470,71 @@ onMounted(() => {
     </el-drawer>
 
     <!-- 签约弹窗 -->
-    <el-dialog v-model="signVisible" title="签约(自动生成 N 期租金计划)" width="640px">
-      <el-form :model="signForm" label-width="120px" size="small">
+    <el-dialog v-model="signVisible" title="签约(自动生成 N 期租金计划)" width="680px" :close-on-click-modal="false">
+      <el-form :model="signForm" label-width="120px" size="small" :disabled="signSaving">
         <el-form-item label="合同编号" required><el-input v-model="signForm.no" placeholder="HT-2026-0004" /></el-form-item>
-        <el-form-item label="客户ID" required><el-input-number v-model="signForm.customerId" :min="1" style="width:100%" /></el-form-item>
-        <el-form-item label="租期(月)"><el-input-number v-model="signForm.termMonths" :min="1" placeholder="缺省按品类" style="width:100%" /></el-form-item>
-        <el-form-item label="月租合计(元)"><el-input-number v-model="signForm.monthRent" :min="0" :step="500" placeholder="缺省=Σ单台分摊" style="width:100%" /></el-form-item>
-        <el-form-item label="期末转让价(元)"><el-input-number v-model="signForm.endTransferPrice" :min="0" :step="1000" style="width:100%" /></el-form-item>
-        <el-form-item label="目标IRR(0-1)"><el-input-number v-model="signForm.targetIrr" :min="0" :max="1" :step="0.01" style="width:100%" /></el-form-item>
-        <el-form-item label="起租日"><el-date-picker v-model="signForm.startDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
-        <el-form-item label="挂载设备">
+        <el-form-item label="客户" required>
+          <el-select v-model="signForm.customerId" filterable :loading="customersLoading" placeholder="从客户 CRM 选择" style="width:100%">
+            <el-option v-for="c in customers" :key="c.id" :label="c.name + (c.contact ? ' · ' + c.contact : '')" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12"><el-form-item label="租期(月)"><el-input-number v-model="signForm.termMonths" :min="1" placeholder="缺省按品类" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="月租合计(元)"><el-input-number v-model="signForm.monthRent" :min="0" :step="500" placeholder="缺省=Σ单台分摊" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="期末转让价(元)"><el-input-number v-model="signForm.endTransferPrice" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="押金(元)"><el-input-number v-model="signForm.deposit" :min="0" :step="1000" placeholder="缺省按押金月数" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="目标IRR(%)"><el-input-number v-model="signForm.targetIrrPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="签约日"><el-date-picker v-model="signForm.signDate" type="date" value-format="YYYY-MM-DD" placeholder="缺省今天" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="起租日"><el-date-picker v-model="signForm.startDate" type="date" value-format="YYYY-MM-DD" placeholder="缺省签约日" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="性质"><el-input model-value="分期收款销售" disabled /></el-form-item></el-col>
+        </el-row>
+        <el-form-item label="挂载设备" required>
           <div style="width:100%">
             <div v-for="(a, i) in signForm.assets" :key="i" style="display:flex;gap:8px;margin-bottom:6px">
-              <el-input-number v-model="a.assetId" :min="1" placeholder="设备ID" style="width:130px" />
-              <el-input-number v-model="a.allocRent" :min="0" :step="500" placeholder="单台分摊(可空)" style="width:170px" />
+              <el-select v-model="a.assetId" filterable :loading="assetsLoading" placeholder="按序列号选择设备租赁台账中的设备" style="flex:1">
+                <el-option v-for="opt in signableAssets" :key="opt.id" :label="assetLabel(opt)" :value="opt.id" />
+              </el-select>
+              <el-input-number v-model="a.allocRent" :min="0" :step="500" placeholder="单台分摊(可空)" controls-position="right" style="width:150px" />
               <el-button size="small" @click="removeAssetRow(i)" :disabled="signForm.assets.length === 1">删</el-button>
             </div>
             <el-button size="small" @click="addAssetRow">+ 加一台</el-button>
+            <div class="sub">只列出台账状态为「采购」「投放」的设备；单台分摊都留空则按月租均摊。</div>
           </div>
         </el-form-item>
+        <el-form-item label="备注"><el-input v-model="signForm.remark" maxlength="255" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="signVisible = false">取消</el-button><el-button type="primary" @click="submitSign">签约</el-button></template>
+      <template #footer><el-button :disabled="signSaving" @click="signVisible = false">取消</el-button><el-button type="primary" :loading="signSaving" @click="submitSign">签约</el-button></template>
+    </el-dialog>
+
+    <!-- 编辑合同要素 -->
+    <el-dialog v-model="editVisible" :title="detail ? `编辑合同 ${detail.no}（${detail.status}）` : '编辑合同'" width="680px" :close-on-click-modal="false">
+      <el-alert v-if="detail?.status === '生效'" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+        :title="`生效合同：已生成收租单的 ${billedPeriods} 期保留，其余期次按新要素重排；押金变化自动补收或退回；全部写入变更留痕。`" />
+      <el-form :model="editForm" label-width="120px" size="small" :disabled="editSaving">
+        <el-form-item label="客户" required>
+          <el-select v-model="editForm.customerId" filterable :loading="customersLoading" style="width:100%">
+            <el-option v-for="c in customers" :key="c.id" :label="c.name + (c.contact ? ' · ' + c.contact : '')" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="性质">
+              <el-select v-model="editForm.nature" style="width:100%"><el-option label="分期收款销售" value="分期收款销售" /></el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12"><el-form-item label="目标IRR(%)"><el-input-number v-model="editForm.targetIrrPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="租期(月)" required><el-input-number v-model="editForm.termMonths" :min="Math.max(1, billedPeriods)" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="月租(元)" required><el-input-number v-model="editForm.monthRent" :min="0" :precision="2" :step="500" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="期末转让价(元)"><el-input-number v-model="editForm.endTransferPrice" :min="0" :precision="2" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="押金(元)"><el-input-number v-model="editForm.deposit" :min="0" :precision="2" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="起租日" required><el-date-picker v-model="editForm.startDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="签约日"><el-date-picker v-model="editForm.signDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item></el-col>
+        </el-row>
+        <el-form-item label="备注"><el-input v-model="editForm.remark" maxlength="255" /></el-form-item>
+        <el-form-item label="变更说明"><el-input v-model="editForm.detail" maxlength="255" placeholder="写入变更留痕，如：客户要求延长租期" /></el-form-item>
+        <div class="sub edit-tip">月租变化时，挂载设备的单台分摊按原比例重新分配。需要财务或老板角色。</div>
+      </el-form>
+      <template #footer><el-button :disabled="editSaving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="editSaving" @click="submitEdit">保存</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -287,9 +547,13 @@ onMounted(() => {
 .filter-card :deep(.el-card__body) { padding: 10px 12px; display: flex; align-items: center; }
 .filter-card .total { margin-left: auto; font-size: 12px; color: #666; }
 .detail .block-title { font-weight: 600; margin: 16px 0 8px; border-left: 3px solid #409eff; padding-left: 8px; }
+.block-title-row { display: flex; align-items: center; justify-content: space-between; }
 .recon { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: #fef0f0; border-radius: 6px; font-size: 13px; }
 .recon.ok { background: #f0f9eb; }
 .recon .eq { font-weight: 600; }
 .recon .deposit { color: #909399; font-size: 12px; margin-left: auto; }
 .sub { font-size: 12px; color: #666; margin-top: 6px; }
+.edit-tip { margin-left: 120px; }
+.lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
+.lnk:hover { text-decoration: underline; }
 </style>

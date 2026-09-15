@@ -20,6 +20,7 @@ import top.aole.rent.modules.contract.domain.DepositLedger;
 import top.aole.rent.modules.contract.domain.RentSchedule;
 import top.aole.rent.modules.contract.dto.ContractChangeRequest;
 import top.aole.rent.modules.contract.dto.ContractDetailResponse;
+import top.aole.rent.modules.contract.dto.ContractEditRequest;
 import top.aole.rent.modules.contract.dto.ContractListItem;
 import top.aole.rent.modules.contract.dto.ContractSignRequest;
 import top.aole.rent.modules.contract.mapper.ContractAssetMapper;
@@ -379,6 +380,142 @@ public class ContractService {
                 ? net.divide(rentTotal, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO);
         p.setNote("经营口径简化:未含税与运维/管理费分摊(M2 凭证/分配精确化)");
         return p;
+    }
+
+    // ============ 编辑合同要素 ============
+
+    /**
+     * 编辑合同要素(客户/性质/目标IRR/租期/月租/转让价/押金/起租日/签约日/备注)。
+     * <ul>
+     *   <li>草稿:直接改,不涉及计划与押金台账。</li>
+     *   <li>生效:已生成收租单的期次保留;其余期次删除后按新起租日/月租重排到新租期;
+     *       押金变化记补收/退回;改客户同步在租设备承租客户;写变更留痕。</li>
+     *   <li>月租变化时,挂载设备的单台分摊按原比例重分(末台补差,Σ=月租)。</li>
+     * </ul>
+     */
+    @Transactional
+    public void edit(Long id, ContractEditRequest req) {
+        Contract c = load(id);
+        if (!"草稿".equals(c.getStatus()) && !"生效".equals(c.getStatus())) {
+            throw new BizException(400, "合同已" + c.getStatus() + ",不可编辑");
+        }
+        String nature = req.getNature() == null || req.getNature().trim().isEmpty() ? NATURE : req.getNature().trim();
+        validateNature(nature, req.getRemark());
+        validateNature(null, req.getDetail());
+        if (!NATURE.equals(nature)) {
+            throw new BizException(400, "合同性质固定为「" + NATURE + "」");
+        }
+        Customer cust = customerMapper.selectById(req.getCustomerId());
+        if (cust == null || Integer.valueOf(1).equals(cust.getIsDeleted())) {
+            throw new BizException(404, "客户不存在: id=" + req.getCustomerId());
+        }
+
+        String before = snapshot(c);
+        boolean active = "生效".equals(c.getStatus());
+        BigDecimal newRent = req.getMonthRent().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal oldDeposit = c.getDeposit() == null ? BigDecimal.ZERO : c.getDeposit();
+        BigDecimal newDeposit = req.getDeposit() == null ? oldDeposit : req.getDeposit().setScale(2, RoundingMode.HALF_UP);
+        boolean customerChanged = !req.getCustomerId().equals(c.getCustomerId());
+        boolean rentChanged = c.getMonthRent() == null || c.getMonthRent().compareTo(newRent) != 0;
+
+        int kept = 0;
+        int regenerated = 0;
+        if (active) {
+            List<RentSchedule> all = rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()
+                    .eq(RentSchedule::getContractId, id).orderByAsc(RentSchedule::getPeriodNo));
+            int maxBilled = all.stream().filter(s -> "已生成单".equals(s.getPlanStatus()))
+                    .mapToInt(RentSchedule::getPeriodNo).max().orElse(0);
+            if (req.getTermMonths() < maxBilled) {
+                throw new BizException(400, "前 " + maxBilled + " 期已生成收租单,租期不能少于 " + maxBilled + " 个月");
+            }
+            for (RentSchedule s : all) {
+                if (s.getPeriodNo() <= maxBilled && "已生成单".equals(s.getPlanStatus())) {
+                    kept++;
+                } else {
+                    rentScheduleMapper.deleteById(s.getId());
+                }
+            }
+            for (int p = maxBilled + 1; p <= req.getTermMonths(); p++) {
+                RentSchedule rs = new RentSchedule();
+                rs.setContractId(id);
+                rs.setPeriodNo(p);
+                rs.setDueDate(req.getStartDate().plusMonths(p));
+                rs.setAmount(newRent);
+                rs.setPlanStatus("未到期");
+                rentScheduleMapper.insert(rs);
+                regenerated++;
+            }
+            BigDecimal diff = newDeposit.subtract(oldDeposit);
+            if (diff.signum() != 0) {
+                DepositLedger dl = new DepositLedger();
+                dl.setContractId(id);
+                dl.setDirection(diff.signum() > 0 ? "收" : "退");
+                dl.setAmount(diff.abs());
+                dl.setBizTime(LocalDateTime.now());
+                dl.setOperatorId(UserContext.get() != null ? UserContext.get().getUserId() : null);
+                dl.setRemark("合同编辑调整押金:" + oldDeposit.toPlainString() + " → " + newDeposit.toPlainString());
+                depositLedgerMapper.insert(dl);
+            }
+            if (customerChanged) {
+                for (ContractAsset ca : assetLinks(id)) {
+                    assetService.changeHolder(ca.getAssetId(), req.getCustomerId());
+                }
+            }
+        }
+        if (rentChanged) {
+            reallocate(id, c.getMonthRent(), newRent);
+        }
+
+        contractMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Contract>()
+                .eq(Contract::getId, id)
+                .set(Contract::getCustomerId, req.getCustomerId())
+                .set(Contract::getNature, nature)
+                .set(Contract::getTargetIrr, req.getTargetIrr())
+                .set(Contract::getTermMonths, req.getTermMonths())
+                .set(Contract::getMonthRent, newRent)
+                .set(Contract::getEndTransferPrice, req.getEndTransferPrice() == null ? BigDecimal.ZERO : req.getEndTransferPrice())
+                .set(Contract::getDeposit, newDeposit)
+                .set(Contract::getStartDate, req.getStartDate())
+                .set(Contract::getSignDate, req.getSignDate() == null ? c.getSignDate() : req.getSignDate())
+                .set(Contract::getRemark, req.getRemark()));
+
+        Contract after = load(id);
+        String detail = (req.getDetail() == null || req.getDetail().trim().isEmpty() ? "编辑合同要素" : req.getDetail().trim())
+                + (active ? "·保留已出单" + kept + "期·重排" + regenerated + "期" : "");
+        recordChange(id, "编辑", false, before, snapshot(after), detail);
+        auditLogService.record("合同编辑", "contract", id, AuditLogService.EXECUTED, detail);
+        log.info("合同编辑: id={}, status={}, kept={}, regenerated={}, by={}", id, c.getStatus(), kept, regenerated, UserContext.getUserId());
+    }
+
+    private String snapshot(Contract c) {
+        return "customerId=" + c.getCustomerId() + ",term=" + c.getTermMonths() + ",monthRent=" + c.getMonthRent()
+                + ",deposit=" + c.getDeposit() + ",transfer=" + c.getEndTransferPrice() + ",irr=" + c.getTargetIrr()
+                + ",start=" + c.getStartDate() + ",sign=" + c.getSignDate();
+    }
+
+    /** 月租变化时按原分摊比例重分单台月租(原合计为 0 则均摊),末台补差保证 Σ=新月租。 */
+    private void reallocate(Long contractId, BigDecimal oldRent, BigDecimal newRent) {
+        List<ContractAsset> links = assetLinks(contractId);
+        if (links.isEmpty()) {
+            return;
+        }
+        BigDecimal oldSum = links.stream().map(ContractAsset::getAllocRent)
+                .filter(java.util.Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal acc = BigDecimal.ZERO;
+        for (int i = 0; i < links.size(); i++) {
+            ContractAsset ca = links.get(i);
+            BigDecimal v;
+            if (i == links.size() - 1) {
+                v = newRent.subtract(acc);
+            } else if (oldSum.signum() > 0 && ca.getAllocRent() != null) {
+                v = newRent.multiply(ca.getAllocRent()).divide(oldSum, 2, RoundingMode.HALF_UP);
+            } else {
+                v = newRent.divide(BigDecimal.valueOf(links.size()), 2, RoundingMode.HALF_UP);
+            }
+            acc = acc.add(v);
+            contractAssetMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ContractAsset>()
+                    .eq(ContractAsset::getId, ca.getId()).set(ContractAsset::getAllocRent, v));
+        }
     }
 
     // ============ 作废(限未采购·整份红冲) ============

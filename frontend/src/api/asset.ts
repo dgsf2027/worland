@@ -13,7 +13,10 @@ export interface AssetListItem {
   residualValue?: number
   supplierId?: number
   supplierName?: string
+  currentHolderCustomerId?: number
   currentHolderName?: string
+  intendedCustomerId?: number
+  intendedCustomerName?: string
   sensitiveMasked?: boolean
 }
 
@@ -87,8 +90,13 @@ export interface AssetDetail {
   replaceHeadcount?: number
   supplierId?: number
   supplierName?: string
+  currentHolderCustomerId?: number
   currentHolderName?: string
+  /** 意向承接客户(未签约设备预设) */
+  intendedCustomerId?: number
+  intendedCustomerName?: string
   contractId?: number
+  contractNo?: string
   remark?: string
   sensitiveMasked?: boolean
   /** 集采价已与工程量清单总价联动(清单有计价行) */
@@ -100,7 +108,11 @@ export interface AssetDetail {
   costBreakdown?: { items: CostItem[]; total: number; purchasePrice?: number; gapVsPurchase?: number }
   residualBreakdown?: { items?: CostItem[]; bomResidualTotal?: number; categoryResidual?: number }
   faultArchive: FaultItem[]
-  singleUnitReturn: { cumulativeRent?: number; allocRent?: number; inServiceDays?: number; idleDays?: number; returnRate?: number; idleAlert?: boolean }
+  singleUnitReturn: {
+    cumulativeRent?: number; allocRent?: number; inServiceDays?: number; idleDays?: number; returnRate?: number; idleAlert?: boolean
+    /** 手工覆盖的字段:allocRent/cumulativeRent/returnRate/inServiceDays/idleDays */
+    manualFields: string[]
+  }
   timeline: { eventType: string; bizTime: string; refDocType?: string; refDocId?: number; operatorName?: string; remark?: string }[]
 }
 
@@ -131,6 +143,14 @@ export function deleteBom(bomId: number): Promise<void> {
 /** 工程量清单改数量/单价(合价恢复自动计算,集采价随清单总价联动) */
 export function updateBomPricing(bomId: number, body: { qty: number; unitCost: number | null }): Promise<void> {
   return request.put(`/rent/assets/bom/${bomId}/pricing`, body)
+}
+/** 单台收益手工覆盖(某项传 null = 恢复自动计算) */
+export function updateSingleUnitReturn(id: number, body: Record<string, number | null>): Promise<void> {
+  return request.put(`/rent/assets/${id}/single-unit-return`, body)
+}
+/** 设置意向承接客户(customerId=null 清除) */
+export function updateIntendedCustomer(id: number, customerId: number | null): Promise<void> {
+  return request.put(`/rent/assets/${id}/intended-customer`, { customerId })
 }
 /** 故障档案编辑 */
 export function updateBomFault(bomId: number, body: { faultCount: number; repairable: boolean; warrantyUntil: string | null; supplierId: number | null }): Promise<void> {

@@ -96,3 +96,34 @@ export function renewContract(id: number, body: Record<string, any>): Promise<vo
 export function changeContract(id: number, body: Record<string, any>): Promise<void> {
   return request.post(`/rent/contracts/${id}/change`, body)
 }
+
+/** 编辑合同要素:草稿直接改;生效合同保留已出单期次、其余重排、押金差额补收/退回(财务/老板) */
+export function editContract(id: number, body: Record<string, any>): Promise<void> {
+  return request.put(`/rent/contracts/${id}`, body)
+}
+
+/** 合同附件:压缩文件(zip/rar/7z),单个 1GB */
+export const CONTRACT_ATTACHMENT_EXTS = ['zip', 'rar', '7z']
+export const CONTRACT_ATTACHMENT_MAX_MB = 1024
+
+export interface ContractFile {
+  id: number
+  fileName: string
+  size: number
+  uploaderName?: string
+  createTime?: string
+}
+export function fetchContractFiles(id: number): Promise<ContractFile[]> {
+  return request.get('/rent/files', { params: { bizType: 'contract', bizId: id } })
+}
+export function uploadContractFile(id: number, file: File, onProgress?: (p: number) => void): Promise<ContractFile> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('bizType', 'contract')
+  fd.append('bizId', String(id))
+  return request.post('/rent/files', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+    onUploadProgress: (e) => { if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100)) },
+  })
+}
