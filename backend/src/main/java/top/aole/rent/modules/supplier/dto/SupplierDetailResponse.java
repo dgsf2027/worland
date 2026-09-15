@@ -36,6 +36,15 @@ public class SupplierDetailResponse {
     /** 关联的合格考察记录(考察合格建档的供应商才有;否则 null) */
     private InspectionDtos.Item inspection;
 
+    /** 代表供货项 id(履约评分/价格构成的编辑落点);无供货项为 null,编辑时自动建一行 */
+    private Long primarySupplyId;
+
+    /** 履约评分权重(rule_config,供前端编辑时预览加权总分) */
+    private java.util.Map<String, Double> scoreWeights;
+
+    /** 设备租赁台账里供应商为本供应商的设备 */
+    private List<LinkedAsset> linkedAssets;
+
     @Data
     public static class ScoreRadar {
         private Integer quality;
@@ -56,7 +65,11 @@ public class SupplierDetailResponse {
         private BigDecimal quotePrice;
         private BigDecimal firstPayRatio;
         private Integer accountDays;
+        private Boolean noInterest;
         private Boolean canSingleBuy;
+        /** 是否代表供货项(履约评分/价格构成取此行) */
+        private Boolean primary;
+        private String remark;
         private Integer scoreTotal;
     }
 
@@ -67,7 +80,20 @@ public class SupplierDetailResponse {
         private BigDecimal profit;
         private BigDecimal quote;
         private BigDecimal bomEstimate;
-        /** 报价 vs BOM 估算结论:合理/偏高 */
+        /** 报价 vs BOM 估算结论:合理/偏高;缺报价或 BOM 估算时为 null */
         private String verdict;
+    }
+
+    @Data
+    public static class LinkedAsset {
+        private Long id;
+        private String serialNo;
+        private String category;
+        private String model;
+        /** 设备租赁台账状态 */
+        private String status;
+        /** 集采价(敏感) */
+        private BigDecimal purchasePrice;
+        private String currentHolderName;
     }
 }

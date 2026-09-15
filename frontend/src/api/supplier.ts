@@ -40,8 +40,22 @@ export interface SupplyRow {
   quotePrice?: number
   firstPayRatio?: number
   accountDays?: number
+  noInterest: boolean
   canSingleBuy: boolean
+  /** 代表供货项(履约评分/价格构成取此行) */
+  primary: boolean
+  remark?: string
   scoreTotal?: number
+}
+
+export interface LinkedAsset {
+  id: number
+  serialNo: string
+  category?: string
+  model?: string
+  status?: string
+  purchasePrice?: number
+  currentHolderName?: string
 }
 
 export interface PriceComposition {
@@ -69,6 +83,22 @@ export interface SupplierDetail {
   costMasked?: boolean
   /** 关联的合格考察记录 */
   inspection?: InspectionItem
+  primarySupplyId?: number
+  /** 履约评分权重 quality/delivery/service/price/term */
+  scoreWeights: Record<string, number>
+  /** 设备租赁台账里供应商为本供应商的设备 */
+  linkedAssets: LinkedAsset[]
+}
+
+export interface SupplierImportResult {
+  supplierRows: number
+  suppliersCreated: number
+  suppliersUpdated: number
+  supplyRows: number
+  suppliesCreated: number
+  suppliesUpdated: number
+  skipped: number
+  messages: { sheet: string; row: number; name?: string; level: 'info' | 'warn'; message: string }[]
 }
 
 export interface DependencyAlert {
@@ -90,6 +120,45 @@ export function fetchDependencyAlert(): Promise<DependencyAlert> {
 }
 export function retireSupplier(id: number, reason: string): Promise<void> {
   return request.post(`/rent/suppliers/${id}/retire`, { reason })
+}
+export function deleteSupplier(id: number): Promise<void> {
+  return request.delete(`/rent/suppliers/${id}`)
+}
+export function updateSupplierScores(id: number, body: Record<string, number | null>): Promise<void> {
+  return request.put(`/rent/suppliers/${id}/scores`, body)
+}
+export function updateSupplierPrice(id: number, body: Record<string, number | null>): Promise<void> {
+  return request.put(`/rent/suppliers/${id}/price-composition`, body)
+}
+export function addSupply(id: number, body: Record<string, any>): Promise<number> {
+  return request.post(`/rent/suppliers/${id}/supplies`, body)
+}
+export function updateSupply(supplyId: number, body: Record<string, any>): Promise<void> {
+  return request.put(`/rent/suppliers/supplies/${supplyId}`, body)
+}
+export function deleteSupply(supplyId: number): Promise<void> {
+  return request.delete(`/rent/suppliers/supplies/${supplyId}`)
+}
+
+/** 导出供应商(供应商 + 供货矩阵两张表);template=true 只下载表头模板。 */
+export async function exportSuppliers(template = false) {
+  const blob: Blob = await request.get('/rent/suppliers/export', { params: { template }, responseType: 'blob', timeout: 0 })
+  const d = new Date()
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = template ? '供应商上游-模板.xlsx' : `供应商上游-${ymd}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
+
+export function importSuppliers(file: File): Promise<SupplierImportResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post('/rent/suppliers/import', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 0 })
 }
 
 // ---- 供应商考察 ----
