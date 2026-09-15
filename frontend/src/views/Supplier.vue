@@ -81,9 +81,6 @@ async function onRetire(row: SupplierPoolItem) {
 // ---- 考察关联 ----
 const route = useRoute()
 const router = useRouter()
-function capitalWan(v?: number) {
-  return v === null || v === undefined ? '—' : (v / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' 万元'
-}
 function goInspection() {
   router.push('/supplier-inspection')
 }
@@ -206,7 +203,9 @@ onMounted(() => {
             <el-descriptions :column="3" border size="small">
               <el-descriptions-item label="公司名称">{{ detail.inspection.companyName }}</el-descriptions-item>
               <el-descriptions-item label="法人">{{ detail.inspection.legalPerson || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="注册资本">{{ capitalWan(detail.inspection.registeredCapital) }}</el-descriptions-item>
+              <el-descriptions-item label="注册资本">{{ detail.inspection.registeredCapitalWan ? detail.inspection.registeredCapitalWan + ' 万元' : '—' }}</el-descriptions-item>
+              <el-descriptions-item label="成立时间">{{ detail.inspection.establishedDate || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="公司地址" :span="2">{{ detail.inspection.address || '—' }}</el-descriptions-item>
               <el-descriptions-item label="业务范围">{{ detail.inspection.businessScope.join(' / ') || '—' }}</el-descriptions-item>
               <el-descriptions-item label="主要联系人">{{ detail.inspection.contact || '—' }} {{ detail.inspection.phone || '' }}</el-descriptions-item>
               <el-descriptions-item label="考察记录">{{ detail.inspection.archiveCount }} 个压缩包</el-descriptions-item>

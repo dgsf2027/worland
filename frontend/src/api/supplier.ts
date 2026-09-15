@@ -99,11 +99,15 @@ export const INSPECTION_ARCHIVE_MAX_MB = 1024
 
 export interface InspectionItem {
   id: number
+  /** 序号(列表排序) */
+  sortNo?: number
   companyName: string
   legalPerson?: string
-  /** 注册资本(元) */
-  registeredCapital?: number
+  /** 注册资本(万元·原文,如 200 / 60*6) */
+  registeredCapitalWan?: string
+  establishedDate?: string
   businessScope: string[]
+  address?: string
   contact?: string
   phone?: string
   result: '待考察' | '合格' | '不合格'
@@ -123,6 +127,16 @@ export interface InspectionDecideResult {
   supplierId?: number
   supplierCreated?: boolean
   message: string
+}
+
+export interface InspectionImportResult {
+  total: number
+  created: number
+  updated: number
+  passed: number
+  failed: number
+  skipped: number
+  messages: { row: number; companyName?: string; level: 'info' | 'warn'; message: string }[]
 }
 
 export interface FileItem {
@@ -165,4 +179,31 @@ export function uploadInspectionArchive(id: number, file: File, onProgress?: (pe
 }
 export function fetchInspectionArchives(id: number): Promise<FileItem[]> {
   return request.get('/rent/files', { params: { bizType: 'supplier_inspection', bizId: id } })
+}
+
+/** 导出「厂家考察汇总表」;template=true 只下载表头空模板。 */
+export async function exportInspections(template = false) {
+  const blob: Blob = await request.get('/rent/supplier-inspections/export', {
+    params: { template }, responseType: 'blob', timeout: 0,
+  })
+  const d = new Date()
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = template ? '厂家考察汇总表-模板.xlsx' : `厂家考察汇总表-${ymd}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
+
+/** 导入「厂家考察汇总表」(.xls/.xlsx),按公司名称新增或更新。 */
+export function importInspections(file: File): Promise<InspectionImportResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post('/rent/supplier-inspections/import', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+  })
 }
