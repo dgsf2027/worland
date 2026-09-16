@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -9,8 +9,10 @@ import {
   type InspectionItem, type FileItem, type InspectionImportResult,
 } from '@/api/supplier'
 import { checkUploadFile, saveFile } from '@/api/asset'
+import { sessionRole } from '@/utils/session'
 
 const router = useRouter()
+const canReview = computed(() => sessionRole.value === '供应链' || sessionRole.value === '老板')
 
 // ---- 列表(按序号排序,后端已排好) ----
 const filters = reactive<{ keyword: string; result: string }>({ keyword: '', result: '' })
@@ -304,9 +306,10 @@ onMounted(loadList)
       <el-button @click="loadList">查询</el-button>
       <span class="cnt">共 {{ total }} 家</span>
       <el-button link type="primary" :disabled="exporting" @click="onExport(true)">下载模板</el-button>
-      <el-upload :http-request="importRequest" :before-upload="beforeImport" accept=".xls,.xlsx" :show-file-list="false" :disabled="importing">
+      <el-upload v-if="canReview" :http-request="importRequest" :before-upload="beforeImport" accept=".xls,.xlsx" :show-file-list="false" :disabled="importing">
         <el-button :loading="importing">⬆ 导入表格</el-button>
       </el-upload>
+      <span v-else class="mini">导入/判定需供应链或老板</span>
       <el-button :loading="exporting" @click="onExport(false)">⬇ 导出表格</el-button>
       <el-button type="primary" @click="openCreate">+ 新增考察供应商</el-button>
     </div>
@@ -353,10 +356,10 @@ onMounted(loadList)
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.result !== '合格'" link type="success" size="small" @click="decide(row, '合格')">
+          <el-button v-if="canReview && row.result !== '合格'" link type="success" size="small" @click="decide(row, '合格')">
             {{ row.result === '待考察' ? '合格' : '改为合格' }}
           </el-button>
-          <el-button v-if="row.result !== '不合格'" link type="danger" size="small" @click="decide(row, '不合格')">
+          <el-button v-if="canReview && row.result !== '不合格'" link type="danger" size="small" @click="decide(row, '不合格')">
             {{ row.result === '待考察' ? '不合格' : '改为不合格' }}
           </el-button>
           <el-button link size="small" @click="openEdit(row)">编辑</el-button>

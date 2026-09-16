@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   fetchRoster, updateRole, computeCommission, fetchCommission,
   type RosterItem, type CommissionSummary,
 } from '@/api/roster'
+import { sessionRole } from '@/utils/session'
 
 const activeTab = ref('roster')
+const canEditRole = computed(() => sessionRole.value === '老板')
 
 // ============ 花名册 ============
 const roster = ref<RosterItem[]>([])
@@ -70,7 +72,7 @@ onMounted(() => { loadRoster(); loadCommission() })
             <template #default="{ row }"><el-tag size="small" :type="row.active ? 'success' : 'info'">{{ row.active ? '在职' : '离职' }}</el-tag></template>
           </el-table-column>
           <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ row }"><el-button link size="small" @click="openEdit(row)">改权限</el-button></template>
+            <template #default="{ row }"><el-button v-if="canEditRole" link size="small" @click="openEdit(row)">改权限</el-button><span v-else class="hint">仅老板</span></template>
           </el-table-column>
         </el-table>
         <div class="note">改角色权限限「老板」，越权 403 且全程入 audit_log（M5-06 只追加）。</div>

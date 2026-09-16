@@ -35,6 +35,7 @@ public class UserContextFilter extends OncePerRequestFilter {
     public static final String HEADER_ROLE = "X-User-Role";
 
     private final AuthTokenService tokenService;
+    private final AuthUserMapper userMapper;
 
     /**
      * 2026-08-19 邀请码注册上线后：身份唯一来源 = Bearer 令牌（/auth/register|login 签发），
@@ -75,7 +76,15 @@ public class UserContextFilter extends OncePerRequestFilter {
             String auth = request.getHeader("Authorization");
             if (auth != null && auth.regionMatches(true, 0, "Bearer ", 0, 7)) {
                 AuthTokenService.Claims c = tokenService.verify(auth.substring(7).trim());
-                if (c != null) { name = c.name; role = c.role; tokenUserId = c.userId; }
+                if (c != null) {
+                    tokenUserId = c.userId;
+                    // 角色是可变权限，不能长期信任签发时写进 token 的旧值；每次请求回源账号表。
+                    AuthUser current = userMapper.selectById(c.userId);
+                    if (current != null && Integer.valueOf(1).equals(current.getStatus())) {
+                        name = current.getDisplayName();
+                        role = current.getRole();
+                    }
+                }
             }
             if (name == null && placeholderHeadersEnabled) {
                 // Undertow/Servlet 默认按 ISO-8859-1 解析请求头,中文名会 mojibake,需转回 UTF-8
