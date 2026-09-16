@@ -1,16 +1,20 @@
 import request from '@/utils/request'
 
-export interface RosterItem {
-  id: number
-  userId: number
-  userName: string
+export interface RosterAccount {
+  accountId: number
+  username: string
+  displayName: string
   role: string
-  dataScope?: string
-  costVisible?: boolean
-  ownerScoped?: boolean
-  projectId?: number
+  costVisible: boolean
+  ownerScoped: boolean
+  active: boolean
+  loginSource: string
+  lastLoginAt?: string
+}
+
+export interface AccountUpdateRequest {
+  role?: string
   active?: boolean
-  remark?: string
 }
 
 export interface CommissionLine {
@@ -52,11 +56,11 @@ export interface ComputeResult {
   totalCommission?: number
 }
 
-export function fetchRoster(): Promise<RosterItem[]> {
-  return request.get('/rent/roster')
+export function fetchRoster(): Promise<RosterAccount[]> {
+  return request.get('/rent/roster/accounts')
 }
-export function updateRole(id: number, body: Record<string, any>): Promise<RosterItem> {
-  return request.put(`/rent/roster/${id}`, body)
+export function updateRole(accountId: number, body: AccountUpdateRequest): Promise<RosterAccount> {
+  return request.put(`/rent/roster/accounts/${accountId}`, body)
 }
 export function computeCommission(period: string): Promise<ComputeResult> {
   return request.post('/rent/commission/compute', null, { params: { period } })

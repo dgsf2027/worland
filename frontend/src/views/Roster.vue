@@ -1,33 +1,67 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchRoster, updateRole, computeCommission, fetchCommission,
-  type RosterItem, type CommissionSummary,
+  type RosterAccount, type CommissionSummary,
 } from '@/api/roster'
 import { sessionRole } from '@/utils/session'
+import { refreshSession } from '@/api/auth'
 
 const activeTab = ref('roster')
 const canEditRole = computed(() => sessionRole.value === '老板')
 
 // ============ 花名册 ============
-const roster = ref<RosterItem[]>([])
+const roster = ref<RosterAccount[]>([])
+const loading = ref(false)
+const loadError = ref(false)
+const saving = ref(false)
+const roles = ['老板', '财务', '供应链', '业务', 'GP', 'LP']
+const roleNotes: Record<string, string> = {
+  老板: '可管理账号权限及执行老板审批操作。请仅授予需要管理系统的同事。',
+  财务: '可执行财务相关操作，查看成本、账期和授信。',
+  供应链: '可执行供应链相关操作，查看成本、账期和授信。',
+  业务: '客户范围限本人名下及公海，可查看成本、账期和授信。',
+  GP: '投资人角色，成本、账期和授信等敏感字段受限。',
+  LP: '投资人角色，成本、账期和授信等敏感字段受限。',
+}
 async function loadRoster() {
-  roster.value = await fetchRoster()
+  loading.value = true
+  loadError.value = false
+  try {
+    const [accounts] = await Promise.all([fetchRoster(), refreshSession()])
+    roster.value = accounts
+  } catch {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
 }
 const editDlg = ref(false)
-const eForm = reactive<Record<string, any>>({ id: 0, role: '', dataScope: '', costVisible: true, ownerScoped: false, active: true, remark: '' })
-function openEdit(row: RosterItem) {
-  Object.assign(eForm, { id: row.id, role: row.role, dataScope: row.dataScope, costVisible: row.costVisible, ownerScoped: row.ownerScoped, active: row.active, remark: row.remark })
+const eForm = reactive({ accountId: 0, username: '', displayName: '', role: '', active: true })
+const originalRole = ref('')
+const originalActive = ref(true)
+function openEdit(row: RosterAccount) {
+  Object.assign(eForm, row)
+  originalRole.value = row.role
+  originalActive.value = row.active
   editDlg.value = true
 }
 async function submitEdit() {
+  if (saving.value) return
+  saving.value = true
   try {
-    await updateRole(eForm.id, { role: eForm.role, dataScope: eForm.dataScope, costVisible: eForm.costVisible, ownerScoped: eForm.ownerScoped, active: eForm.active, remark: eForm.remark })
-    ElMessage.success('已更新（入 audit·限老板）')
+    if (!eForm.active && originalActive.value) {
+      await ElMessageBox.confirm(`停用后，${eForm.displayName}（${eForm.username}）将无法继续访问系统。`, '停用账号', { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' })
+    } else if (eForm.role === '老板' && originalRole.value !== '老板') {
+      await ElMessageBox.confirm(`${eForm.displayName}（${eForm.username}）将能管理其他人的角色和账号状态。`, '授予老板权限', { type: 'warning', confirmButtonText: '确认授权', cancelButtonText: '取消' })
+    }
+    await updateRole(eForm.accountId, { role: eForm.role, active: eForm.active })
+    ElMessage.success('账号权限已更新，下次请求生效')
     editDlg.value = false
-    loadRoster()
-  } catch { /* 403 由拦截器提示 */ }
+    await loadRoster()
+  } catch { /* 取消保持表单；接口错误由拦截器提示 */ }
+  finally { saving.value = false }
 }
 
 // ============ 提成 ============
@@ -50,32 +84,38 @@ onMounted(() => { loadRoster(); loadCommission() })
 <template>
   <div>
     <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
-      title="人事从简起步：花名册 + 角色权限 + 提成。复用平台账号不自建登录；🔒 保密隔离：成本价/账期字段级权限，LP 看不到上下游价。" />
+      title="同事注册或通过门户首次登录后会出现在账号列表。老板可在此分配角色，无需服务器权限；保存后，下次请求即按新权限执行。" />
     <el-tabs v-model="activeTab">
       <!-- 花名册 -->
-      <el-tab-pane label="花名册 · 角色权限" name="roster">
-        <el-table :data="roster" size="small" border>
-          <el-table-column prop="userName" label="成员" width="100" />
+      <el-tab-pane label="花名册 · 账号权限" name="roster">
+        <div class="bar">
+          <el-button :loading="loading" @click="loadRoster">刷新账号与权限</el-button>
+          <span v-if="!canEditRole" class="hint">当前为只读。需要调整权限时，请联系拥有「老板」角色的管理员。</span>
+        </div>
+        <el-alert v-if="loadError" type="error" :closable="false" title="账号列表加载失败，请点击上方刷新重试。" class="load-error" />
+        <el-table v-else v-loading="loading" :data="roster" row-key="accountId" size="small" border empty-text="暂无登录账号，同事首次登录后请刷新列表">
+          <el-table-column prop="displayName" label="成员" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="username" label="登录账号" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="loginSource" label="登录方式" width="100" />
           <el-table-column label="角色" width="90">
             <template #default="{ row }"><el-tag size="small">{{ row.role }}</el-tag></template>
           </el-table-column>
-          <el-table-column prop="dataScope" label="数据权限" min-width="200" />
-          <el-table-column label="成本可见" width="100">
+          <el-table-column label="成本等敏感字段" min-width="130">
             <template #default="{ row }">
               <el-tag size="small" :type="row.costVisible ? 'success' : 'warning'">{{ row.costVisible ? '可见' : '🔒 保密' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="行级隔离" width="100">
-            <template #default="{ row }"><span>{{ row.ownerScoped ? '名下+公海' : '全量' }}</span></template>
+          <el-table-column label="客户行级限制" min-width="130">
+            <template #default="{ row }"><span>{{ row.ownerScoped ? '名下+公海' : '无本人归属限制' }}</span></template>
           </el-table-column>
-          <el-table-column label="在职" width="70">
-            <template #default="{ row }"><el-tag size="small" :type="row.active ? 'success' : 'info'">{{ row.active ? '在职' : '离职' }}</el-tag></template>
+          <el-table-column label="账号状态" width="90">
+            <template #default="{ row }"><el-tag size="small" :type="row.active ? 'success' : 'info'">{{ row.active ? '启用' : '停用' }}</el-tag></template>
           </el-table-column>
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }"><el-button v-if="canEditRole" link size="small" @click="openEdit(row)">改权限</el-button><span v-else class="hint">仅老板</span></template>
           </el-table-column>
         </el-table>
-        <div class="note">改角色权限限「老板」，越权 403 且全程入 audit_log（M5-06 只追加）。</div>
+        <div class="note">成本等敏感字段与客户行级限制随角色确定。权限变更保留操作记录；系统至少保留一个启用的老板账号。停用账号后，该账号无法继续访问。</div>
       </el-tab-pane>
 
       <!-- 提成 -->
@@ -119,29 +159,28 @@ onMounted(() => { loadRoster(); loadCommission() })
     </el-tabs>
 
     <!-- 改权限弹窗 -->
-    <el-dialog v-model="editDlg" title="角色权限改动（限老板·入 audit）" width="460px">
+    <el-dialog v-model="editDlg" title="修改账号权限" width="min(460px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
       <el-form label-width="90px">
+        <el-form-item label="登录账号"><span class="account-name">{{ eForm.displayName }}（{{ eForm.username }}）</span></el-form-item>
         <el-form-item label="角色">
-          <el-select v-model="eForm.role" style="width:100%">
-            <el-option label="老板" value="老板" /><el-option label="财务" value="财务" />
-            <el-option label="供应链" value="供应链" /><el-option label="业务" value="业务" /><el-option label="LP" value="LP" />
+          <el-select v-model="eForm.role" :disabled="saving" style="width:100%">
+            <el-option v-for="role in roles" :key="role" :label="role" :value="role" />
           </el-select>
+          <span class="hint">{{ roleNotes[eForm.role] }}</span>
         </el-form-item>
-        <el-form-item label="数据权限"><el-input v-model="eForm.dataScope" /></el-form-item>
-        <el-form-item label="成本可见"><el-switch v-model="eForm.costVisible" /> <span class="hint">关闭=🔒保密(如LP)</span></el-form-item>
-        <el-form-item label="行级隔离"><el-switch v-model="eForm.ownerScoped" /> <span class="hint">仅名下+公海(如业务BD)</span></el-form-item>
-        <el-form-item label="在职"><el-switch v-model="eForm.active" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="eForm.remark" /></el-form-item>
+        <el-form-item label="账号启用"><el-switch v-model="eForm.active" :disabled="saving" aria-label="账号启用" /><span class="hint">停用后立即阻止后续访问</span></el-form-item>
       </el-form>
-      <template #footer><el-button @click="editDlg = false">取消</el-button><el-button type="primary" @click="submitEdit">保存</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="editDlg = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canEditRole" @click="submitEdit">保存权限</el-button></template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
-.hint { color: #909399; font-size: 12px; }
-.note { color: #909399; font-size: 12px; margin-top: 8px; }
+.bar { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hint { color: #606266; font-size: 12px; }
+.note { color: #606266; font-size: 12px; margin-top: 8px; line-height: 1.6; }
+.account-name { overflow-wrap: anywhere; }
+.load-error { margin-bottom: 12px; }
 .up { color: #67c23a; }
 .cline { font-size: 12px; padding: 2px 0; }
 </style>

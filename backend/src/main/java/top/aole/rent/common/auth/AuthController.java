@@ -1,6 +1,7 @@
 package top.aole.rent.common.auth;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
@@ -79,7 +80,9 @@ public class AuthController {
             throw new BizException(401, "账号或密码错误");
         }
         u.setLastLoginAt(LocalDateTime.now());
-        userMapper.updateById(u);
+        // 登录只写登录时间，不能把并发授权前读到的旧 role/status 写回。
+        userMapper.update(null, new LambdaUpdateWrapper<AuthUser>().eq(AuthUser::getId, u.getId())
+                .set(AuthUser::getLastLoginAt, u.getLastLoginAt()));
         return R.ok(tokenPayload(u), "登录成功");
     }
 
@@ -90,6 +93,7 @@ public class AuthController {
         if (cu == null) throw new BizException(401, "未登录");
         Map<String, Object> m = new HashMap<>();
         m.put("userId", cu.getUserId());
+        m.put("accountId", cu.getAccountId());
         m.put("displayName", cu.getUserName());
         m.put("role", cu.getRole());
         return R.ok(m);

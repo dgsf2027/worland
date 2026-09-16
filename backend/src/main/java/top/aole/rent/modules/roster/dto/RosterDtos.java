@@ -11,6 +11,26 @@ import java.util.List;
  */
 public class RosterDtos {
 
+    /** 实际登录账号；不返回密码、门户身份键或历史花名册主键。 */
+    @Data
+    public static class AccountItem {
+        private Long accountId;
+        private String username;
+        private String displayName;
+        private String role;
+        private Boolean active;
+        private Boolean costVisible;
+        private Boolean ownerScoped;
+        private String loginSource;
+        private LocalDateTime lastLoginAt;
+    }
+
+    @Data
+    public static class AccountUpdateRequest {
+        private String role;
+        private Boolean active;
+    }
+
     /** 花名册行(角色权限矩阵)。 */
     @Data
     public static class RosterItem {

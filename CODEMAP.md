@@ -200,6 +200,8 @@ modules/<module>/
 
 现行链路：前端登录拿 `/api/auth` 签发的 **Bearer token** → `UserContextFilter` 按 token 派生身份写入 `UserContext` → `RoleGuardInterceptor` 按 `@RequireRole` 卡权限 → service 层用 `DataScope` 做行级 / 字段级过滤。
 
+账号角色和启停状态以 `yc_rent_auth_user` 为准，每次请求重新读取。花名册页面使用 `/rent/roster/accounts`，由 `RosterAccountService` 按真实 `accountId` 修改同一张表。`CurrentUser.accountId` 是账号主键；`CurrentUser.userId` 仍保留历史业务归属键，两者不可互换，也不可用显示名自动绑定。旧 `/rent/roster/{id}` 写接口返回 409，要求刷新客户端；`yc_rent_user_role_ext` 保留原有提成归属，不再作为授权入口。操作步骤与上线检查见 [账号权限管理](运营手册/账号权限管理.md)。
+
 `X-User-*` 占位头是 ADR-001 遗留的开发期通道，由 `rent.auth.placeholder-headers-enabled` 控制，**默认 false**。若为兼容旧网关而打开，则**网关必须先剥离客户端自带的这些头再重新注入**，否则任何人可伪造身份（`TODO.md` 记为 `S0-04 [P0·上线红线]`）。
 
 ### 6.2 上线红线（`application.yml` 里必须改的默认值）

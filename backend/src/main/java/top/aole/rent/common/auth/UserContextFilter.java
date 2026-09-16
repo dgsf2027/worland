@@ -77,10 +77,10 @@ public class UserContextFilter extends OncePerRequestFilter {
             if (auth != null && auth.regionMatches(true, 0, "Bearer ", 0, 7)) {
                 AuthTokenService.Claims c = tokenService.verify(auth.substring(7).trim());
                 if (c != null) {
-                    tokenUserId = c.userId;
                     // 角色是可变权限，不能长期信任签发时写进 token 的旧值；每次请求回源账号表。
                     AuthUser current = userMapper.selectById(c.userId);
                     if (current != null && Integer.valueOf(1).equals(current.getStatus())) {
+                        tokenUserId = current.getId();
                         name = current.getDisplayName();
                         role = current.getRole();
                     }
@@ -105,6 +105,7 @@ public class UserContextFilter extends OncePerRequestFilter {
                 Long userId = resolveUserId(name.trim());
                 if (tokenUserId != null) log.debug("token userId={}", tokenUserId);
                 CurrentUser u = new CurrentUser(userId, name.trim(), role == null ? "" : role.trim(), null);
+                u.setAccountId(tokenUserId);
                 // 请求指纹(审计抗抵赖 M5-06 P1-16):IP/URI/请求号。生产由可信网关注入 X-Forwarded-For/X-Request-Id
                 u.setClientIp(clientIp(request));
                 u.setRequestUri(request.getRequestURI());

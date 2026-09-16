@@ -100,6 +100,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Apache POI:月度报表包 Excel(XSSF)+ 经营分析报告 Word(XWPF)导出(照园区小卖账房 imports/monthly)-->
         <dependency>

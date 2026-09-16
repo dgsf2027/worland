@@ -14,6 +14,9 @@ public class CurrentUser {
     /** 用户主键(占位期由 X-User-Name 映射到真实 user 主键,作隔离键;缺省 0=未登录) */
     private Long userId;
 
+    /** 登录账号主键，与历史业务归属 userId 分开，授权操作只使用此键。 */
+    private Long accountId;
+
     /** 显示名(X-User-Name) */
     private String userName;
 

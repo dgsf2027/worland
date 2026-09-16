@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()
 
 // 2026-08-19 邀请码注册上线:身份来自登录会话(token),不再前端切角色
-import request from '@/utils/request'
+import { refreshSession } from '@/api/auth'
 import { clearSession, sessionDisplayName, sessionRole } from '@/utils/session'
 const displayName = sessionDisplayName
 const current = sessionRole
-onMounted(async () => {
+async function syncProfile() {
+  if (route.meta.public) return
   try {
-    const me: any = await request.get('/auth/me')
-    displayName.value = me.displayName || ''
-    current.value = me.role || ''
-    localStorage.setItem('rent_user_name', displayName.value)
-    localStorage.setItem('rent_user_role', current.value)
+    await refreshSession()
   } catch { /* 登录失效由请求拦截器处理 */ }
-})
+}
+watch(() => route.fullPath, syncProfile, { immediate: true })
+onMounted(() => window.addEventListener('focus', syncProfile))
+onUnmounted(() => window.removeEventListener('focus', syncProfile))
 function logout() {
   clearSession()
   window.location.href = '/login'

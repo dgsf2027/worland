@@ -5,8 +5,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import top.aole.rent.common.audit.AuditLogService;
-import top.aole.rent.common.exception.BizException;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.purchase.domain.PurchaseIn;
@@ -32,7 +30,7 @@ import java.util.Map;
 /**
  * 花名册/提成服务(M5-03)。
  *
- * <p>①花名册:角色权限矩阵(复用 DataScope 口径),改动限老板 + 入 audit(M5-06)。
+ * <p>①历史花名册:只读保留提成归属；登录账号权限由 RosterAccountService 管理。
  * ②提成:供应链集采降本贡献 / 业务成交贡献,从管理费列支;
  * 提成率走 rule commission_rate(禁硬编码);base 溯源真实业务单据(purchase_item 降本 / 合同成交额);
  * 幂等键 uk(period,user_id,type,source_ref)避免重复计提。
@@ -48,7 +46,6 @@ public class RosterService {
     private final PurchaseItemMapper purchaseItemMapper;
     private final ContractMapper contractMapper;
     private final RuleConfigService rules;
-    private final AuditLogService auditLogService;
 
     // ============ 花名册 ============
 
@@ -60,44 +57,6 @@ public class RosterService {
             out.add(toRosterItem(u));
         }
         return out;
-    }
-
-    /** 角色权限改动(限老板·切面卡+此处入 audit)。 */
-    @Transactional
-    public RosterDtos.RosterItem updateRole(Long id, RosterDtos.RoleUpdateRequest req) {
-        UserRoleExt u = roleExtMapper.selectById(id);
-        if (u == null || Integer.valueOf(1).equals(u.getIsDeleted())) {
-            throw new BizException(404, "花名册成员不存在: id=" + id);
-        }
-        StringBuilder chg = new StringBuilder();
-        if (req.getRole() != null && !req.getRole().equals(u.getRole())) {
-            chg.append("角色 ").append(u.getRole()).append("→").append(req.getRole()).append("; ");
-            u.setRole(req.getRole());
-        }
-        if (req.getDataScope() != null) {
-            u.setDataScope(req.getDataScope());
-        }
-        if (req.getCostVisible() != null && !req.getCostVisible().equals(Integer.valueOf(1).equals(u.getCostVisible()))) {
-            chg.append("成本可见 ").append(bool(u.getCostVisible())).append("→").append(req.getCostVisible()).append("; ");
-            u.setCostVisible(req.getCostVisible() ? 1 : 0);
-        }
-        if (req.getOwnerScoped() != null) {
-            u.setOwnerScoped(req.getOwnerScoped() ? 1 : 0);
-        }
-        if (req.getProjectId() != null) {
-            u.setProjectId(req.getProjectId());
-        }
-        if (req.getActive() != null) {
-            u.setActive(req.getActive() ? 1 : 0);
-        }
-        if (req.getRemark() != null) {
-            u.setRemark(req.getRemark());
-        }
-        roleExtMapper.updateById(u);
-        auditLogService.record("角色权限变更", "user_role_ext", id, AuditLogService.EXECUTED,
-                "成员 " + u.getUserName() + " · " + (chg.length() == 0 ? "字段调整" : chg.toString()));
-        log.info("花名册角色权限变更: user={}, changes={}", u.getUserName(), chg);
-        return toRosterItem(u);
     }
 
     // ============ 提成计提 ============
@@ -305,7 +264,4 @@ public class RosterService {
         return v == null ? BigDecimal.ZERO : v;
     }
 
-    private String bool(Integer i) {
-        return Integer.valueOf(1).equals(i) ? "true" : "false";
-    }
 }

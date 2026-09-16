@@ -2,6 +2,7 @@ package top.aole.rent.common.sso;
 
 import cn.hutool.json.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -76,6 +77,12 @@ public class SsoService {
         if (user == null) {
             user = findUnboundByPhone(id);
             if (user != null) {
+                // 首绑与检查必须原子化：并发授权/停用后不得再按旧的最低角色判断绑定。
+                int bound = userMapper.update(null, new LambdaUpdateWrapper<AuthUser>()
+                        .eq(AuthUser::getId, user.getId()).isNull(AuthUser::getPortalUid)
+                        .eq(AuthUser::getRole, defaultRole).eq(AuthUser::getStatus, 1)
+                        .set(AuthUser::getPortalUid, id.getPortalUid()));
+                if (bound != 1) throw new BizException(409, "账号状态已变化，请重新从门户登录");
                 user.setPortalUid(id.getPortalUid());
             } else {
                 try {
@@ -96,7 +103,9 @@ public class SsoService {
         // 注意：不覆写 display_name —— 它是 UserContextFilter.resolveUserId 的行级隔离键（同名同键），
         // 每次登录跟门户改名会让老数据"换主人"。门户 name 只在 createUser 首登建号时取一次；改名走花名册人工改。
         user.setLastLoginAt(LocalDateTime.now());
-        userMapper.updateById(user);
+        // 登录仅写登录时间；门户身份只在上面的原子首绑或建号时写入。
+        userMapper.update(null, new LambdaUpdateWrapper<AuthUser>().eq(AuthUser::getId, user.getId())
+                .set(AuthUser::getLastLoginAt, user.getLastLoginAt()));
 
         // 5. 签发本系统原有会话 token（与 /auth/login 完全一致的载荷）
         String token = tokenService.issue(user.getId(), user.getDisplayName(), user.getRole());
