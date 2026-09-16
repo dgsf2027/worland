@@ -48,6 +48,9 @@ public class RosterAccountService {
         }
         AuthUser target = find(locked, accountId);
         if (target == null) throw new BizException(404, "登录账号不存在，请刷新列表");
+        if (Boolean.TRUE.equals(request.getActive()) && RecoveryCredential.isPending(target.getPasswordHash())) {
+            throw new BizException(409, "恢复账号必须先在登录页输入恢复码并修改临时密码，不能直接启用");
+        }
         String nextRole = request.getRole() == null ? target.getRole() : request.getRole();
         Integer nextStatus = request.getActive() == null ? target.getStatus() : (request.getActive() ? 1 : 0);
         if (enabledBoss(target) && (!"老板".equals(nextRole) || !Integer.valueOf(1).equals(nextStatus))
@@ -85,6 +88,7 @@ public class RosterAccountService {
         item.setDisplayName(user.getDisplayName());
         item.setRole(user.getRole());
         item.setActive(Integer.valueOf(1).equals(user.getStatus()));
+        item.setPendingActivation(Integer.valueOf(RecoveryCredential.PENDING_STATUS).equals(user.getStatus()));
         item.setCostVisible(DataScope.canSeeCost(user.getRole()));
         item.setOwnerScoped(DataScope.isOwnerScoped(user.getRole()));
         item.setLoginSource(user.getPortalUid() == null ? "本地账号" : "门户 SSO");

@@ -19,6 +19,7 @@ public class RosterDtos {
         private String displayName;
         private String role;
         private Boolean active;
+        private Boolean pendingActivation;
         private Boolean costVisible;
         private Boolean ownerScoped;
         private String loginSource;

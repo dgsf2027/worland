@@ -297,6 +297,70 @@ class RosterAccountIntegrationTest {
         return jdbc.queryForObject("SELECT role FROM yc_rent_auth_user WHERE id=?", String.class, id);
     }
 
+    private void pendingAdmin() {
+        String credentials = (System.currentTimeMillis() / 1000 + 1800) + "$"
+                + PasswordHasher.hash("123456") + "$" + PasswordHasher.hash("one-time-recovery-code");
+        jdbc.update("INSERT INTO yc_rent_auth_user(id,username,password_hash,display_name,role,status) VALUES(404,'test',?,'恢复管理员 test','老板',2)", credentials);
+    }
+
+    @Test void pendingAdminLoginRequiresActivationAndDoesNotIssueToken() throws Exception {
+        pendingAdmin();
+        mvc.perform(post("/auth/login").contentType("application/json")
+                        .content("{\"username\":\"test\",\"password\":\"123456\"}"))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.requiresPasswordChange").value(true))
+                .andExpect(jsonPath("$.data.token").doesNotExist());
+        mvc.perform(get("/rent/roster/accounts").header("Authorization", "Bearer " + tokens.issue(404, "恢复管理员 test", "老板")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test void recoveryRequiresOneTimeCodeAndStrongNewPassword() throws Exception {
+        pendingAdmin();
+        completeRecovery("wrong-code", "New-test-password-2026", 401);
+        completeRecovery("one-time-recovery-code", "123456", 400);
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM yc_rent_auth_user WHERE id=404", Integer.class));
+        completeRecovery("one-time-recovery-code", "New-test-password-2026", 200);
+        assertEquals(1, jdbc.queryForObject("SELECT status FROM yc_rent_auth_user WHERE id=404", Integer.class));
+        assertTrue(PasswordHasher.verify("New-test-password-2026", jdbc.queryForObject("SELECT password_hash FROM yc_rent_auth_user WHERE id=404", String.class)));
+        completeRecovery("one-time-recovery-code", "Another-password-2026", 401);
+        mvc.perform(post("/auth/login").contentType("application/json")
+                        .content("{\"username\":\"test\",\"password\":\"123456\"}"))
+                .andExpect(jsonPath("$.code").value(401));
+        String body = mvc.perform(post("/auth/login").contentType("application/json")
+                        .content("{\"username\":\"test\",\"password\":\"New-test-password-2026\"}"))
+                .andExpect(jsonPath("$.code").value(200)).andReturn().getResponse().getContentAsString();
+        String token = new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).path("data").path("token").asText();
+        change(202, token, "{\"role\":\"供应链\"}", 200);
+    }
+
+    @Test void normalAccountCannotUseRecoveryAndPendingAccountCannotSkipActivation() throws Exception {
+        pendingAdmin();
+        change(404, bossToken, "{\"active\":true}", 409);
+        change(404, bossToken, "{\"active\":false}", 200);
+        completeRecovery("one-time-recovery-code", "New-test-password-2026", 401);
+        // A disabled recovery account must not be re-enabled with its temporary credentials.
+        change(404, bossToken, "{\"active\":true}", 409);
+        mvc.perform(post("/auth/complete-recovery").contentType("application/json")
+                        .content("{\"username\":\"colleague\",\"password\":\"123456\",\"recoveryCode\":\"one-time-recovery-code\",\"newPassword\":\"New-test-password-2026\"}"))
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test void expiredRecoveryCredentialsCannotActivateAdministrator() throws Exception {
+        pendingAdmin();
+        String credentials = "1$" + PasswordHasher.hash("123456") + "$" + PasswordHasher.hash("one-time-recovery-code");
+        jdbc.update("UPDATE yc_rent_auth_user SET password_hash=? WHERE id=404", credentials);
+        completeRecovery("one-time-recovery-code", "New-test-password-2026", 401);
+    }
+
+    private void completeRecovery(String code, String password, int expected) throws Exception {
+        Map<String, String> body = new HashMap<>();
+        body.put("username", "test"); body.put("password", "123456");
+        body.put("recoveryCode", code); body.put("newPassword", password);
+        mvc.perform(post("/auth/complete-recovery").contentType("application/json")
+                        .content(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(body)))
+                .andExpect(jsonPath("$.code").value(expected));
+    }
+
     private void change(long id, String token, String body, int code) throws Exception {
         mvc.perform(put("/rent/roster/accounts/" + id).header("Authorization", "Bearer " + token)
                         .contentType("application/json").content(body))

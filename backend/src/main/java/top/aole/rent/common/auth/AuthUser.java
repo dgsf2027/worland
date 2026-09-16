@@ -17,6 +17,7 @@ public class AuthUser {
     private String passwordHash;
     private String displayName;
     private String role;
+    /** 0 停用，1 正常，2 恢复账号待激活（无业务访问权限）。 */
     private Integer status;
     private LocalDateTime createdAt;
     private LocalDateTime lastLoginAt;

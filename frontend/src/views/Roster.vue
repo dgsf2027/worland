@@ -109,7 +109,7 @@ onMounted(() => { loadRoster(); loadCommission() })
             <template #default="{ row }"><span>{{ row.ownerScoped ? '名下+公海' : '无本人归属限制' }}</span></template>
           </el-table-column>
           <el-table-column label="账号状态" width="90">
-            <template #default="{ row }"><el-tag size="small" :type="row.active ? 'success' : 'info'">{{ row.active ? '启用' : '停用' }}</el-tag></template>
+            <template #default="{ row }"><el-tag size="small" :type="row.active ? 'success' : row.pendingActivation ? 'warning' : 'info'">{{ row.pendingActivation ? '待激活' : row.active ? '启用' : '停用' }}</el-tag></template>
           </el-table-column>
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }"><el-button v-if="canEditRole" link size="small" @click="openEdit(row)">改权限</el-button><span v-else class="hint">仅老板</span></template>

@@ -17,7 +17,7 @@ const request = axios.create({
  * 免登白名单(ole-portal-sso 硬约束 9):门户 SSO 回调与登录/注册接口不带旧 token、401 也不弹回登录页。
  * 路径按 baseURL 之后的相对路径匹配(/v1/sso/*、/auth/login|register)。
  */
-const AUTH_WHITELIST = ['/v1/sso/', '/auth/login', '/auth/register']
+const AUTH_WHITELIST = ['/v1/sso/', '/auth/login', '/auth/register', '/auth/complete-recovery']
 function isWhitelisted(url?: string): boolean {
   if (!url) return false
   const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api(?=\/)/, '')

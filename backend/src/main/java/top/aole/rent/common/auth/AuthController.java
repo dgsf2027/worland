@@ -76,6 +76,13 @@ public class AuthController {
         String username = trim(body.get("username"));
         String password = body.get("password") == null ? "" : body.get("password");
         AuthUser u = userMapper.selectOne(new LambdaQueryWrapper<AuthUser>().eq(AuthUser::getUsername, username).last("limit 1"));
+        if (u != null && Integer.valueOf(RecoveryCredential.PENDING_STATUS).equals(u.getStatus())
+                && RecoveryCredential.verifyPassword(password, u.getPasswordHash())) {
+            Map<String, Object> pending = new HashMap<>();
+            pending.put("requiresPasswordChange", true);
+            pending.put("username", u.getUsername());
+            return R.ok(pending, "请输入一次性恢复码并设置新密码");
+        }
         if (u == null || u.getStatus() == null || u.getStatus() != 1 || !PasswordHasher.verify(password, u.getPasswordHash())) {
             throw new BizException(401, "账号或密码错误");
         }
@@ -84,6 +91,37 @@ public class AuthController {
         userMapper.update(null, new LambdaUpdateWrapper<AuthUser>().eq(AuthUser::getId, u.getId())
                 .set(AuthUser::getLastLoginAt, u.getLastLoginAt()));
         return R.ok(tokenPayload(u), "登录成功");
+    }
+
+    @ApiOperation("使用一次性恢复码完成管理员激活，临时密码不能取得业务会话")
+    @PostMapping("/complete-recovery")
+    public R<Map<String, Object>> completeRecovery(@RequestBody Map<String, String> body) {
+        String username = trim(body.get("username"));
+        AuthUser u = userMapper.selectOne(new LambdaQueryWrapper<AuthUser>()
+                .eq(AuthUser::getUsername, username).last("limit 1"));
+        if (u == null || !Integer.valueOf(RecoveryCredential.PENDING_STATUS).equals(u.getStatus())
+                || !RecoveryCredential.verifyPassword(body.get("password"), u.getPasswordHash())
+                || !RecoveryCredential.verifyCode(trim(body.get("recoveryCode")), u.getPasswordHash())) {
+            throw new BizException(401, "临时密码或恢复码不正确、已过期，或账号已停用/激活");
+        }
+        String password = body.get("newPassword");
+        if (password == null || password.length() < 12 || password.length() > 128
+                || password.equals(body.get("password")) || password.trim().length() < 12
+                || !password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
+            throw new BizException(400, "新密码需 12–128 位，包含字母和数字，且不能与临时密码相同");
+        }
+        String hash = PasswordHasher.hash(password);
+        LocalDateTime now = LocalDateTime.now();
+        int changed = userMapper.update(null, new LambdaUpdateWrapper<AuthUser>()
+                .eq(AuthUser::getId, u.getId()).eq(AuthUser::getStatus, RecoveryCredential.PENDING_STATUS)
+                .eq(AuthUser::getPasswordHash, u.getPasswordHash())
+                .set(AuthUser::getPasswordHash, hash).set(AuthUser::getStatus, 1)
+                .set(AuthUser::getLastLoginAt, now));
+        if (changed != 1) throw new BizException(409, "恢复状态已变化，请重新登录");
+        u.setPasswordHash(hash);
+        u.setStatus(1);
+        log.info("[auth] recovery completed accountId={}", u.getId());
+        return R.ok(tokenPayload(u), "管理员已激活，临时密码和恢复码已失效");
     }
 
     @ApiOperation("当前账号")

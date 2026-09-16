@@ -8,6 +8,7 @@ export interface RosterAccount {
   costVisible: boolean
   ownerScoped: boolean
   active: boolean
+  pendingActivation: boolean
   loginSource: string
   lastLoginAt?: string
 }
