@@ -89,8 +89,8 @@ public class FileStorageService {
         // 合同附件:压缩包(合同扫描件/补充协议打包),与考察压缩包同上限
         MAX_BYTES.put(CONTRACT, 1024 * MB);
         ALLOWED_EXT.put(CONTRACT, new HashSet<>(Arrays.asList("zip", "rar", "7z")));
-        // 资产照片 / 出入库现场照片:手机拍照直传
-        for (String inv : Arrays.asList(InvService.BIZ_ITEM, InvService.BIZ_MOVEMENT)) {
+        // 资产照片 / 出入库现场照片 / 供应商考察产品图片:手机拍照直传
+        for (String inv : Arrays.asList(InvService.BIZ_ITEM, InvService.BIZ_MOVEMENT, SupplierInspectionService.IMAGE_BIZ_TYPE)) {
             MAX_BYTES.put(inv, 20 * MB);
             ALLOWED_EXT.put(inv, new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "webp", "gif", "heic", "heif")));
         }
@@ -156,7 +156,7 @@ public class FileStorageService {
                 throw new BizException(404, "请先保存有效的 BOM 节点再上传附件");
             }
         }
-        if (SupplierInspectionService.BIZ_TYPE.equals(bizType)) {
+        if (SupplierInspectionService.BIZ_TYPE.equals(bizType) || SupplierInspectionService.IMAGE_BIZ_TYPE.equals(bizType)) {
             supplierInspectionService.assertCanAttach(bizId);
         }
         if (InvService.BIZ_ITEM.equals(bizType) || InvService.BIZ_MOVEMENT.equals(bizType)) {
@@ -379,7 +379,7 @@ public class FileStorageService {
     public void delete(Long fileId) {
         FileObject fo = require(fileId);
         CurrentUser u = UserContext.require();
-        if (!InvService.BIZ_ITEM.equals(fo.getBizType()) && !InvService.BIZ_MOVEMENT.equals(fo.getBizType())) {
+        if (!DELETABLE_BIZ_TYPES.contains(fo.getBizType())) {
             throw new BizException(403, "该类附件不支持删除");
         }
         authorize(fo, u);
@@ -387,6 +387,60 @@ public class FileStorageService {
         if (!owner && !"老板".equals(u.getRole())) {
             throw new BizException(403, "只能删除自己上传的照片");
         }
+        fileObjectMapper.deleteById(fileId);
+    }
+
+    private static final Set<String> DELETABLE_BIZ_TYPES = new HashSet<>(Arrays.asList(
+            InvService.BIZ_ITEM, InvService.BIZ_MOVEMENT, SupplierInspectionService.IMAGE_BIZ_TYPE));
+
+    // ============================== 服务端内部读写(Excel 导入图片等) ==============================
+
+    /** 服务端直接落一份文件(不经上传,调用方已做业务校验)。返回文件 id。 */
+    public Long storeBytes(byte[] data, String fileName, String contentType, String bizType, Long bizId) {
+        CurrentUser u = UserContext.require();
+        String key = UUID.randomUUID().toString().replace("-", "");
+        Path dir = Paths.get(storageDir, bizType);
+        try {
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(key), data);
+        } catch (IOException e) {
+            throw new BizException("文件保存失败:" + e.getMessage());
+        }
+        FileObject fo = new FileObject();
+        fo.setStorageKey(key);
+        fo.setBizType(bizType);
+        fo.setBizId(bizId);
+        fo.setFileName(fileName);
+        fo.setContentType(contentType);
+        fo.setFileSize((long) data.length);
+        fo.setStoragePath(bizType + "/" + key);
+        fo.setProjectId(u.getProjectId());
+        fo.setUploaderId(u.getUserId());
+        fo.setUploaderName(u.getUserName());
+        fileObjectMapper.insert(fo);
+        return fo.getId();
+    }
+
+    /** 某业务对象下的文件(不做角色校验,供服务端内部使用)。 */
+    public List<FileObject> listRaw(String bizType, Long bizId) {
+        return fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
+                .eq(FileObject::getBizType, bizType)
+                .eq(FileObject::getBizId, bizId)
+                .orderByAsc(FileObject::getId));
+    }
+
+    /** 读取文件内容;文件已不在磁盘返回 null。 */
+    public byte[] readBytes(FileObject fo) {
+        Path p = Paths.get(storageDir, fo.getStoragePath()).toAbsolutePath();
+        try {
+            return Files.isRegularFile(p) ? Files.readAllBytes(p) : null;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** 逻辑删除(服务端内部使用)。 */
+    public void removeRaw(Long fileId) {
         fileObjectMapper.deleteById(fileId);
     }
 

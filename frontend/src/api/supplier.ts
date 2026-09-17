@@ -165,6 +165,8 @@ export function importSuppliers(file: File): Promise<SupplierImportResult> {
 export const INSPECTION_SCOPES = ['货架', '阁楼', '播种墙'] as const
 export const INSPECTION_ARCHIVE_EXTS = ['zip', 'rar', '7z']
 export const INSPECTION_ARCHIVE_MAX_MB = 1024
+/** 导入表格上限(含嵌入的产品图片) */
+export const INSPECTION_IMPORT_MAX_MB = 100
 
 export interface InspectionItem {
   id: number
@@ -179,6 +181,18 @@ export interface InspectionItem {
   address?: string
   contact?: string
   phone?: string
+  /** 公司业务范围(公司简介) */
+  companyProfile?: string
+  /** 业绩/万元(原文) */
+  performanceWan?: string
+  /** 社保员工(原文) */
+  socialStaff?: string
+  /** 产品图片说明(无图时的文字) */
+  productImageNote?: string
+  /** 考察观后感 */
+  impression?: string
+  /** 产品图片张数 */
+  imageCount: number
   result: '待考察' | '合格' | '不合格'
   conclusion?: string
   decidedByName?: string
@@ -205,6 +219,8 @@ export interface InspectionImportResult {
   passed: number
   failed: number
   skipped: number
+  /** 本次新增的产品图片张数 */
+  imagesAdded: number
   messages: { row: number; companyName?: string; level: 'info' | 'warn'; message: string }[]
 }
 

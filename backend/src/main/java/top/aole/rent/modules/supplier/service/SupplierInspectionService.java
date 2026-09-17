@@ -24,9 +24,11 @@ import top.aole.rent.modules.supplier.mapper.SupplierMapper;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,6 +53,8 @@ import java.util.stream.Collectors;
 public class SupplierInspectionService {
 
     public static final String BIZ_TYPE = "supplier_inspection";
+    /** 产品图片(对象存储 biz_type) */
+    public static final String IMAGE_BIZ_TYPE = "supplier_inspection_image";
 
     public static final String PENDING = "待考察";
     public static final String PASSED = "合格";
@@ -309,11 +313,45 @@ public class SupplierInspectionService {
         private String address;
         private String contact;
         private String phone;
+        private String companyProfile;
+        private String performanceWan;
+        private String socialStaff;
+        private String productImageNote;
+        private String impression;
+        /** 表格里实际存在的可选列(公司业务范围/业绩/社保员工/产品图片/考察观后感);不存在的列导入时保留原值 */
+        private Set<String> columns = new HashSet<>();
+        /** 产品图片列里提取到的图片 */
+        private List<SheetImage> images = new ArrayList<>();
         /** 合格/不合格;null=表内未填,保持原结果(新增则为待考察) */
         private String result;
         /** 解析阶段产生的提示 */
         private List<String> warnings = new ArrayList<>();
+        /** 【回填】导入落库后的考察 id(跳过的行为 null) */
+        private Long inspectionId;
     }
+
+    /** 表格单元格里的一张图片 */
+    @Data
+    public static class SheetImage {
+        private byte[] data;
+        /** 扩展名(png/jpeg/…) */
+        private String ext;
+
+        public SheetImage() {
+        }
+
+        public SheetImage(byte[] data, String ext) {
+            this.data = data;
+            this.ext = ext;
+        }
+    }
+
+    /** 可选列名(SheetRow.columns 的取值) */
+    public static final String COL_PROFILE = "公司业务范围";
+    public static final String COL_PERFORMANCE = "业绩";
+    public static final String COL_STAFF = "社保员工";
+    public static final String COL_IMAGE = "产品图片";
+    public static final String COL_IMPRESSION = "考察观后感";
 
     /**
      * 按公司名称(规范化后)匹配:已存在则更新公司信息,不存在则新增;「是否合格」有值时按表格设置/改判结果。
@@ -370,6 +408,7 @@ public class SupplierInspectionService {
                     writeInfo(row);
                     res.setUpdated(res.getUpdated() + 1);
                 }
+                sr.setInspectionId(row.getId());
 
                 if (sr.getResult() != null && !sr.getResult().equals(row.getResult())) {
                     String before = row.getResult();
@@ -415,6 +454,11 @@ public class SupplierInspectionService {
         row.setAddress(trimToNull(req.getAddress()));
         row.setContact(trimToNull(req.getContact()));
         row.setPhone(trimToNull(req.getPhone()));
+        row.setCompanyProfile(trimToNull(req.getCompanyProfile()));
+        row.setPerformanceWan(trimToNull(req.getPerformanceWan()));
+        row.setSocialStaff(trimToNull(req.getSocialStaff()));
+        row.setProductImageNote(trimToNull(req.getProductImageNote()));
+        row.setImpression(trimToNull(req.getImpression()));
         row.setRemark(req.getRemark());
     }
 
@@ -430,6 +474,22 @@ public class SupplierInspectionService {
         row.setAddress(trimToNull(sr.getAddress()));
         row.setContact(trimToNull(sr.getContact()));
         row.setPhone(trimToNull(sr.getPhone()));
+        Set<String> cols = sr.getColumns();
+        if (cols.contains(COL_PROFILE)) {
+            row.setCompanyProfile(trimToNull(sr.getCompanyProfile()));
+        }
+        if (cols.contains(COL_PERFORMANCE)) {
+            row.setPerformanceWan(trimToNull(sr.getPerformanceWan()));
+        }
+        if (cols.contains(COL_STAFF)) {
+            row.setSocialStaff(trimToNull(sr.getSocialStaff()));
+        }
+        if (cols.contains(COL_IMAGE)) {
+            row.setProductImageNote(trimToNull(sr.getProductImageNote()));
+        }
+        if (cols.contains(COL_IMPRESSION)) {
+            row.setImpression(trimToNull(sr.getImpression()));
+        }
     }
 
     /** 写入公司信息与结果字段(显式 set,允许清空;updateById 会跳过 null)。 */
@@ -445,6 +505,11 @@ public class SupplierInspectionService {
                 .set(SupplierInspection::getAddress, row.getAddress())
                 .set(SupplierInspection::getContact, row.getContact())
                 .set(SupplierInspection::getPhone, row.getPhone())
+                .set(SupplierInspection::getCompanyProfile, row.getCompanyProfile())
+                .set(SupplierInspection::getPerformanceWan, row.getPerformanceWan())
+                .set(SupplierInspection::getSocialStaff, row.getSocialStaff())
+                .set(SupplierInspection::getProductImageNote, row.getProductImageNote())
+                .set(SupplierInspection::getImpression, row.getImpression())
                 .set(SupplierInspection::getRemark, row.getRemark())
                 .set(SupplierInspection::getResult, row.getResult())
                 .set(SupplierInspection::getConclusion, row.getConclusion())
@@ -481,11 +546,18 @@ public class SupplierInspectionService {
             return new ArrayList<>();
         }
         Set<Long> ids = rows.stream().map(SupplierInspection::getId).collect(Collectors.toSet());
-        Map<Long, List<FileObject>> archives = fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
-                        .eq(FileObject::getBizType, BIZ_TYPE)
-                        .in(FileObject::getBizId, ids)
-                        .orderByAsc(FileObject::getId))
-                .stream().collect(Collectors.groupingBy(FileObject::getBizId));
+        Map<Long, List<FileObject>> archives = new HashMap<>();
+        Map<Long, Integer> imageCounts = new HashMap<>();
+        for (FileObject fo : fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
+                .in(FileObject::getBizType, Arrays.asList(BIZ_TYPE, IMAGE_BIZ_TYPE))
+                .in(FileObject::getBizId, ids)
+                .orderByAsc(FileObject::getId))) {
+            if (IMAGE_BIZ_TYPE.equals(fo.getBizType())) {
+                imageCounts.merge(fo.getBizId(), 1, Integer::sum);
+            } else {
+                archives.computeIfAbsent(fo.getBizId(), k -> new ArrayList<>()).add(fo);
+            }
+        }
 
         Set<Long> supplierIds = rows.stream().map(SupplierInspection::getSupplierId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
@@ -506,6 +578,12 @@ public class SupplierInspectionService {
             it.setAddress(r.getAddress());
             it.setContact(r.getContact());
             it.setPhone(r.getPhone());
+            it.setCompanyProfile(r.getCompanyProfile());
+            it.setPerformanceWan(r.getPerformanceWan());
+            it.setSocialStaff(r.getSocialStaff());
+            it.setProductImageNote(r.getProductImageNote());
+            it.setImpression(r.getImpression());
+            it.setImageCount(imageCounts.getOrDefault(r.getId(), 0));
             it.setResult(r.getResult());
             it.setConclusion(r.getConclusion());
             it.setDecidedByName(r.getDecidedByName());

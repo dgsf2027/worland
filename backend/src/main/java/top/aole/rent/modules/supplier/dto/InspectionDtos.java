@@ -42,7 +42,7 @@ public final class InspectionDtos {
         @ApiModelProperty("成立时间")
         private LocalDate establishedDate;
 
-        @ApiModelProperty("业务范围:货架/阁楼/播种墙,可多选")
+        @ApiModelProperty("业务类型:货架/阁楼/播种墙,可多选")
         private List<String> businessScope;
 
         @Size(max = 255)
@@ -56,6 +56,24 @@ public final class InspectionDtos {
         @Size(max = 32)
         @ApiModelProperty("主要电话")
         private String phone;
+
+        @ApiModelProperty("公司业务范围(公司简介)")
+        private String companyProfile;
+
+        @Size(max = 64)
+        @ApiModelProperty("业绩/万元(原文)")
+        private String performanceWan;
+
+        @Size(max = 128)
+        @ApiModelProperty("社保员工(原文)")
+        private String socialStaff;
+
+        @Size(max = 128)
+        @ApiModelProperty("产品图片说明(无图时的文字)")
+        private String productImageNote;
+
+        @ApiModelProperty("考察观后感")
+        private String impression;
 
         @Size(max = 255)
         @ApiModelProperty("备注")
@@ -88,6 +106,18 @@ public final class InspectionDtos {
         private String address;
         private String contact;
         private String phone;
+        /** 公司业务范围(公司简介) */
+        private String companyProfile;
+        /** 业绩/万元(原文) */
+        private String performanceWan;
+        /** 社保员工(原文) */
+        private String socialStaff;
+        /** 产品图片说明 */
+        private String productImageNote;
+        /** 考察观后感 */
+        private String impression;
+        /** 产品图片数量 */
+        private Integer imageCount;
         private String result;
         private String conclusion;
         private String decidedByName;
@@ -127,6 +157,8 @@ public final class InspectionDtos {
         private int failed;
         /** 跳过的行(缺公司名称/表内重复) */
         private int skipped;
+        /** 本次新增的产品图片张数 */
+        private int imagesAdded;
         private List<RowMessage> messages = new ArrayList<>();
     }
 

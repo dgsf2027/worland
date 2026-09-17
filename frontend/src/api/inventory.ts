@@ -279,15 +279,16 @@ export function scanUrl(token: string): string {
   return `${window.location.origin}/scan/${token}`
 }
 
-// ---------- 照片 ----------
-export function uploadInvPhoto(bizType: 'inv_item' | 'inv_movement', bizId: number, file: File): Promise<PhotoFile> {
+// ---------- 照片(资产/出入库/供应商考察产品图片共用) ----------
+export type PhotoBizType = 'inv_item' | 'inv_movement' | 'supplier_inspection_image'
+export function uploadInvPhoto(bizType: PhotoBizType, bizId: number, file: File): Promise<PhotoFile> {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('bizType', bizType)
   fd.append('bizId', String(bizId))
   return request.post('/rent/files', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 0 })
 }
-export function fetchInvPhotos(bizType: 'inv_item' | 'inv_movement', bizId: number): Promise<PhotoFile[]> {
+export function fetchInvPhotos(bizType: PhotoBizType, bizId: number): Promise<PhotoFile[]> {
   return request.get('/rent/files', { params: { bizType, bizId } })
 }
 export function deleteInvPhoto(fileId: number): Promise<void> {

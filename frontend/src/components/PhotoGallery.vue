@@ -2,11 +2,11 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkUploadFile, downloadFileBlob } from '@/api/asset'
-import { deleteInvPhoto, fetchInvPhotos, uploadInvPhoto, PHOTO_EXTS, PHOTO_MAX_MB, type PhotoFile } from '@/api/inventory'
+import { deleteInvPhoto, fetchInvPhotos, uploadInvPhoto, PHOTO_EXTS, PHOTO_MAX_MB, type PhotoFile, type PhotoBizType } from '@/api/inventory'
 
-/** 资产照片 / 出入库现场照片:缩略图预览 + 拍照上传 + 删除 */
+/** 图片附件(资产照片 / 出入库现场照片 / 考察产品图片):缩略图预览 + 拍照上传 + 删除 */
 const props = defineProps<{
-  bizType: 'inv_item' | 'inv_movement'
+  bizType: PhotoBizType
   bizId: number
   editable?: boolean
 }>()

@@ -187,6 +187,9 @@ modules/<module>/
 | `V106__asset_override_intended_customer_followup_contract.sql` | 单台收益手工覆盖、意向承接客户、跟进关联合同 |
 | `V107__asset_payment_term.sql` | 设备合同付款条件（自定义多段）、应付逐台生成 |
 | `V108__inventory_asset_management.sql` | 资产管理（替代盘点）：资产批次/出租单/出入库/损坏缺件/赔偿价目/标签企业信息 |
+| `V109__remove_demo_suppliers.sql` | 删除演示供应商（恒丰自动化/睿捷设备/广达货架）及误建的「11」，解除引用 |
+| `V110__remove_assets.sql` | 删除设备 WL-BZQ-0002/0003/0004、WL-HJ-0001/0002/0003 及关联单据 |
+| `V111__supplier_inspection_sheet_v2.sql` | 供应商考察对齐 0916 版汇总表：公司业务范围/业绩/社保员工/产品图片说明/考察观后感 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

@@ -5,10 +5,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchInspections, createInspection, updateInspection, deleteInspection, decideInspection,
   uploadInspectionArchive, fetchInspectionArchives, exportInspections, importInspections,
-  INSPECTION_SCOPES, INSPECTION_ARCHIVE_EXTS, INSPECTION_ARCHIVE_MAX_MB,
+  INSPECTION_SCOPES, INSPECTION_ARCHIVE_EXTS, INSPECTION_ARCHIVE_MAX_MB, INSPECTION_IMPORT_MAX_MB,
   type InspectionItem, type FileItem, type InspectionImportResult,
 } from '@/api/supplier'
 import { checkUploadFile, saveFile } from '@/api/asset'
+import PhotoGallery from '@/components/PhotoGallery.vue'
 import { sessionRole } from '@/utils/session'
 
 const router = useRouter()
@@ -63,7 +64,7 @@ const importResult = ref<InspectionImportResult | null>(null)
 const importResultVisible = ref(false)
 
 function beforeImport(file: File) {
-  const err = checkUploadFile(file, ['xls', 'xlsx'], 10)
+  const err = checkUploadFile(file, ['xls', 'xlsx'], INSPECTION_IMPORT_MAX_MB)
   if (err) {
     ElMessage.warning(err)
     return false
@@ -75,7 +76,7 @@ async function importRequest(options: any) {
   const file = options.file as File
   try {
     await ElMessageBox.confirm(
-      `将按「公司名称」导入「${file.name}」：已有的更新公司信息，没有的新增；「是否合格」填了是/否的会自动判定或改判，并同步供应商上游（改为不合格的会解除关联并把原供应商置为淘汰）。表格里没有的考察记录不会删除。确认导入？`,
+      `将按「公司名称」导入「${file.name}」：已有的更新公司信息，没有的新增；「产品图片」列里的图片会一并导入（该行有图时以表格为准）；「是否合格」填了是/否的会自动判定或改判，并同步供应商上游（改为不合格的会解除关联并把原供应商置为淘汰）。表格里没有的考察记录不会删除。确认导入？`,
       '导入考察汇总表', { type: 'warning', confirmButtonText: '确认导入' },
     )
   } catch {
@@ -103,6 +104,7 @@ function resetForm(values: Record<string, any>) {
   Object.assign(form, {
     id: undefined, sortNo: undefined, companyName: '', legalPerson: '', registeredCapitalWan: '',
     establishedDate: undefined, businessScope: [], address: '', contact: '', phone: '', remark: '',
+    companyProfile: '', performanceWan: '', socialStaff: '', productImageNote: '', impression: '',
     ...values,
   })
 }
@@ -128,6 +130,11 @@ function openEdit(row: InspectionItem) {
     contact: row.contact || '',
     phone: row.phone || '',
     remark: row.remark || '',
+    companyProfile: row.companyProfile || '',
+    performanceWan: row.performanceWan || '',
+    socialStaff: row.socialStaff || '',
+    productImageNote: row.productImageNote || '',
+    impression: row.impression || '',
   })
   queuedFiles.value = []
   formVisible.value = true
@@ -166,6 +173,11 @@ async function submitForm() {
     address: trimOrNull(form.address),
     contact: trimOrNull(form.contact),
     phone: trimOrNull(form.phone),
+    companyProfile: trimOrNull(form.companyProfile),
+    performanceWan: trimOrNull(form.performanceWan),
+    socialStaff: trimOrNull(form.socialStaff),
+    productImageNote: trimOrNull(form.productImageNote),
+    impression: trimOrNull(form.impression),
     remark: form.remark,
   }
   saving.value = true
@@ -246,6 +258,17 @@ async function downloadArchive(file: FileItem) {
   await saveFile(file.id, file.fileName)
 }
 
+// ---- 产品图片 ----
+const imageVisible = ref(false)
+const imageRow = ref<InspectionItem | null>(null)
+function openImages(row: InspectionItem) {
+  imageRow.value = row
+  imageVisible.value = true
+}
+function onImagesChanged(n: number) {
+  if (imageRow.value) imageRow.value.imageCount = n
+}
+
 // ---- 判定 / 改判 ----
 async function decide(row: InspectionItem, result: '合格' | '不合格') {
   const changing = row.result !== '待考察'
@@ -294,7 +317,7 @@ onMounted(loadList)
 <template>
   <div class="page">
     <div class="sub">
-      列表按「序号」排序，字段与《厂家考察汇总表》一致。<b>合格</b>自动列入「供应商 · 上游」并关联；<b>不合格</b>不列入、不关联。
+      列表按「序号」排序，字段与《厂家考察汇总表》（0916 版，含公司业务范围、业绩、社保员工、产品图片、考察观后感）一致。<b>合格</b>自动列入「供应商 · 上游」并关联；<b>不合格</b>不列入、不关联。
       可「导出」为表格，修改后「导入」回系统自动更新。
     </div>
 
@@ -320,7 +343,16 @@ onMounted(loadList)
       <el-table-column label="法人" width="80"><template #default="{ row }">{{ row.legalPerson || '—' }}</template></el-table-column>
       <el-table-column label="注册资本/万元" width="110" align="right"><template #default="{ row }">{{ row.registeredCapitalWan || '—' }}</template></el-table-column>
       <el-table-column label="成立时间" width="100"><template #default="{ row }">{{ row.establishedDate || '—' }}</template></el-table-column>
-      <el-table-column label="业务范围" width="120">
+      <el-table-column label="公司业务范围" min-width="200">
+        <template #default="{ row }">
+          <el-tooltip v-if="row.companyProfile" placement="top" :show-after="300">
+            <template #content><div class="tip-long">{{ row.companyProfile }}</div></template>
+            <div class="clamp">{{ row.companyProfile }}</div>
+          </el-tooltip>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="业务类型" width="120">
         <template #default="{ row }">
           <el-tag v-for="s in row.businessScope" :key="s" size="small" class="scope-tag">{{ s }}</el-tag>
           <span v-if="!row.businessScope?.length">—</span>
@@ -329,9 +361,21 @@ onMounted(loadList)
       <el-table-column prop="address" label="公司地址" min-width="200" show-overflow-tooltip />
       <el-table-column label="主要联系人" width="90"><template #default="{ row }">{{ row.contact || '—' }}</template></el-table-column>
       <el-table-column label="主要电话" width="115"><template #default="{ row }">{{ row.phone || '—' }}</template></el-table-column>
-      <el-table-column label="考察记录压缩包" width="110">
+      <el-table-column label="业绩/万元" width="95"><template #default="{ row }">{{ row.performanceWan || '—' }}</template></el-table-column>
+      <el-table-column label="社保员工" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.socialStaff || '—' }}</template></el-table-column>
+      <el-table-column label="产品图片" width="110">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openArchives(row)">📦 {{ row.archiveCount }} 个</el-button>
+          <el-button link type="primary" size="small" @click="openImages(row)">🖼 {{ row.imageCount }} 张</el-button>
+          <div v-if="!row.imageCount && row.productImageNote" class="mini" :title="row.productImageNote">{{ row.productImageNote }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="考察观后感" min-width="220">
+        <template #default="{ row }">
+          <el-tooltip v-if="row.impression" placement="top" :show-after="300">
+            <template #content><div class="tip-long">{{ row.impression }}</div></template>
+            <div class="clamp">{{ row.impression }}</div>
+          </el-tooltip>
+          <span v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="是否合格" width="80" align="center">
@@ -352,6 +396,11 @@ onMounted(loadList)
           <span v-else class="mini">待考察</span>
           <div v-if="row.decidedAt" class="mini">{{ row.decidedByName || '—' }} · {{ fmtTime(row.decidedAt) }}</div>
           <div v-if="row.conclusion" class="mini" :title="row.conclusion">结论：{{ row.conclusion }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="考察记录压缩包" width="110">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="openArchives(row)">📦 {{ row.archiveCount }} 个</el-button>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
@@ -379,6 +428,7 @@ onMounted(loadList)
           <span class="pass">合格 <b>{{ importResult.passed }}</b></span>
           <span class="fail">不合格 <b>{{ importResult.failed }}</b></span>
           <span>跳过 <b>{{ importResult.skipped }}</b></span>
+          <span>新增产品图片 <b>{{ importResult.imagesAdded }}</b> 张</span>
         </div>
         <el-table v-if="importResult.messages.length" :data="importResult.messages" size="small" border max-height="360">
           <el-table-column label="行" width="60" align="center" prop="row" />
@@ -395,7 +445,7 @@ onMounted(loadList)
     </el-dialog>
 
     <!-- 新增 / 编辑 -->
-    <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑考察供应商' : '新增考察供应商'" width="640px" :close-on-click-modal="false">
+    <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑考察供应商' : '新增考察供应商'" width="720px" :close-on-click-modal="false">
       <el-form :model="form" label-width="110px" size="small" :disabled="saving">
         <el-row :gutter="12">
           <el-col :span="8">
@@ -420,13 +470,14 @@ onMounted(loadList)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="业务范围">
+            <el-form-item label="业务类型">
               <el-checkbox-group v-model="form.businessScope">
                 <el-checkbox v-for="s in INSPECTION_SCOPES" :key="s" :value="s">{{ s }}</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="公司业务范围"><el-input v-model="form.companyProfile" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="公司简介、主营产品、资质荣誉等" /></el-form-item>
         <el-form-item label="公司地址"><el-input v-model="form.address" maxlength="255" /></el-form-item>
         <el-row :gutter="12">
           <el-col :span="12">
@@ -435,7 +486,18 @@ onMounted(loadList)
           <el-col :span="12">
             <el-form-item label="主要电话"><el-input v-model="form.phone" maxlength="32" /></el-form-item>
           </el-col>
+          <el-col :span="12">
+            <el-form-item label="业绩/万元"><el-input v-model="form.performanceWan" maxlength="64" placeholder="如 2000万 / 200~300万 / 未详" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="社保员工"><el-input v-model="form.socialStaff" maxlength="128" placeholder="如 64（实际现场300多人）" /></el-form-item>
+          </el-col>
         </el-row>
+        <el-form-item label="产品图片">
+          <div class="upload-tip">保存后在列表「产品图片」里上传；导入表格时会自动带入表格里的图片。</div>
+          <el-input v-model="form.productImageNote" maxlength="128" placeholder="没有图片时的说明（选填），如 无播种墙图片" />
+        </el-form-item>
+        <el-form-item label="考察观后感"><el-input v-model="form.impression" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="1、…&#10;2、…" /></el-form-item>
         <el-form-item v-if="formMode === 'create'" label="考察记录">
           <div class="archive-box">
             <el-upload :http-request="queueArchive" :before-upload="beforeArchive" :accept="archiveAccept" :show-file-list="false" multiple>
@@ -454,6 +516,18 @@ onMounted(loadList)
       <template #footer>
         <el-button :disabled="saving" @click="formVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitForm">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 产品图片 -->
+    <el-dialog v-model="imageVisible" :title="'产品图片 · ' + (imageRow?.companyName || '')" width="640px">
+      <template v-if="imageRow">
+        <PhotoGallery biz-type="supplier_inspection_image" :biz-id="imageRow.id" editable @changed="onImagesChanged" />
+        <div class="upload-tip">点击缩略图放大查看；支持 jpg/png/webp 等图片，单张不超过 20MB。导入表格时，表格里该行有图片会以表格为准同步。</div>
+        <div v-if="imageRow.productImageNote" class="mini">说明：{{ imageRow.productImageNote }}</div>
+      </template>
+      <template #footer>
+        <el-button @click="imageVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -505,4 +579,6 @@ onMounted(loadList)
 .attachment-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .progress { margin: 10px 0; }
 .archive-table { margin-top: 10px; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; font-size: 12px; line-height: 1.5; }
+.tip-long { max-width: 460px; white-space: pre-line; line-height: 1.6; }
 </style>

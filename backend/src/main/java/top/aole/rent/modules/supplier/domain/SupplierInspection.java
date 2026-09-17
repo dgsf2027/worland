@@ -34,8 +34,23 @@ public class SupplierInspection {
     /** 成立时间 */
     private LocalDate establishedDate;
 
-    /** 业务范围(逗号分隔):货架/阁楼/播种墙 */
+    /** 业务类型(逗号分隔):货架/阁楼/播种墙(表格旧版列名「业务范围」) */
     private String businessScope;
+
+    /** 公司业务范围(公司简介) */
+    private String companyProfile;
+
+    /** 业绩/万元(原文) */
+    private String performanceWan;
+
+    /** 社保员工(原文) */
+    private String socialStaff;
+
+    /** 产品图片说明(无图时的文字) */
+    private String productImageNote;
+
+    /** 考察观后感 */
+    private String impression;
 
     /** 公司地址 */
     private String address;

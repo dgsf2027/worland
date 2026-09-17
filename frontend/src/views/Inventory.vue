@@ -13,7 +13,7 @@ import {
 } from '@/api/inventory'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
-import PhotoGallery from '@/components/inventory/PhotoGallery.vue'
+import PhotoGallery from '@/components/PhotoGallery.vue'
 import MovementForm from '@/components/inventory/MovementForm.vue'
 import { printQrLabels, qrDataUrl } from '@/utils/qrLabel'
 
