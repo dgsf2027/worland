@@ -22,6 +22,14 @@ public class BomNodeRequest {
     private String name;
 
     private Long parentId;
+    @Min(0)
+    private Integer seq;
+    @Size(max = 128)
+    private String model;
+    @Size(max = 255)
+    private String spec;
+    @Size(max = 16)
+    private String unit;
     @DecimalMin("0.01")
     @Digits(integer = 7, fraction = 2)
     private BigDecimal qty;

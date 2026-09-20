@@ -24,6 +24,7 @@ import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
 import top.aole.rent.modules.asset.dto.BomPricingRequest;
+import top.aole.rent.modules.asset.dto.BoqDtos;
 import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
@@ -52,6 +53,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,9 +70,9 @@ import java.util.stream.Collectors;
  *   <li>self_purchase_payback(自购回本期·月) 即时算 = 市场价 / 月替代人工价值。</li>
  * </ul>
  * <p>字段级隔离:集采价/账面价/成本拆解/回报率 对 GP/LP 打码(seeCost=false → null + masked)。
- * <p><b>集采价 ↔ 工程量清单联动</b>:清单任一一级项已计价时,{@code purchase_price} = Σ一级项合价,
- * 由 {@link #syncPurchasePriceFromBom} 在清单增删改后回写(@owner=清单维护);此时设备编辑不接受手填集采价。
- * 清单无计价行时集采价仍手工/采购入库写入。
+ * <p><b>合同价 ↔ 合同清单联动</b>:合同清单(《工程量清单计价表》)有行时,{@code purchase_price} = 清单含税合计,
+ * 由 {@link AssetBoqService} 在清单保存/导入后回写;此时设备编辑不接受手填合同价。
+ * 清单为空时合同价仍手工/采购入库写入。配件 BOM 明细只记配件构成与故障档案,<b>不参与合同价</b>。
  */
 @Slf4j
 @Service
@@ -89,19 +91,11 @@ public class AssetService {
     private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
     private final AssetPaymentService paymentService;
+    private final AssetBoqService boqService;
 
-    /** 状态机:from → 允许的 to 集合。已转让/报废为终态。 */
-    private static final Map<String, Set<String>> TRANSITIONS = new HashMap<>();
-    static {
-        TRANSITIONS.put("采购", new HashSet<>(Arrays.asList("投放", "报废")));
-        TRANSITIONS.put("投放", new HashSet<>(Arrays.asList("在租", "收回待处置", "报废")));
-        TRANSITIONS.put("在租", new HashSet<>(Arrays.asList("待转让", "收回待处置")));
-        TRANSITIONS.put("待转让", new HashSet<>(Arrays.asList("已转让", "收回待处置")));
-        TRANSITIONS.put("收回待处置", new HashSet<>(Arrays.asList("投放", "已转让", "报废")));
-        TRANSITIONS.put("已转让", new HashSet<>());
-        TRANSITIONS.put("报废", new HashSet<>());
-    }
-    private static final Set<String> VALID_STATUS = TRANSITIONS.keySet();
+    /** 设备状态集合。状态可直接改(不限先后顺序),改为「在租」须带承租客户与合同。 */
+    private static final Set<String> VALID_STATUS = new LinkedHashSet<>(Arrays.asList(
+            "采购", "投放", "在租", "待转让", "已转让", "收回待处置", "报废"));
 
     /** 目标状态 → 事件类型(再投放特殊命名)。 */
     private static String eventTypeFor(String from, String to) {
@@ -122,7 +116,8 @@ public class AssetService {
                 .eq(status != null && !status.isEmpty(), Asset::getStatus, status)
                 .eq(category != null && !category.isEmpty(), Asset::getCategory, category)
                 .and(keyword != null && !keyword.trim().isEmpty(), w -> w
-                        .like(Asset::getSerialNo, keyword.trim())
+                        .like(Asset::getContractNo, keyword.trim())
+                        .or().like(Asset::getSerialNo, keyword.trim())
                         .or().like(Asset::getModel, keyword.trim()))
                 .orderByAsc(Asset::getId);
         List<Asset> all = assetMapper.selectList(qw);
@@ -132,6 +127,8 @@ public class AssetService {
             AssetListItem it = new AssetListItem();
             it.setId(a.getId());
             it.setSerialNo(a.getSerialNo());
+            it.setContractNo(a.getContractNo());
+            it.setContractId(a.getContractId());
             it.setCategory(a.getCategory());
             it.setModel(a.getModel());
             it.setStatus(a.getStatus());
@@ -165,11 +162,13 @@ public class AssetService {
         AssetDetailResponse r = new AssetDetailResponse();
         r.setId(a.getId());
         r.setSerialNo(a.getSerialNo());
+        r.setContractNo(a.getContractNo());
         r.setCategory(a.getCategory());
         r.setModel(a.getModel());
         r.setStatus(a.getStatus());
         r.setMarketPrice(a.getMarketPrice());
         r.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
+        r.setTaxRate(a.getTaxRate());
         r.setMonthlyLaborValue(a.getMonthlyLaborValue());
         r.setReplaceHeadcount(a.getReplaceHeadcount());
         r.setSupplierId(a.getSupplierId());
@@ -179,7 +178,7 @@ public class AssetService {
         r.setIntendedCustomerId(a.getIntendedCustomerId());
         r.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
         r.setContractId(a.getContractId());
-        if (a.getContractId() != null) {
+        if (a.getContractNo() == null && a.getContractId() != null) {
             Contract ct = contractMapper.selectById(a.getContractId());
             r.setContractNo(ct == null ? null : ct.getNo());
         }
@@ -193,7 +192,17 @@ public class AssetService {
                 .eq(AssetBom::getAssetId, id)
                 .orderByAsc(AssetBom::getId));
         r.setBom(buildBomTree(boms, seeCost));
-        r.setPurchasePriceLinked(bomTotalIfPriced(boms) != null);
+        BoqDtos.Boq boq = boqService.boq(a);
+        if (!seeCost) {
+            // 清单含价格,非成本角色只给行数不给金额
+            boq.setLines(new ArrayList<>());
+            boq.setTotalWithTax(null);
+            boq.setTotalWithoutTax(null);
+            boq.setTaxAmount(null);
+            boq.setTotalUpper(null);
+        }
+        r.setBoq(boq);
+        r.setPurchasePriceLinked(Boolean.TRUE.equals(boq.getLinked()));
         r.setCostBreakdown(seeCost ? costBreakdown(a, boms) : null);
         r.setResidualBreakdown(residualBreakdown(a, boms));
         r.setFaultArchive(faultArchive(boms));
@@ -207,13 +216,16 @@ public class AssetService {
 
     @Transactional
     public Long create(AssetSaveRequest req) {
-        Asset dup = assetMapper.selectOne(new LambdaQueryWrapper<Asset>()
-                .eq(Asset::getSerialNo, req.getSerialNo().trim()));
-        if (dup != null) {
-            throw new BizException(400, "序列号已存在: " + req.getSerialNo());
+        String serial = trimToNull(req.getSerialNo());
+        if (serial != null && assetMapper.selectOne(new LambdaQueryWrapper<Asset>()
+                .eq(Asset::getSerialNo, serial)) != null) {
+            throw new BizException(400, "序列号已存在: " + serial);
         }
         Asset a = new Asset();
         applySave(a, req);
+        if (a.getSerialNo() == null) {
+            a.setSerialNo(nextSerialNo());
+        }
         a.setStatus("采购");
         assetMapper.insert(a);
         writeEvent(a.getId(), "采购", null, null, "逐件建档");
@@ -223,22 +235,30 @@ public class AssetService {
     @Transactional
     public void update(Long id, AssetSaveRequest req) {
         Asset a = load(id);
-        if (!a.getSerialNo().equals(req.getSerialNo().trim())) {
+        String serial = trimToNull(req.getSerialNo());
+        if (serial != null && !serial.equals(a.getSerialNo())) {
             Asset dup = assetMapper.selectOne(new LambdaQueryWrapper<Asset>()
-                    .eq(Asset::getSerialNo, req.getSerialNo().trim()));
+                    .eq(Asset::getSerialNo, serial));
             if (dup != null && !dup.getId().equals(id)) {
-                throw new BizException(400, "序列号已存在: " + req.getSerialNo());
+                throw new BizException(400, "序列号已存在: " + serial);
             }
         }
         BigDecimal oldPrice = a.getPurchasePrice();
+        String oldSerial = a.getSerialNo();
         applySave(a, req);
-        // 清单已计价 → 集采价由清单总价决定,忽略手填值
-        BigDecimal linked = bomTotalIfPriced(loadBoms(id));
+        if (a.getSerialNo() == null) {
+            a.setSerialNo(oldSerial);
+        }
+        // 合同清单有行 → 合同价由清单合计决定,忽略手填值
+        BigDecimal linked = boqService.totalIfAny(id);
         if (linked != null) {
             a.setPurchasePrice(linked);
         }
         assetMapper.update(a, new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, id)
+                .set(Asset::getContractNo, a.getContractNo())
+                .set(Asset::getContractId, a.getContractId())
+                .set(Asset::getTaxRate, a.getTaxRate())
                 .set(req.getSupplierId() == null, Asset::getSupplierId, null));
         boolean priceChanged = a.getPurchasePrice() == null ? oldPrice != null
                 : (oldPrice == null || a.getPurchasePrice().compareTo(oldPrice) != 0);
@@ -255,7 +275,18 @@ public class AssetService {
     }
 
     private void applySave(Asset a, AssetSaveRequest req) {
-        a.setSerialNo(req.getSerialNo().trim());
+        a.setSerialNo(trimToNull(req.getSerialNo()));
+        String contractNo = trimToNull(req.getContractNo());
+        a.setContractNo(contractNo);
+        // 合同编号能对上合同时建立关联;对不上保留原关联(合同可能还没录进系统)
+        if (contractNo != null) {
+            Contract ct = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
+                    .eq(Contract::getNo, contractNo).orderByAsc(Contract::getId).last("limit 1"));
+            if (ct != null) {
+                a.setContractId(ct.getId());
+            }
+        }
+        a.setTaxRate(req.getTaxRate());
         a.setCategory(req.getCategory().trim());
         a.setModel(req.getModel());
         a.setMarketPrice(req.getMarketPrice());
@@ -274,24 +305,31 @@ public class AssetService {
         String from = a.getStatus();
         String to = req.getTargetStatus() == null ? "" : req.getTargetStatus().trim();
         if (!VALID_STATUS.contains(to)) {
-            throw new BizException(400, "非法目标状态: " + to);
+            throw new BizException(400, "非法目标状态: " + to + "(可选 " + String.join("/", VALID_STATUS) + ")");
         }
-        Set<String> allowed = TRANSITIONS.getOrDefault(from, new HashSet<>());
-        if (!allowed.contains(to)) {
-            throw new BizException(400, "非法状态流转: " + from + " → " + to
-                    + "(允许: " + (allowed.isEmpty() ? "终态" : String.join("/", allowed)) + ")");
+        if (from.equals(to)) {
+            throw new BizException(400, "设备已经是「" + to + "」状态");
         }
-        // 投放审批→老板(P0-D):投放是资金投放决策,任意路径(含手动流转/再投放)统一卡老板。
-        // body 依赖(目标状态在入参里),切面无法声明式拦,故在此 service 内联守卫,与 /deploy 端点双保险。
-        if ("投放".equals(to)) {
-            RoleGuard.assertRole("老板");
-        }
-        // 手动流转到"投放/收回待处置/报废"时脱离承租关系(在租/转让由合同事件维护)。
         // 用 LambdaUpdateWrapper 显式置 null——updateById 默认跳过 null 字段(FieldStrategy.NOT_NULL)。
         LambdaUpdateWrapper<Asset> uw = new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, id)
                 .set(Asset::getStatus, to);
-        if (!"在租".equals(to)) {
+        String linkNote = "";
+        if ("在租".equals(to)) {
+            // 在租必须落到具体客户与合同(关联关系),否则收租/合同侧对不上
+            Customer c = req.getCustomerId() == null ? null : customerMapper.selectById(req.getCustomerId());
+            if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
+                throw new BizException(400, "改为「在租」请选择承租客户");
+            }
+            Contract ct = req.getContractId() == null ? null : contractMapper.selectById(req.getContractId());
+            if (ct == null || Integer.valueOf(1).equals(ct.getIsDeleted())) {
+                throw new BizException(400, "改为「在租」请选择关联合同");
+            }
+            uw.set(Asset::getCurrentHolderCustomerId, c.getId())
+                    .set(Asset::getContractId, ct.getId())
+                    .set(Asset::getIntendedCustomerId, null);
+            linkNote = " · 承租客户=" + c.getName() + " 合同=" + ct.getNo();
+        } else {
             uw.set(Asset::getCurrentHolderCustomerId, null);
             if (!"待转让".equals(to) && !"已转让".equals(to)) {
                 uw.set(Asset::getContractId, null);
@@ -299,7 +337,9 @@ public class AssetService {
         }
         assetMapper.update(null, uw);
         writeEvent(id, eventTypeFor(from, to), req.getRefDocType(), req.getRefDocId(), req.getRemark());
-        log.info("设备状态流转: assetId={}, {} → {}, by={}", id, from, to, UserContext.getUserId());
+        auditLogService.record("设备状态调整", "asset", id, AuditLogService.EXECUTED,
+                from + " → " + to + linkNote + (req.getRemark() == null ? "" : " · " + req.getRemark()));
+        log.info("设备状态调整: assetId={}, {} → {}, by={}", id, from, to, UserContext.getUserId());
     }
 
     // ============ 合同驱动的资产状态(设备状态机 owner,供 ContractService 调用) ============
@@ -593,7 +633,7 @@ public class AssetService {
 
     @Transactional
     public Long addBom(Long assetId, BomNodeRequest req) {
-        requireCostRole("新增工程量清单配件");
+        requireCostRole("新增配件 BOM 明细");
         load(assetId);
         if (req.getParentId() != null) {
             AssetBom parent = bomMapper.selectById(req.getParentId());
@@ -605,13 +645,12 @@ public class AssetService {
         b.setAssetId(assetId);
         applyBom(b, req);
         bomMapper.insert(b);
-        syncPurchasePriceFromBom(assetId);
         return b.getId();
     }
 
     @Transactional
     public void updateBom(Long bomId, BomNodeRequest req) {
-        requireCostRole("编辑工程量清单配件");
+        requireCostRole("编辑配件 BOM 明细");
         AssetBom b = bomMapper.selectById(bomId);
         if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
             throw new BizException(404, "配件不存在: id=" + bomId);
@@ -639,6 +678,10 @@ public class AssetService {
         bomMapper.update(null, new LambdaUpdateWrapper<AssetBom>()
                 .eq(AssetBom::getId, bomId)
                 .set(AssetBom::getName, b.getName())
+                .set(AssetBom::getSeq, b.getSeq())
+                .set(AssetBom::getModel, b.getModel())
+                .set(AssetBom::getSpec, b.getSpec())
+                .set(AssetBom::getUnit, b.getUnit())
                 .set(AssetBom::getQty, b.getQty())
                 .set(AssetBom::getRepairable, b.getRepairable())
                 .set(AssetBom::getFaultCount, b.getFaultCount())
@@ -650,20 +693,18 @@ public class AssetService {
                 .set(AssetBom::getWarrantyUntil, b.getWarrantyUntil())
                 .set(AssetBom::getResidualRate, b.getResidualRate())
                 .set(AssetBom::getRemark, b.getRemark()));
-        syncPurchasePriceFromBom(b.getAssetId());
     }
 
-    /** 工程量清单行内改价:只改数量/单价,合价恢复自动计算,并回写集采价。 */
+    /** 配件 BOM 行内改价:只改数量/单价,合价恢复自动计算。BOM 不参与合同价。 */
     @Transactional
     public void updateBomPricing(Long bomId, BomPricingRequest req) {
-        requireCostRole("修改工程量清单数量/单价");
-        AssetBom b = loadBom(bomId);
+        requireCostRole("修改配件 BOM 数量/单价");
+        loadBom(bomId);
         bomMapper.update(null, new LambdaUpdateWrapper<AssetBom>()
                 .eq(AssetBom::getId, bomId)
                 .set(AssetBom::getQty, req.getQty())
                 .set(AssetBom::getUnitCost, req.getUnitCost())
                 .set(AssetBom::getSubtotalOverride, null));
-        syncPurchasePriceFromBom(b.getAssetId());
     }
 
     /** 故障档案编辑(按配件):故障次数/可维修/质保到期/质保方。 */
@@ -681,7 +722,7 @@ public class AssetService {
 
     @Transactional
     public void deleteBom(Long bomId) {
-        requireCostRole("删除工程量清单配件");
+        requireCostRole("删除配件 BOM 明细");
         AssetBom b = bomMapper.selectById(bomId);
         if (b == null || Integer.valueOf(1).equals(b.getIsDeleted())) {
             throw new BizException(404, "配件不存在: id=" + bomId);
@@ -692,46 +733,30 @@ public class AssetService {
         for (Long delId : toDelete) {
             bomMapper.deleteById(delId);
         }
-        syncPurchasePriceFromBom(b.getAssetId());
     }
 
-    /**
-     * 集采价 ← 工程量清单总价(Σ一级项合价)。清单无计价行时不动集采价(保留手填/采购入库值)。
-     * 集采价是折旧基数,变更只影响之后的折旧计提,已计提凭证不追溯。
-     */
-    private void syncPurchasePriceFromBom(Long assetId) {
-        BigDecimal total = bomTotalIfPriced(loadBoms(assetId));
-        if (total == null) {
-            return;
+    /** 序列号(系统内部唯一标识):AS + 日期 + 3 位流水。 */
+    private String nextSerialNo() {
+        String prefix = "AS" + LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        List<Asset> sameDay = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
+                .likeRight(Asset::getSerialNo, prefix));
+        int max = 0;
+        for (Asset x : sameDay) {
+            try {
+                max = Math.max(max, Integer.parseInt(x.getSerialNo().substring(prefix.length())));
+            } catch (RuntimeException ignore) {
+                // 非本规则的序列号跳过
+            }
         }
-        Asset a = load(assetId);
-        if (a.getPurchasePrice() != null && a.getPurchasePrice().compareTo(total) == 0) {
-            return;
-        }
-        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
-                .eq(Asset::getId, assetId)
-                .set(Asset::getPurchasePrice, total));
-        log.info("集采价随工程量清单联动: assetId={}, {} → {}", assetId, a.getPurchasePrice(), total);
-        // 预计付款 / 待付应付随集采价重算
-        a.setPurchasePrice(total);
-        paymentService.resyncPending(a);
+        return prefix + String.format("%03d", max + 1);
     }
 
-    /** 一级项任一已计价(单价或手动合价非空)→ 返回 Σ一级项合价;否则 null(未联动)。 */
-    private BigDecimal bomTotalIfPriced(List<AssetBom> boms) {
-        List<AssetBom> topLevel = boms.stream()
-                .filter(x -> x.getParentId() == null)
-                .collect(Collectors.toList());
-        boolean priced = topLevel.stream()
-                .anyMatch(x -> x.getUnitCost() != null || x.getSubtotalOverride() != null);
-        if (!priced) {
+    private static String trimToNull(String v) {
+        if (v == null) {
             return null;
         }
-        BigDecimal total = BigDecimal.ZERO;
-        for (AssetBom x : topLevel) {
-            total = total.add(subtotal(x));
-        }
-        return total.setScale(2, RoundingMode.HALF_UP);
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     private List<AssetBom> loadBoms(Long assetId) {
@@ -756,7 +781,11 @@ public class AssetService {
 
     private void applyBom(AssetBom b, BomNodeRequest req) {
         b.setParentId(req.getParentId());
+        b.setSeq(req.getSeq());
         b.setName(req.getName().trim());
+        b.setModel(trimToNull(req.getModel()));
+        b.setSpec(trimToNull(req.getSpec()));
+        b.setUnit(trimToNull(req.getUnit()));
         b.setQty(req.getQty() != null ? req.getQty() : BigDecimal.ONE);
         b.setUnitCost(req.getUnitCost());
         b.setSubtotalOverride(req.getSubtotalOverride());
@@ -864,7 +893,11 @@ public class AssetService {
             AssetDetailResponse.BomNode n = new AssetDetailResponse.BomNode();
             n.setId(b.getId());
             n.setParentId(b.getParentId());
+            n.setSeq(b.getSeq());
             n.setName(b.getName());
+            n.setModel(b.getModel());
+            n.setSpec(b.getSpec());
+            n.setUnit(b.getUnit());
             n.setQty(b.getQty());
             BigDecimal subtotal = subtotal(b);
             n.setUnitCost(seeCost ? b.getUnitCost() : null);

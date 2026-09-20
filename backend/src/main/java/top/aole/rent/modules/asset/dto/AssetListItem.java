@@ -12,6 +12,10 @@ public class AssetListItem {
 
     private Long id;
     private String serialNo;
+    /** 合同编号 */
+    private String contractNo;
+    /** 合同编号匹配到的合同 */
+    private Long contractId;
     private String category;
     private String model;
     private String status;

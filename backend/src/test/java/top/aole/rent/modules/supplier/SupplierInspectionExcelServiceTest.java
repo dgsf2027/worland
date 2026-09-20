@@ -26,6 +26,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
+import java.util.stream.Collectors;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -217,17 +218,25 @@ class SupplierInspectionExcelServiceTest {
         java.io.File f = new java.io.File("E:\\云山项目\\耀石公司\\5、系统设置\\【20260916】播种墙厂家考察观后感.xls");
         Assumptions.assumeTrue(f.isFile());
         List<SupplierInspectionService.SheetRow> rows = parse(java.nio.file.Files.readAllBytes(f.toPath()));
-        assertEquals(8, rows.size());
-        long withImages = rows.stream().filter(r -> !r.getImages().isEmpty()).count();
-        assertEquals(7, withImages);
-        SupplierInspectionService.SheetRow third = rows.get(2);
-        assertTrue(third.getImages().isEmpty());
-        assertEquals("无播种墙图片", third.getProductImageNote());
-        assertEquals(SupplierInspectionService.FAILED, third.getResult());
-        assertEquals(Arrays.asList("货架", "阁楼"), rows.get(6).getBusinessScope());
+        // 业务表格会持续追加厂家,断言按内容而不是固定条数
+        assertTrue(rows.size() >= 8, "至少 8 家厂,实际 " + rows.size());
+        assertTrue(rows.stream().allMatch(r -> r.getCompanyName() != null && !r.getCompanyName().isEmpty()));
+        assertTrue(rows.stream().allMatch(r -> r.getWarnings().isEmpty()),
+                () -> rows.stream().map(SupplierInspectionService.SheetRow::getWarnings).collect(Collectors.toList()).toString());
+        assertTrue(rows.stream().filter(r -> !r.getImages().isEmpty()).count() >= rows.size() - 2, "多数行应能读出产品图片");
+        assertTrue(rows.stream().allMatch(r -> r.getColumns().contains(SupplierInspectionService.COL_IMAGE)));
+
+        SupplierInspectionService.SheetRow noPic = rows.stream()
+                .filter(r -> r.getCompanyName().contains("沃港")).findFirst().orElseThrow(AssertionError::new);
+        assertTrue(noPic.getImages().isEmpty());
+        assertEquals("无播种墙图片", noPic.getProductImageNote());
+        assertEquals(SupplierInspectionService.FAILED, noPic.getResult());
+
+        SupplierInspectionService.SheetRow shelf = rows.stream()
+                .filter(r -> r.getCompanyName().contains("金铁牛")).findFirst().orElseThrow(AssertionError::new);
+        assertEquals(Arrays.asList("货架", "阁楼"), shelf.getBusinessScope());
         assertTrue(rows.get(0).getCompanyProfile().length() > 20);
         assertTrue(rows.get(0).getImpression().startsWith("1、"));
-        assertTrue(rows.stream().allMatch(r -> r.getWarnings().isEmpty()), () -> rows.get(0).getWarnings().toString());
     }
 
     @Test

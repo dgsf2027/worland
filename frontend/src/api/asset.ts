@@ -3,7 +3,11 @@ import type { PageResult } from '@/api/supplier'
 
 export interface AssetListItem {
   id: number
+  /** 系统内部序列号(自动生成) */
   serialNo: string
+  /** 合同编号(多台设备可共用) */
+  contractNo?: string
+  contractId?: number
   category: string
   model?: string
   status: string
@@ -23,7 +27,12 @@ export interface AssetListItem {
 export interface BomNode {
   id: number
   parentId?: number
+  /** 序号(与合同清单同格式) */
+  seq?: number
   name: string
+  model?: string
+  spec?: string
+  unit?: string
   qty?: number
   unitCost?: number
   subtotal?: number
@@ -111,9 +120,49 @@ export function checkUploadFile(file: File, exts: string[], maxMb: number): stri
   if (file.size > maxMb * 1024 * 1024) return `「${file.name}」超过 ${maxMb}MB 上限`
   return null
 }
+/** 合同清单行(《工程量清单计价表》9 列) */
+export interface BoqLine {
+  id?: number
+  seq?: number
+  name: string
+  model?: string | null
+  spec?: string | null
+  unit?: string | null
+  qty?: number | null
+  /** 单价(含税) */
+  unitPrice?: number | null
+  /** 金额(含税);null = 表格里的「-」(赠送/不计价) */
+  amount?: number | null
+  /** true=金额手填(赠送/优惠行) */
+  amountManual?: boolean
+  remark?: string | null
+}
+
+export interface Boq {
+  lines: BoqLine[]
+  totalWithTax?: number
+  totalWithoutTax?: number
+  taxAmount?: number
+  taxRate?: number
+  totalUpper?: string
+  linked?: boolean
+}
+
+export interface BoqImportResult {
+  total: number
+  imported: number
+  skipped: number
+  totalWithTax?: number
+  messages: string[]
+}
+
 export interface AssetDetail {
   id: number
   serialNo: string
+  /** 合同编号 */
+  contractNo?: string
+  /** 合同税率(0-1) */
+  taxRate?: number
   category: string
   model?: string
   status: string
@@ -129,11 +178,12 @@ export interface AssetDetail {
   intendedCustomerId?: number
   intendedCustomerName?: string
   contractId?: number
-  contractNo?: string
   remark?: string
   sensitiveMasked?: boolean
-  /** 集采价已与工程量清单总价联动(清单有计价行) */
+  /** 合同价已与合同清单合计联动(清单有行) */
   purchasePriceLinked?: boolean
+  /** 合同清单(《工程量清单计价表》格式) */
+  boq: Boq
   bookValue?: number
   residualValue?: number
   selfPurchasePayback?: number
@@ -175,7 +225,7 @@ export function updateBom(bomId: number, body: Record<string, any>): Promise<voi
 export function deleteBom(bomId: number): Promise<void> {
   return request.delete(`/rent/assets/bom/${bomId}`)
 }
-/** 工程量清单改数量/单价(合价恢复自动计算,集采价随清单总价联动) */
+/** 配件 BOM 改数量/单价(合价恢复自动计算;BOM 不参与合同价) */
 export function updateBomPricing(bomId: number, body: { qty: number; unitCost: number | null }): Promise<void> {
   return request.put(`/rent/assets/bom/${bomId}/pricing`, body)
 }
@@ -221,6 +271,34 @@ export function checkTermRows(rows: TermRow[]): string | null {
   const total = Math.round(rows.reduce((s, r) => s + Number(r.ratioPct || 0), 0) * 100) / 100
   if (Math.abs(total - 100) >= 0.01) return `比例合计须为 100%，当前 ${total}%`
   return null
+}
+
+/** 保存合同清单(整表;合计回写合同价) */
+export function saveBoq(id: number, lines: BoqLine[]): Promise<Boq> {
+  return request.put(`/rent/assets/${id}/boq`, { lines })
+}
+/** 导入合同清单(《工程量清单计价表》.xls/.xlsx,整表替换) */
+export function importBoq(id: number, file: File): Promise<BoqImportResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post(`/rent/assets/${id}/boq/import`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+  })
+}
+/** 导出合同清单;template=true 只下载表头模板 */
+export async function exportBoq(id: number, fileLabel: string, template = false) {
+  const blob: Blob = await request.get(`/rent/assets/${id}/boq/export`, {
+    params: { template }, responseType: 'blob', timeout: 0,
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `工程量清单计价表-${fileLabel}${template ? '-模板' : ''}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 
 /** 单台收益手工覆盖(某项传 null = 恢复自动计算) */

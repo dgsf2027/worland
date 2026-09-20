@@ -26,7 +26,19 @@ public class AssetBom {
     /** 父节点(自引用);NULL=一级总成 */
     private Long parentId;
 
+    /** 序号(与合同清单同格式) */
+    private Integer seq;
+
     private String name;
+
+    /** 型号 */
+    private String model;
+
+    /** 规格 */
+    private String spec;
+
+    /** 单位 */
+    private String unit;
 
     private BigDecimal qty;
 

@@ -73,7 +73,7 @@ modules/<module>/
 
 | 模块 | 核心实体 | Controller 路径 | 定时任务 |
 |---|---|---|---|
-| `asset` | Asset / AssetBom / AssetEvent / AssetDepreciationLine | `/rent/assets` | — |
+| `asset` | Asset / AssetBoq（合同清单） / AssetBom（配件明细） / AssetEvent / AssetDepreciationLine | `/rent/assets`（含 `/{id}/boq` 清单读写与导入导出） | — |
 | `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
 | `contract` | Contract / ContractAsset / ContractChange / RentSchedule / DepositLedger | `/rent/contracts` | — |
@@ -190,6 +190,7 @@ modules/<module>/
 | `V109__remove_demo_suppliers.sql` | 删除演示供应商（恒丰自动化/睿捷设备/广达货架）及误建的「11」，解除引用 |
 | `V110__remove_assets.sql` | 删除设备 WL-BZQ-0002/0003/0004、WL-HJ-0001/0002/0003 及关联单据 |
 | `V111__supplier_inspection_sheet_v2.sql` | 供应商考察对齐 0916 版汇总表：公司业务范围/业绩/社保员工/产品图片说明/考察观后感 |
+| `V112__asset_contract_no_boq.sql` | 设备合同编号/合同税率、合同清单（工程量清单计价表）、配件 BOM 补序号/型号/规格/单位 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

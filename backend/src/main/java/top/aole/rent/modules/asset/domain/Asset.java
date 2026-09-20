@@ -27,6 +27,9 @@ public class Asset {
 
     private String serialNo;
 
+    /** 合同编号(多台设备可共用;匹配到合同时回填 contractId) */
+    private String contractNo;
+
     /** 品类:播种墙/货架/阁楼/配件 */
     private String category;
 
@@ -37,6 +40,9 @@ public class Asset {
 
     /** 集采价(元·成本口径);book_value 折旧基数 */
     private BigDecimal purchasePrice;
+
+    /** 合同税率(0-1);合同清单金额为含税价 */
+    private BigDecimal taxRate;
 
     private Long supplierId;
 

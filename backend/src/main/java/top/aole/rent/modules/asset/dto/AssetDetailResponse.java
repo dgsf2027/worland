@@ -16,11 +16,15 @@ public class AssetDetailResponse {
 
     private Long id;
     private String serialNo;
+    /** 合同编号(设备上录入;未录入时回落到关联合同的合同号) */
+    private String contractNo;
     private String category;
     private String model;
     private String status;
     private BigDecimal marketPrice;
-    private BigDecimal purchasePrice;   // 敏感
+    private BigDecimal purchasePrice;   // 敏感(= 合同清单含税合计)
+    /** 合同税率(0-1) */
+    private BigDecimal taxRate;
     private BigDecimal monthlyLaborValue;
     private BigDecimal replaceHeadcount;
     private Long supplierId;
@@ -31,11 +35,12 @@ public class AssetDetailResponse {
     private Long intendedCustomerId;
     private String intendedCustomerName;
     private Long contractId;
-    private String contractNo;
     private String remark;
     private Boolean sensitiveMasked;
-    /** 集采价是否已与工程量清单总价联动(清单有计价行时为 true,集采价不可手工改) */
+    /** 合同价是否已与合同清单合计联动(清单有行时为 true,合同价不可手工改) */
     private Boolean purchasePriceLinked;
+    /** 合同清单(《工程量清单计价表》格式) */
+    private BoqDtos.Boq boq;
 
     /** 派生·即时算:经营口径账面价(采购价-直线折旧占位·M3精确化) */
     private BigDecimal bookValue;
@@ -63,7 +68,12 @@ public class AssetDetailResponse {
     public static class BomNode {
         private Long id;
         private Long parentId;
+        /** 序号(与合同清单同格式) */
+        private Integer seq;
         private String name;
+        private String model;
+        private String spec;
+        private String unit;
         private BigDecimal qty;
         private BigDecimal unitCost;      // 敏感
         private BigDecimal subtotal;      // 敏感：手动小计优先，否则 qty×unitCost
@@ -81,10 +91,10 @@ public class AssetDetailResponse {
 
     @Data
     public static class CostBreakdown {
-        /** 工程量清单一级项合价(名称→合价),敏感 */
+        /** 配件 BOM 一级项合价(名称→合价),敏感;不参与合同价 */
         private List<CostItem> items;
         private BigDecimal total;
-        /** 对比集采价识别虚高:集采价 - BOM 合计 */
+        /** 对比合同价识别虚高:合同价 - BOM 合计 */
         private BigDecimal purchasePrice;
         private BigDecimal gapVsPurchase;
     }

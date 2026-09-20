@@ -14,6 +14,11 @@ public class StatusChangeRequest {
     @NotBlank(message = "目标状态必填")
     private String targetStatus;
 
+    /** 改为「在租」时必填:承租客户 */
+    private Long customerId;
+    /** 改为「在租」时必填:合同 */
+    private Long contractId;
+
     private String remark;
     private String refDocType;
     private Long refDocId;
