@@ -25,6 +25,10 @@ public class ContractDetailResponse {
     private BigDecimal deposit;
     private BigDecimal endTransferPrice;
     private BigDecimal targetIrr;
+    /** 合同税率(0-1) */
+    private BigDecimal taxRate;
+    /** 设备总价(含税)= 合同清单合计 */
+    private BigDecimal equipmentTotal;
     private LocalDate signDate;
     private LocalDate startDate;
     private String remark;
@@ -32,6 +36,9 @@ public class ContractDetailResponse {
 
     /** 挂载设备(逐台分摊) */
     private List<AssetLine> assets;
+
+    /** 合同清单(《工程量清单计价表》格式;合计=设备总价) */
+    private BoqDtos.Boq boq;
     /** 勾稽校验行 */
     private Reconciliation reconciliation;
     /** 回款进度(计划态口径) */

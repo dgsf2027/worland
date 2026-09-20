@@ -13,21 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.multipart.MultipartFile;
 import top.aole.rent.common.auth.RequireRole;
-import top.aole.rent.modules.asset.domain.Asset;
-import top.aole.rent.modules.asset.dto.BoqDtos;
-import top.aole.rent.modules.asset.service.AssetBoqExcelService;
-import top.aole.rent.modules.asset.service.AssetBoqService;
-
-import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
@@ -53,8 +39,6 @@ import top.aole.rent.modules.asset.service.AssetService;
 public class AssetController {
 
     private final AssetService assetService;
-    private final AssetBoqService boqService;
-    private final AssetBoqExcelService boqExcelService;
 
     @ApiOperation("设备台账:按状态/品类/关键词筛选 + 分页")
     @GetMapping
@@ -62,9 +46,10 @@ public class AssetController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long contractId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return R.ok(assetService.list(status, category, keyword, page, size));
+        return R.ok(assetService.list(status, category, keyword, contractId, page, size));
     }
 
     @ApiOperation("设备详情:配件树BOM/成本拆解/残值构成/故障档案/单台收益/状态机事件流")
@@ -161,42 +146,5 @@ public class AssetController {
     public R<Void> deleteBom(@PathVariable Long bomId) {
         assetService.deleteBom(bomId);
         return R.ok();
-    }
-
-    // ============ 合同清单(《工程量清单计价表》格式) ============
-
-    @ApiOperation("合同清单:明细 + 含税合计/不含税/税额")
-    @GetMapping("/{id}/boq")
-    public R<BoqDtos.Boq> boq(@PathVariable Long id) {
-        return R.ok(boqService.boq(assetService.requireAsset(id)));
-    }
-
-    @ApiOperation("保存合同清单(整表;合计回写合同价)")
-    @RequireRole(value = {"老板", "财务", "供应链", "业务"}, action = "合同清单保存", targetType = "asset")
-    @PutMapping("/{id}/boq")
-    public R<BoqDtos.Boq> saveBoq(@PathVariable Long id, @RequestBody BoqDtos.SaveRequest req) {
-        return R.ok(boqService.save(assetService.requireAsset(id), req.getLines()));
-    }
-
-    @ApiOperation("导出合同清单 Excel(《工程量清单计价表》版式;template=true 只导表头模板)")
-    @GetMapping("/{id}/boq/export")
-    public ResponseEntity<ByteArrayResource> exportBoq(@PathVariable Long id,
-                                                       @RequestParam(defaultValue = "false") boolean template) {
-        Asset asset = assetService.requireAsset(id);
-        byte[] data = boqExcelService.export(asset, boqService.boq(asset), template);
-        String name = "工程量清单计价表-" + (asset.getContractNo() == null ? asset.getSerialNo() : asset.getContractNo())
-                + (template ? "-模板" : "-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)) + ".xlsx";
-        ContentDisposition cd = ContentDisposition.attachment().filename(name, StandardCharsets.UTF_8).build();
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
-                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .body(new ByteArrayResource(data));
-    }
-
-    @ApiOperation("导入合同清单 Excel(整表替换,合计回写合同价)")
-    @RequireRole(value = {"老板", "财务", "供应链", "业务"}, action = "合同清单导入", targetType = "asset")
-    @PostMapping("/{id}/boq/import")
-    public R<BoqDtos.ImportResult> importBoq(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
-        return R.ok(boqExcelService.importFile(assetService.requireAsset(id), file));
     }
 }

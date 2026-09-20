@@ -19,6 +19,7 @@ import top.aole.rent.modules.contract.domain.ContractChange;
 import top.aole.rent.modules.contract.domain.DepositLedger;
 import top.aole.rent.modules.contract.domain.RentSchedule;
 import top.aole.rent.modules.contract.dto.ContractChangeRequest;
+import top.aole.rent.modules.contract.dto.BoqDtos;
 import top.aole.rent.modules.contract.dto.ContractDetailResponse;
 import top.aole.rent.modules.contract.dto.ContractEditRequest;
 import top.aole.rent.modules.contract.dto.ContractListItem;
@@ -61,6 +62,7 @@ public class ContractService {
 
     private final ContractMapper contractMapper;
     private final ContractAssetMapper contractAssetMapper;
+    private final ContractBoqService boqService;
     private final RentScheduleMapper rentScheduleMapper;
     private final DepositLedgerMapper depositLedgerMapper;
     private final ContractChangeMapper contractChangeMapper;
@@ -76,6 +78,7 @@ public class ContractService {
     // ============ 列表 ============
 
     public PageResult<ContractListItem> list(String status, Long customerId, String keyword, int page, int size) {
+        boolean seeCost = DataScope.canSeeCost(UserContext.getRole());
         LambdaQueryWrapper<Contract> qw = new LambdaQueryWrapper<Contract>()
                 .eq(status != null && !status.isEmpty(), Contract::getStatus, status)
                 .eq(customerId != null, Contract::getCustomerId, customerId)
@@ -93,6 +96,7 @@ public class ContractService {
             it.setStatus(c.getStatus());
             it.setTermMonths(c.getTermMonths());
             it.setMonthRent(c.getMonthRent());
+            it.setEquipmentTotal(seeCost ? c.getEquipmentTotal() : null);
             it.setEndTransferPrice(c.getEndTransferPrice());
             it.setAssetCount(assetLinks(c.getId()).size());
             it.setStartDate(c.getStartDate());
@@ -159,6 +163,7 @@ public class ContractService {
         c.setDeposit(deposit);
         c.setEndTransferPrice(req.getEndTransferPrice() != null ? req.getEndTransferPrice() : BigDecimal.ZERO);
         c.setTargetIrr(req.getTargetIrr());
+        c.setTaxRate(req.getTaxRate());
         c.setNature(NATURE);
         c.setStatus(activate ? "生效" : "草稿");
         c.setSignDate(signDate);
@@ -230,6 +235,8 @@ public class ContractService {
         r.setDeposit(c.getDeposit());
         r.setEndTransferPrice(c.getEndTransferPrice());
         r.setTargetIrr(c.getTargetIrr());
+        r.setTaxRate(c.getTaxRate());
+        r.setEquipmentTotal(seeCost ? c.getEquipmentTotal() : null);
         r.setSignDate(c.getSignDate());
         r.setStartDate(c.getStartDate());
         r.setRemark(c.getRemark());
@@ -256,6 +263,17 @@ public class ContractService {
             assetLines.add(al);
         }
         r.setAssets(assetLines);
+
+        // 合同清单(含金额,非成本角色只给行数)
+        BoqDtos.Boq boq = boqService.boq(c);
+        if (!seeCost) {
+            boq.setLines(new java.util.ArrayList<>());
+            boq.setTotalWithTax(null);
+            boq.setTotalWithoutTax(null);
+            boq.setTaxAmount(null);
+            boq.setTotalUpper(null);
+        }
+        r.setBoq(boq);
 
         // 勾稽校验行
         r.setReconciliation(reconciliation(c));
@@ -471,6 +489,7 @@ public class ContractService {
                 .set(Contract::getCustomerId, req.getCustomerId())
                 .set(Contract::getNature, nature)
                 .set(Contract::getTargetIrr, req.getTargetIrr())
+                .set(Contract::getTaxRate, req.getTaxRate())
                 .set(Contract::getTermMonths, req.getTermMonths())
                 .set(Contract::getMonthRent, newRent)
                 .set(Contract::getEndTransferPrice, req.getEndTransferPrice() == null ? BigDecimal.ZERO : req.getEndTransferPrice())
@@ -773,6 +792,11 @@ public class ContractService {
         return (int) rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()
                 .eq(RentSchedule::getContractId, contractId))
                 .stream().filter(s -> !s.getDueDate().isAfter(LocalDate.now())).count();
+    }
+
+    /** 取合同(不存在或已删 → 404);供合同清单等模块调用。 */
+    public Contract requireContract(Long id) {
+        return load(id);
     }
 
     private Contract load(Long id) {

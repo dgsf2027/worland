@@ -16,15 +16,13 @@ public class AssetDetailResponse {
 
     private Long id;
     private String serialNo;
-    /** 合同编号(设备上录入;未录入时回落到关联合同的合同号) */
+    /** 所属合同编号(来自关联合同,只读) */
     private String contractNo;
     private String category;
     private String model;
     private String status;
     private BigDecimal marketPrice;
-    private BigDecimal purchasePrice;   // 敏感(= 合同清单含税合计)
-    /** 合同税率(0-1) */
-    private BigDecimal taxRate;
+    private BigDecimal purchasePrice;   // 敏感
     private BigDecimal monthlyLaborValue;
     private BigDecimal replaceHeadcount;
     private Long supplierId;
@@ -37,10 +35,8 @@ public class AssetDetailResponse {
     private Long contractId;
     private String remark;
     private Boolean sensitiveMasked;
-    /** 合同价是否已与合同清单合计联动(清单有行时为 true,合同价不可手工改) */
-    private Boolean purchasePriceLinked;
-    /** 合同清单(《工程量清单计价表》格式) */
-    private BoqDtos.Boq boq;
+    /** 由哪一行合同清单生成(空=非清单生成) */
+    private Long boqLineId;
 
     /** 派生·即时算:经营口径账面价(采购价-直线折旧占位·M3精确化) */
     private BigDecimal bookValue;

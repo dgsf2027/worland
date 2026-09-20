@@ -27,6 +27,11 @@ public class ContractEditRequest {
     @Digits(integer = 1, fraction = 8)
     private BigDecimal targetIrr;
 
+    /** 合同税率(0-1,如 0.13) */
+    @DecimalMin("0")
+    @DecimalMax("1")
+    private BigDecimal taxRate;
+
     @NotNull(message = "租期必填")
     @Min(value = 1, message = "租期至少 1 个月")
     private Integer termMonths;

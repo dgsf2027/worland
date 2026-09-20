@@ -18,6 +18,8 @@ public class ContractListItem {
     private String status;
     private Integer termMonths;
     private BigDecimal monthRent;
+    /** 设备总价(含税)= 合同清单合计 */
+    private BigDecimal equipmentTotal;
     private BigDecimal endTransferPrice;
     private Integer assetCount;
     private LocalDate startDate;

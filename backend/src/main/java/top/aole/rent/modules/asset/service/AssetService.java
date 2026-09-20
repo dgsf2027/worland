@@ -24,7 +24,6 @@ import top.aole.rent.modules.asset.dto.AssetSaveRequest;
 import top.aole.rent.modules.asset.dto.BomFaultRequest;
 import top.aole.rent.modules.asset.dto.BomNodeRequest;
 import top.aole.rent.modules.asset.dto.BomPricingRequest;
-import top.aole.rent.modules.asset.dto.BoqDtos;
 import top.aole.rent.modules.asset.dto.IdleAlertResponse;
 import top.aole.rent.modules.asset.dto.StatusChangeRequest;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
@@ -70,9 +69,10 @@ import java.util.stream.Collectors;
  *   <li>self_purchase_payback(自购回本期·月) 即时算 = 市场价 / 月替代人工价值。</li>
  * </ul>
  * <p>字段级隔离:集采价/账面价/成本拆解/回报率 对 GP/LP 打码(seeCost=false → null + masked)。
- * <p><b>合同价 ↔ 合同清单联动</b>:合同清单(《工程量清单计价表》)有行时,{@code purchase_price} = 清单含税合计,
- * 由 {@link AssetBoqService} 在清单保存/导入后回写;此时设备编辑不接受手填合同价。
- * 清单为空时合同价仍手工/采购入库写入。配件 BOM 明细只记配件构成与故障档案,<b>不参与合同价</b>。
+ * <p><b>合同清单在「合同」模块</b>:一份设备租赁合同一张《工程量清单计价表》,清单合计=合同设备总价;
+ * 清单行可按数量生成设备(见 ContractBoqService),生成的设备带 boq_line_id 与 contract_id。
+ * 设备自身的合同价(purchase_price)= 生成时取清单行单价,或手工/采购入库写入。
+ * 配件 BOM 明细只记配件构成与故障档案,<b>不参与合同金额</b>。
  */
 @Slf4j
 @Service
@@ -91,7 +91,6 @@ public class AssetService {
     private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
     private final AssetPaymentService paymentService;
-    private final AssetBoqService boqService;
 
     /** 设备状态集合。状态可直接改(不限先后顺序),改为「在租」须带承租客户与合同。 */
     private static final Set<String> VALID_STATUS = new LinkedHashSet<>(Arrays.asList(
@@ -110,15 +109,23 @@ public class AssetService {
 
     // ============ 台账列表 ============
 
-    public PageResult<AssetListItem> list(String status, String category, String keyword, int page, int size) {
+    public PageResult<AssetListItem> list(String status, String category, String keyword, Long contractId, int page, int size) {
         boolean seeCost = DataScope.canSeeCost(UserContext.getRole());
+        String kw = keyword == null || keyword.trim().isEmpty() ? null : keyword.trim();
+        // 关键词也能按合同编号找设备(合同编号在合同上)
+        List<Long> kwContracts = kw == null ? java.util.Collections.emptyList()
+                : contractMapper.selectList(new LambdaQueryWrapper<Contract>().like(Contract::getNo, kw))
+                .stream().map(Contract::getId).collect(Collectors.toList());
         LambdaQueryWrapper<Asset> qw = new LambdaQueryWrapper<Asset>()
                 .eq(status != null && !status.isEmpty(), Asset::getStatus, status)
                 .eq(category != null && !category.isEmpty(), Asset::getCategory, category)
-                .and(keyword != null && !keyword.trim().isEmpty(), w -> w
-                        .like(Asset::getContractNo, keyword.trim())
-                        .or().like(Asset::getSerialNo, keyword.trim())
-                        .or().like(Asset::getModel, keyword.trim()))
+                .eq(contractId != null, Asset::getContractId, contractId)
+                .and(kw != null, w -> {
+                    w.like(Asset::getSerialNo, kw).or().like(Asset::getModel, kw);
+                    if (!kwContracts.isEmpty()) {
+                        w.or().in(Asset::getContractId, kwContracts);
+                    }
+                })
                 .orderByAsc(Asset::getId);
         List<Asset> all = assetMapper.selectList(qw);
 
@@ -127,8 +134,8 @@ public class AssetService {
             AssetListItem it = new AssetListItem();
             it.setId(a.getId());
             it.setSerialNo(a.getSerialNo());
-            it.setContractNo(a.getContractNo());
             it.setContractId(a.getContractId());
+            it.setContractNo(contractNo(a.getContractId()));
             it.setCategory(a.getCategory());
             it.setModel(a.getModel());
             it.setStatus(a.getStatus());
@@ -162,13 +169,12 @@ public class AssetService {
         AssetDetailResponse r = new AssetDetailResponse();
         r.setId(a.getId());
         r.setSerialNo(a.getSerialNo());
-        r.setContractNo(a.getContractNo());
+        r.setBoqLineId(a.getBoqLineId());
         r.setCategory(a.getCategory());
         r.setModel(a.getModel());
         r.setStatus(a.getStatus());
         r.setMarketPrice(a.getMarketPrice());
         r.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
-        r.setTaxRate(a.getTaxRate());
         r.setMonthlyLaborValue(a.getMonthlyLaborValue());
         r.setReplaceHeadcount(a.getReplaceHeadcount());
         r.setSupplierId(a.getSupplierId());
@@ -178,10 +184,7 @@ public class AssetService {
         r.setIntendedCustomerId(a.getIntendedCustomerId());
         r.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
         r.setContractId(a.getContractId());
-        if (a.getContractNo() == null && a.getContractId() != null) {
-            Contract ct = contractMapper.selectById(a.getContractId());
-            r.setContractNo(ct == null ? null : ct.getNo());
-        }
+        r.setContractNo(contractNo(a.getContractId()));
         r.setRemark(a.getRemark());
         r.setSensitiveMasked(!seeCost);
         r.setBookValue(seeCost ? bookValue(a) : null);
@@ -192,17 +195,6 @@ public class AssetService {
                 .eq(AssetBom::getAssetId, id)
                 .orderByAsc(AssetBom::getId));
         r.setBom(buildBomTree(boms, seeCost));
-        BoqDtos.Boq boq = boqService.boq(a);
-        if (!seeCost) {
-            // 清单含价格,非成本角色只给行数不给金额
-            boq.setLines(new ArrayList<>());
-            boq.setTotalWithTax(null);
-            boq.setTotalWithoutTax(null);
-            boq.setTaxAmount(null);
-            boq.setTotalUpper(null);
-        }
-        r.setBoq(boq);
-        r.setPurchasePriceLinked(Boolean.TRUE.equals(boq.getLinked()));
         r.setCostBreakdown(seeCost ? costBreakdown(a, boms) : null);
         r.setResidualBreakdown(residualBreakdown(a, boms));
         r.setFaultArchive(faultArchive(boms));
@@ -249,16 +241,8 @@ public class AssetService {
         if (a.getSerialNo() == null) {
             a.setSerialNo(oldSerial);
         }
-        // 合同清单有行 → 合同价由清单合计决定,忽略手填值
-        BigDecimal linked = boqService.totalIfAny(id);
-        if (linked != null) {
-            a.setPurchasePrice(linked);
-        }
         assetMapper.update(a, new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, id)
-                .set(Asset::getContractNo, a.getContractNo())
-                .set(Asset::getContractId, a.getContractId())
-                .set(Asset::getTaxRate, a.getTaxRate())
                 .set(req.getSupplierId() == null, Asset::getSupplierId, null));
         boolean priceChanged = a.getPurchasePrice() == null ? oldPrice != null
                 : (oldPrice == null || a.getPurchasePrice().compareTo(oldPrice) != 0);
@@ -276,17 +260,6 @@ public class AssetService {
 
     private void applySave(Asset a, AssetSaveRequest req) {
         a.setSerialNo(trimToNull(req.getSerialNo()));
-        String contractNo = trimToNull(req.getContractNo());
-        a.setContractNo(contractNo);
-        // 合同编号能对上合同时建立关联;对不上保留原关联(合同可能还没录进系统)
-        if (contractNo != null) {
-            Contract ct = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getNo, contractNo).orderByAsc(Contract::getId).last("limit 1"));
-            if (ct != null) {
-                a.setContractId(ct.getId());
-            }
-        }
-        a.setTaxRate(req.getTaxRate());
         a.setCategory(req.getCategory().trim());
         a.setModel(req.getModel());
         a.setMarketPrice(req.getMarketPrice());
@@ -733,6 +706,36 @@ public class AssetService {
         for (Long delId : toDelete) {
             bomMapper.deleteById(delId);
         }
+    }
+
+    /** 合同编号(设备所属合同的合同号);未挂合同返回 null。 */
+    private String contractNo(Long contractId) {
+        if (contractId == null) {
+            return null;
+        }
+        Contract ct = contractMapper.selectById(contractId);
+        return ct == null ? null : ct.getNo();
+    }
+
+    /**
+     * 按合同清单行生成设备(ContractBoqService 调用):状态=采购,合同价=清单行单价,挂到该合同与清单行。
+     * 设备是否计入租金分摊由合同签约时挂载决定,这里只建立归属关系。
+     */
+    @Transactional
+    public Long createFromBoqLine(String category, String model, BigDecimal unitPrice,
+                                  Long contractId, Long boqLineId, String remark) {
+        Asset a = new Asset();
+        a.setSerialNo(nextSerialNo());
+        a.setCategory(category);
+        a.setModel(model);
+        a.setPurchasePrice(unitPrice);
+        a.setContractId(contractId);
+        a.setBoqLineId(boqLineId);
+        a.setStatus("采购");
+        a.setRemark(remark);
+        assetMapper.insert(a);
+        writeEvent(a.getId(), "采购", "contract", contractId, remark);
+        return a.getId();
     }
 
     /** 序列号(系统内部唯一标识):AS + 日期 + 3 位流水。 */

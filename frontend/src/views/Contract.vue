@@ -5,7 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchContracts, fetchContractDetail, signContract, voidContract, renewContract, changeContract,
   editContract, fetchContractFiles, uploadContractFile, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB,
-  type ContractListItem, type ContractDetail, type ContractFile,
+  saveContractBoq, importContractBoq, exportContractBoq, generateAssetsFromBoq, BOQ_ASSET_CATEGORIES,
+  type ContractListItem, type ContractDetail, type ContractFile, type BoqLine, type BoqImportResult,
 } from '@/api/contract'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchAssets, checkUploadFile, saveFile, type AssetListItem } from '@/api/asset'
@@ -144,6 +145,136 @@ async function submitSign() {
   }
 }
 
+// ---- 合同清单(《工程量清单计价表》;合计 = 设备总价) ----
+const boqRows = ref<BoqLine[]>([])
+const boqEditing = ref(false)
+const boqSaving = ref(false)
+const boqImporting = ref(false)
+const boqExporting = ref(false)
+const boqGenerating = ref(false)
+const boqImportResult = ref<BoqImportResult | null>(null)
+const boqImportVisible = ref(false)
+
+function rowAmount(r: BoqLine): number | null {
+  if (r.amountManual) return r.amount ?? null
+  if (r.qty == null || r.unitPrice == null) return null
+  return Math.round(Number(r.qty) * Number(r.unitPrice) * 100) / 100
+}
+const boqTotal = computed(() => boqRows.value.reduce((sum, r) => sum + Number(rowAmount(r) ?? 0), 0))
+const boqTaxRate = computed(() => Number(detail.value?.taxRate ?? 0))
+const boqWithoutTax = computed(() => (boqTaxRate.value > 0 ? Math.round((boqTotal.value / (1 + boqTaxRate.value)) * 100) / 100 : null))
+const boqTaxAmount = computed(() => (boqWithoutTax.value == null ? null : Math.round((boqTotal.value - boqWithoutTax.value) * 100) / 100))
+
+function startBoqEdit() {
+  boqRows.value = (detail.value?.boq?.lines || []).map((l) => ({ ...l }))
+  if (!boqRows.value.length) addBoqRow()
+  boqEditing.value = true
+}
+function cancelBoqEdit() {
+  boqEditing.value = false
+  boqRows.value = []
+}
+function addBoqRow() {
+  boqRows.value.push({ name: '', model: null, spec: null, unit: '台', qty: 1, unitPrice: null, amount: null, amountManual: false, assetCategory: null, remark: null })
+}
+function removeBoqRow(i: number) {
+  const row = boqRows.value[i]
+  if (row.generatedCount) {
+    ElMessage.warning(`「${row.name}」已生成 ${row.generatedCount} 台设备，请先在设备台账里删除这些设备`)
+    return
+  }
+  boqRows.value.splice(i, 1)
+}
+async function submitBoq() {
+  const d = detail.value
+  if (!d) return
+  if (boqRows.value.some((r) => !String(r.name || '').trim())) {
+    ElMessage.warning('清单每行都要填名称')
+    return
+  }
+  boqSaving.value = true
+  try {
+    await saveContractBoq(d.id, boqRows.value)
+    ElMessage.success('合同清单已保存，设备总价已同步为含税合计')
+    boqEditing.value = false
+    await openDetail(d.id)
+    loadList()
+  } finally {
+    boqSaving.value = false
+  }
+}
+function beforeBoqImport(file: File) {
+  const err = checkUploadFile(file, ['xls', 'xlsx'], 10)
+  if (err) {
+    ElMessage.warning(err)
+    return false
+  }
+  return true
+}
+async function boqImportRequest(options: any) {
+  const d = detail.value
+  if (!d) return
+  const file = options.file as File
+  try {
+    await ElMessageBox.confirm(
+      `导入「${file.name}」会整表替换本合同的清单（原有清单行删除；已生成设备的行会拦下来），合计将同步为合同设备总价。确认导入？`,
+      '导入合同清单', { type: 'warning', confirmButtonText: '确认导入' },
+    )
+  } catch {
+    return
+  }
+  boqImporting.value = true
+  try {
+    boqImportResult.value = await importContractBoq(d.id, file)
+    boqImportVisible.value = true
+    boqEditing.value = false
+    await openDetail(d.id)
+    loadList()
+  } finally {
+    boqImporting.value = false
+  }
+}
+async function onExportBoq(template = false) {
+  const d = detail.value
+  if (!d) return
+  boqExporting.value = true
+  try {
+    await exportContractBoq(d.id, d.no, template)
+    ElMessage.success(template ? '模板已下载' : '已导出，可修改后再导入回系统')
+  } finally {
+    boqExporting.value = false
+  }
+}
+async function onGenerateAssets() {
+  const d = detail.value
+  if (!d) return
+  const pending = d.boq?.pendingAssets || 0
+  if (!pending) {
+    ElMessage.warning('没有待生成的设备：请在清单行的「生成设备品类」里选好品类，数量要大于已生成台数')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `按清单行数量生成 ${pending} 台设备，挂到本合同下（状态=采购，合同价取该行单价）。确认生成？`,
+      '按清单生成设备', { type: 'warning', confirmButtonText: '确认生成' },
+    )
+  } catch {
+    return
+  }
+  boqGenerating.value = true
+  try {
+    const res = await generateAssetsFromBoq(d.id)
+    ElMessage.success(`已生成 ${res.created} 台设备` + (res.messages.length ? `：${res.messages.join('；')}` : ''))
+    await openDetail(d.id)
+    loadList()
+  } finally {
+    boqGenerating.value = false
+  }
+}
+function goAssetsOfContract() {
+  if (detail.value) router.push({ path: '/asset', query: { contractId: String(detail.value.id) } })
+}
+
 // ---- 编辑合同要素 ----
 const editVisible = ref(false)
 const editSaving = ref(false)
@@ -158,6 +289,7 @@ async function openEdit() {
     customerId: d.customerId,
     nature: d.nature || '分期收款销售',
     targetIrrPct: d.targetIrr == null ? null : Math.round(d.targetIrr * 10000) / 100,
+    taxRatePct: d.taxRate == null ? null : Math.round(d.taxRate * 1000000) / 10000,
     termMonths: d.termMonths,
     monthRent: d.monthRent,
     endTransferPrice: d.endTransferPrice,
@@ -193,6 +325,7 @@ async function submitEdit() {
       customerId: editForm.customerId,
       nature: editForm.nature,
       targetIrr: editForm.targetIrrPct == null ? null : Math.round(Number(editForm.targetIrrPct) * 100) / 10000,
+      taxRate: editForm.taxRatePct == null ? null : Math.round(Number(editForm.taxRatePct) * 1000000) / 100000000,
       termMonths: editForm.termMonths,
       monthRent: editForm.monthRent,
       endTransferPrice: editForm.endTransferPrice ?? null,
@@ -359,6 +492,8 @@ onMounted(() => {
           <el-descriptions-item label="月租">{{ money(detail.monthRent) }}</el-descriptions-item>
           <el-descriptions-item label="期末转让价">{{ money(detail.endTransferPrice) }}</el-descriptions-item>
           <el-descriptions-item label="押金">{{ money(detail.deposit) }}</el-descriptions-item>
+          <el-descriptions-item label="设备总价(含税)">{{ detail.equipmentTotal == null ? '—' : money(detail.equipmentTotal) }}</el-descriptions-item>
+          <el-descriptions-item label="合同税率">{{ detail.taxRate == null ? '—' : (detail.taxRate * 100).toFixed(2).replace(/\.?0+$/, '') + '%' }}</el-descriptions-item>
           <el-descriptions-item label="起租日">{{ detail.startDate || '—' }}</el-descriptions-item>
           <el-descriptions-item label="签约日">{{ detail.signDate || '—' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.remark" label="备注" :span="3">{{ detail.remark }}</el-descriptions-item>
@@ -424,6 +559,93 @@ onMounted(() => {
           <el-descriptions-item label="− 坏账拨备">{{ money(detail.pnl.badDebtReserve) }}</el-descriptions-item>
           <el-descriptions-item label="= 税后净利"><strong style="color:#67c23a">{{ money(detail.pnl.netProfit) }}</strong> ({{ (detail.pnl.netMargin * 100).toFixed(1) }}%)</el-descriptions-item>
         </el-descriptions>
+
+        <!-- 合同清单(《工程量清单计价表》) -->
+        <div class="block-title block-title-row">
+          <span>合同清单（工程量清单计价表）</span>
+          <span v-if="!detail.sensitiveMasked" class="boq-actions">
+            <el-button link type="primary" size="small" :loading="boqExporting" @click="onExportBoq(false)">⬇ 导出</el-button>
+            <el-button link type="primary" size="small" :loading="boqExporting" @click="onExportBoq(true)">下载模板</el-button>
+            <el-upload :http-request="boqImportRequest" :before-upload="beforeBoqImport" accept=".xls,.xlsx"
+              :show-file-list="false" :disabled="boqImporting" style="display:inline-block">
+              <el-button link type="primary" size="small" :loading="boqImporting">⬆ 导入</el-button>
+            </el-upload>
+            <el-button v-if="!boqEditing" link type="primary" size="small" @click="startBoqEdit">编辑</el-button>
+            <template v-else>
+              <el-button link type="primary" size="small" @click="addBoqRow">+ 加一行</el-button>
+              <el-button link type="primary" size="small" :loading="boqSaving" @click="submitBoq">保存</el-button>
+              <el-button link size="small" :disabled="boqSaving" @click="cancelBoqEdit">取消</el-button>
+            </template>
+            <el-button v-if="!boqEditing" link type="success" size="small" :loading="boqGenerating" @click="onGenerateAssets">
+              一键生成设备{{ detail.boq?.pendingAssets ? `（待生成 ${detail.boq.pendingAssets} 台）` : '' }}
+            </el-button>
+          </span>
+        </div>
+        <div v-if="detail.sensitiveMasked" class="sub">当前角色不可查看清单金额 🔒</div>
+        <template v-else>
+          <el-table v-if="!boqEditing" :data="detail.boq?.lines || []" size="small" border>
+            <el-table-column label="序号" width="60" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
+            <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="model" label="型号" min-width="110" show-overflow-tooltip />
+            <el-table-column prop="spec" label="规格" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="unit" label="单位" width="60" align="center" />
+            <el-table-column prop="qty" label="数量" width="80" align="right" />
+            <el-table-column label="单价🔒" width="110" align="right"><template #default="{ row }">{{ row.unitPrice == null ? '—' : money(row.unitPrice) }}</template></el-table-column>
+            <el-table-column label="金额🔒" width="120" align="right"><template #default="{ row }">{{ row.amount == null ? '-' : money(row.amount) }}</template></el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="150" show-overflow-tooltip />
+            <el-table-column label="生成设备" width="120">
+              <template #default="{ row }">
+                <span v-if="!row.assetCategory" class="sub">—</span>
+                <template v-else>
+                  {{ row.assetCategory }}
+                  <div class="sub">已生成 {{ row.generatedCount || 0 }}{{ row.pendingCount ? ` · 待 ${row.pendingCount}` : '' }}</div>
+                </template>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-table v-else :data="boqRows" size="small" border>
+            <el-table-column label="序号" width="55" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
+            <el-table-column label="名称" min-width="130"><template #default="{ row }"><el-input v-model="row.name" size="small" maxlength="128" /></template></el-table-column>
+            <el-table-column label="型号" min-width="100"><template #default="{ row }"><el-input v-model="row.model" size="small" maxlength="128" /></template></el-table-column>
+            <el-table-column label="规格" min-width="120"><template #default="{ row }"><el-input v-model="row.spec" size="small" maxlength="255" /></template></el-table-column>
+            <el-table-column label="单位" width="70"><template #default="{ row }"><el-input v-model="row.unit" size="small" maxlength="16" /></template></el-table-column>
+            <el-table-column label="数量" width="95"><template #default="{ row }"><el-input-number v-model="row.qty" size="small" :min="0" :precision="2" :controls="false" style="width:100%" /></template></el-table-column>
+            <el-table-column label="单价" width="105"><template #default="{ row }"><el-input-number v-model="row.unitPrice" size="small" :precision="2" :controls="false" style="width:100%" /></template></el-table-column>
+            <el-table-column label="金额" width="145">
+              <template #default="{ row }">
+                <el-input-number v-if="row.amountManual" v-model="row.amount" size="small" :precision="2" :controls="false" style="width:100%" />
+                <span v-else>{{ rowAmount(row) == null ? '-' : money(rowAmount(row)) }}</span>
+                <el-checkbox v-model="row.amountManual" size="small">手填</el-checkbox>
+              </template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="120"><template #default="{ row }"><el-input v-model="row.remark" size="small" maxlength="500" /></template></el-table-column>
+            <el-table-column label="生成设备品类" width="130">
+              <template #default="{ row }">
+                <el-select v-model="row.assetCategory" size="small" clearable placeholder="不生成">
+                  <el-option v-for="c in BOQ_ASSET_CATEGORIES" :key="c" :label="c" :value="c" />
+                </el-select>
+                <div v-if="row.generatedCount" class="sub">已生成 {{ row.generatedCount }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="50">
+              <template #default="{ $index }"><el-button link type="danger" size="small" @click="removeBoqRow($index)">删</el-button></template>
+            </el-table-column>
+          </el-table>
+          <div class="boq-total">
+            <template v-if="boqEditing">
+              合计(含税) <b>{{ money(boqTotal) }}</b>
+              <span v-if="boqWithoutTax != null" class="sub">不含税 {{ money(boqWithoutTax) }} · 税额 {{ money(boqTaxAmount) }}</span>
+            </template>
+            <template v-else-if="detail.boq?.linked">
+              设备总价(含税) <b>{{ money(detail.boq.totalWithTax) }}</b>
+              <span v-if="detail.boq.totalWithoutTax != null" class="sub">不含税 {{ money(detail.boq.totalWithoutTax) }} · 税额 {{ money(detail.boq.taxAmount) }}（税率 {{ ((detail.boq.taxRate || 0) * 100).toFixed(2).replace(/\.?0+$/, '') }}%）</span>
+              <span v-else class="sub">在「修改合同」里填合同税率后可拆出不含税金额与税额</span>
+              <span v-if="detail.boq.generatedAssets" class="sub">已按清单生成 {{ detail.boq.generatedAssets }} 台设备 · <a class="lnk" @click="goAssetsOfContract">查看</a></span>
+              <div v-if="detail.boq.totalUpper" class="sub">{{ detail.boq.totalUpper }}</div>
+            </template>
+            <span v-else class="sub">暂无清单：可点「导入」按《工程量清单计价表》导入，或「编辑」手工录入。</span>
+          </div>
+        </template>
 
         <!-- 挂设备 -->
         <div class="block-title">挂载设备(单台分摊 · 关联设备租赁台账)</div>
@@ -506,6 +728,21 @@ onMounted(() => {
       <template #footer><el-button :disabled="signSaving" @click="signVisible = false">取消</el-button><el-button type="primary" :loading="signSaving" @click="submitSign">签约</el-button></template>
     </el-dialog>
 
+    <!-- 合同清单导入结果 -->
+    <el-dialog v-model="boqImportVisible" title="导入结果" width="560px">
+      <template v-if="boqImportResult">
+        <div class="import-kpi">
+          <span>导入 <b>{{ boqImportResult.imported }}</b> 行</span>
+          <span>设备总价(含税) <b>{{ money(boqImportResult.totalWithTax) }}</b></span>
+        </div>
+        <ul v-if="boqImportResult.messages.length" class="import-msg">
+          <li v-for="(m, i) in boqImportResult.messages" :key="i">{{ m }}</li>
+        </ul>
+        <div v-else class="sub">没有需要注意的行，清单与表格一致。</div>
+      </template>
+      <template #footer><el-button type="primary" @click="boqImportVisible = false">知道了</el-button></template>
+    </el-dialog>
+
     <!-- 编辑合同要素 -->
     <el-dialog v-model="editVisible" :title="detail ? `编辑合同 ${detail.no}（${detail.status}）` : '编辑合同'" width="680px" :close-on-click-modal="false">
       <el-alert v-if="detail?.status === '生效'" type="warning" :closable="false" show-icon style="margin-bottom:12px"
@@ -523,6 +760,7 @@ onMounted(() => {
             </el-form-item>
           </el-col>
           <el-col :span="12"><el-form-item label="目标IRR(%)"><el-input-number v-model="editForm.targetIrrPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="合同税率(%)"><el-input-number v-model="editForm.taxRatePct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" placeholder="如 13" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="租期(月)" required><el-input-number v-model="editForm.termMonths" :min="Math.max(1, billedPeriods)" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="月租(元)" required><el-input-number v-model="editForm.monthRent" :min="0" :precision="2" :step="500" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="期末转让价(元)"><el-input-number v-model="editForm.endTransferPrice" :min="0" :precision="2" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
@@ -540,6 +778,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.boq-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.boq-total { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; }
+.import-kpi { display: flex; gap: 18px; font-size: 13px; margin-bottom: 8px; }
+.import-msg { margin: 0; padding-left: 18px; color: #e6a23c; font-size: 12px; line-height: 1.7; }
 .contract-page { padding: 4px; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .toolbar .hint { font-size: 12px; color: #999; }

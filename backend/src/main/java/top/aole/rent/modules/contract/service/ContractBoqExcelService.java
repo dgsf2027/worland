@@ -1,4 +1,4 @@
-package top.aole.rent.modules.asset.service;
+package top.aole.rent.modules.contract.service;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.BorderStyle;
@@ -20,8 +20,8 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import top.aole.rent.common.exception.BizException;
-import top.aole.rent.modules.asset.domain.Asset;
-import top.aole.rent.modules.asset.dto.BoqDtos;
+import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.contract.dto.BoqDtos;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -40,25 +40,26 @@ import java.util.Map;
  *
  * <p>版式对齐业务表格:第 1 行标题「工程量清单计价表」(合并),第 2 行表头
  * 序号/名称/型号/规格/单位/数量/单价/金额/备注,之后逐行明细(赠送行金额留空或「-」、优惠行金额为负),
- * 最后一行「合计实收:¥… 」并注明含税。导入时表头行自动识别,合计行与空行跳过。
+ * 最后一行「合计实收:¥… 」并注明含税。系统在最后多加一列「生成设备品类」(播种墙/货架/阁楼/配件),
+ * 填了的行可按数量一键生成设备;业务原表没有这一列也能直接导入。导入时表头行自动识别,合计行与空行跳过。
  */
 @Service
 @RequiredArgsConstructor
-public class AssetBoqExcelService {
+public class ContractBoqExcelService {
 
     static final String SHEET_NAME = "工程量清单计价表";
     static final String TITLE = "工程量清单计价表";
-    static final String[] HEADERS = {"序号", "名称", "型号", "规格", "单位", "数量", "单价", "金额", "备注"};
-    private static final int[] COL_WIDTHS = {7, 22, 18, 26, 7, 8, 12, 14, 34};
+    static final String[] HEADERS = {"序号", "名称", "型号", "规格", "单位", "数量", "单价", "金额", "备注", "生成设备品类"};
+    private static final int[] COL_WIDTHS = {7, 22, 18, 26, 7, 8, 12, 14, 34, 14};
     private static final long MAX_BYTES = 10L * 1024 * 1024;
     /** 合计行的名称前缀(导入时跳过) */
     private static final List<String> TOTAL_PREFIXES = Arrays.asList("合计", "总计", "小计", "合计实收");
 
-    private final AssetBoqService boqService;
+    private final ContractBoqService boqService;
 
     // ============================== 导出 ==============================
 
-    public byte[] export(Asset asset, BoqDtos.Boq boq, boolean template) {
+    public byte[] export(Contract contract, BoqDtos.Boq boq, boolean template) {
         try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
             Sheet sh = wb.createSheet(SHEET_NAME);
             CellStyle title = titleStyle(wb);
@@ -103,6 +104,7 @@ public class AssetBoqExcelService {
                     number(row, 7, l.getAmount(), money);
                 }
                 text(row, 8, l.getRemark(), body);
+                text(row, 9, l.getAssetCategory(), body);
                 r++;
             }
 
@@ -113,7 +115,7 @@ public class AssetBoqExcelService {
                 c0.setCellValue(String.valueOf(lines.size() + 1));
                 c0.setCellStyle(total);
                 Cell c1 = sum.createCell(1);
-                c1.setCellValue(totalText(asset, boq));
+                c1.setCellValue(totalText(contract, boq));
                 c1.setCellStyle(total);
                 for (int i = 2; i < HEADERS.length; i++) {
                     sum.createCell(i).setCellStyle(total);
@@ -127,13 +129,13 @@ public class AssetBoqExcelService {
         }
     }
 
-    private String totalText(Asset asset, BoqDtos.Boq boq) {
+    private String totalText(Contract contract, BoqDtos.Boq boq) {
         BigDecimal t = boq.getTotalWithTax() == null ? BigDecimal.ZERO : boq.getTotalWithTax();
         StringBuilder sb = new StringBuilder("合计实收：¥")
                 .append(t.setScale(2, RoundingMode.HALF_UP).toPlainString())
-                .append("（").append(AssetBoqService.upperAmount(t)).append("）");
-        if (asset.getTaxRate() != null && asset.getTaxRate().signum() > 0) {
-            BigDecimal pct = asset.getTaxRate().multiply(BigDecimal.valueOf(100)).stripTrailingZeros();
+                .append("（").append(ContractBoqService.upperAmount(t)).append("）");
+        if (contract.getTaxRate() != null && contract.getTaxRate().signum() > 0) {
+            BigDecimal pct = contract.getTaxRate().multiply(BigDecimal.valueOf(100)).stripTrailingZeros();
             sb.append("  本合同约定价格均已含税费等费用，税率 ").append(pct.toPlainString()).append("%");
             if (boq.getTotalWithoutTax() != null) {
                 sb.append("，不含税 ¥").append(boq.getTotalWithoutTax().toPlainString())
@@ -147,7 +149,7 @@ public class AssetBoqExcelService {
 
     // ============================== 导入 ==============================
 
-    public BoqDtos.ImportResult importFile(Asset asset, MultipartFile file) {
+    public BoqDtos.ImportResult importFile(Contract contract, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BizException(400, "请选择要导入的 Excel 文件");
         }
@@ -170,7 +172,7 @@ public class AssetBoqExcelService {
         if (lines.isEmpty()) {
             throw new BizException(400, "没解析到清单明细行,请确认表格里有「名称」列且下方有数据");
         }
-        return boqService.replaceAll(asset, lines, messages);
+        return boqService.replaceAll(contract, lines, messages);
     }
 
     /** 解析首个含「名称」表头的工作表。 */
@@ -222,6 +224,7 @@ public class AssetBoqExcelService {
         if (h.startsWith("单价")) return "单价";
         if (h.equals("金额") || h.equals("合价") || h.equals("小计")) return "金额";
         if (h.startsWith("备注") || h.equals("说明")) return "备注";
+        if (h.contains("生成设备") || h.equals("设备品类") || h.equals("品类")) return "生成设备品类";
         return null;
     }
 
@@ -256,6 +259,13 @@ public class AssetBoqExcelService {
             l.setAmountManual(manual);
             l.setAmount(manual ? amount : auto);
             l.setRemark(text(row, cols.get("备注"), fmt));
+            String category = text(row, cols.get("生成设备品类"), fmt);
+            if (category != null && !ContractBoqService.ASSET_CATEGORIES.contains(category)) {
+                messages.add("第 " + (r + 1) + " 行「生成设备品类」填的是「" + category + "」,不在 "
+                        + String.join("/", ContractBoqService.ASSET_CATEGORIES) + " 之内,已忽略");
+                category = null;
+            }
+            l.setAssetCategory(category);
             out.add(l);
         }
         return out;

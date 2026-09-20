@@ -27,9 +27,6 @@ public class Asset {
 
     private String serialNo;
 
-    /** 合同编号(多台设备可共用;匹配到合同时回填 contractId) */
-    private String contractNo;
-
     /** 品类:播种墙/货架/阁楼/配件 */
     private String category;
 
@@ -40,9 +37,6 @@ public class Asset {
 
     /** 集采价(元·成本口径);book_value 折旧基数 */
     private BigDecimal purchasePrice;
-
-    /** 合同税率(0-1);合同清单金额为含税价 */
-    private BigDecimal taxRate;
 
     private Long supplierId;
 
@@ -61,6 +55,9 @@ public class Asset {
 
     /** 【派生】当前在租合同(@owner=签约/作废事件) */
     private Long contractId;
+
+    /** 由哪一行合同清单生成(yc_rent_contract_boq.id) */
+    private Long boqLineId;
 
     /** 采购入库单(M1-12 采购模块回填) */
     private Long purchaseInId;

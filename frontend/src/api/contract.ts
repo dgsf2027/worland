@@ -9,6 +9,8 @@ export interface ContractListItem {
   status: string
   termMonths: number
   monthRent: number
+  /** 设备总价(含税)= 合同清单合计 */
+  equipmentTotal?: number
   endTransferPrice?: number
   assetCount?: number
   startDate?: string
@@ -52,6 +54,58 @@ export interface Pnl {
   netMargin: number
   note?: string
 }
+/** 合同清单行(《工程量清单计价表》9 列 + 生成设备品类) */
+export interface BoqLine {
+  id?: number
+  seq?: number
+  name: string
+  model?: string | null
+  spec?: string | null
+  unit?: string | null
+  qty?: number | null
+  /** 单价(含税) */
+  unitPrice?: number | null
+  /** 金额(含税);null = 表格里的「-」(赠送/不计价) */
+  amount?: number | null
+  /** true=金额手填(赠送/优惠行) */
+  amountManual?: boolean
+  /** 生成设备的品类;空=本行不生成设备 */
+  assetCategory?: string | null
+  /** 已生成设备台数(只读) */
+  generatedCount?: number
+  /** 还可生成台数(只读) */
+  pendingCount?: number
+  remark?: string | null
+}
+
+export interface Boq {
+  lines: BoqLine[]
+  totalWithTax?: number
+  totalWithoutTax?: number
+  taxAmount?: number
+  taxRate?: number
+  totalUpper?: string
+  linked?: boolean
+  generatedAssets?: number
+  pendingAssets?: number
+}
+
+export interface BoqImportResult {
+  total: number
+  imported: number
+  skipped: number
+  totalWithTax?: number
+  messages: string[]
+}
+
+export interface BoqGenerateResult {
+  created: number
+  messages: string[]
+}
+
+/** 清单行可生成设备的品类 */
+export const BOQ_ASSET_CATEGORIES = ['播种墙', '货架', '阁楼', '配件']
+
 export interface ContractDetail {
   id: number
   no: string
@@ -64,6 +118,10 @@ export interface ContractDetail {
   deposit: number
   endTransferPrice: number
   targetIrr?: number
+  /** 合同税率(0-1) */
+  taxRate?: number
+  /** 设备总价(含税)= 合同清单合计 */
+  equipmentTotal?: number
   signDate?: string
   startDate?: string
   remark?: string
@@ -76,6 +134,40 @@ export interface ContractDetail {
   pnl?: Pnl
   depositLedger: { direction: string; amount: number; bizTime: string; remark?: string }[]
   changes: { changeType: string; isReverse: boolean; detail?: string; bizTime: string; operatorName?: string }[]
+  /** 合同清单(《工程量清单计价表》格式;合计=设备总价) */
+  boq: Boq
+}
+
+/** 保存合同清单(整表;合计回写设备总价) */
+export function saveContractBoq(id: number, lines: BoqLine[]): Promise<Boq> {
+  return request.put(`/rent/contracts/${id}/boq`, { lines })
+}
+/** 导入合同清单(《工程量清单计价表》.xls/.xlsx,整表替换) */
+export function importContractBoq(id: number, file: File): Promise<BoqImportResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post(`/rent/contracts/${id}/boq/import`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+  })
+}
+/** 按清单行数量一键生成设备(lineIds 为空=所有填了品类的行) */
+export function generateAssetsFromBoq(id: number, lineIds: number[] = []): Promise<BoqGenerateResult> {
+  return request.post(`/rent/contracts/${id}/boq/generate-assets`, { lineIds })
+}
+/** 导出合同清单;template=true 只下载表头模板 */
+export async function exportContractBoq(id: number, contractNo: string, template = false) {
+  const blob: Blob = await request.get(`/rent/contracts/${id}/boq/export`, {
+    params: { template }, responseType: 'blob', timeout: 0,
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `工程量清单计价表-${contractNo}${template ? '-模板' : ''}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 
 export function fetchContracts(params: Record<string, any>): Promise<PageResult<ContractListItem>> {

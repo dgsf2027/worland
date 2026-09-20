@@ -2,6 +2,8 @@ package top.aole.rent.modules.contract.dto;
 
 import lombok.Data;
 
+import javax.validation.constraints.DecimalMax;
+import javax.validation.constraints.DecimalMin;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
@@ -35,6 +37,11 @@ public class ContractSignRequest {
     private BigDecimal endTransferPrice;
 
     private BigDecimal targetIrr;
+
+    /** 合同税率(0-1,如 0.13) */
+    @DecimalMin("0")
+    @DecimalMax("1")
+    private BigDecimal taxRate;
 
     /** 合同性质(默认分期收款销售;禁融资租赁) */
     private String nature;

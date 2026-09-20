@@ -73,10 +73,10 @@ modules/<module>/
 
 | 模块 | 核心实体 | Controller 路径 | 定时任务 |
 |---|---|---|---|
-| `asset` | Asset / AssetBoq（合同清单） / AssetBom（配件明细） / AssetEvent / AssetDepreciationLine | `/rent/assets`（含 `/{id}/boq` 清单读写与导入导出） | — |
+| `asset` | Asset / AssetBom（配件 BOM 明细） / AssetEvent / AssetDepreciationLine | `/rent/assets`（`?contractId=` 按合同筛设备） | — |
 | `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
-| `contract` | Contract / ContractAsset / ContractChange / RentSchedule / DepositLedger | `/rent/contracts` | — |
+| `contract` | Contract / ContractAsset / ContractBoq（合同清单） / ContractChange / RentSchedule / DepositLedger | `/rent/contracts`（含 `/{id}/boq` 清单读写、导入导出、按清单生成设备） | — |
 | `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase` | — |
 | `billing` | RentBill / OverdueCase / RepossessOrder / AccountingPeriod | `/rent/bills`、`/rent/overdue` | 收租单生成 01:00；逾期扫描 02:00 |
 | `finance` | Voucher / VoucherLine / LedgerBook | `/rent/vouchers`、`/rent/depreciation/run`、`/rent/tax/threshold` | 折旧计提 每月 1 日 03:00 |
@@ -190,7 +190,8 @@ modules/<module>/
 | `V109__remove_demo_suppliers.sql` | 删除演示供应商（恒丰自动化/睿捷设备/广达货架）及误建的「11」，解除引用 |
 | `V110__remove_assets.sql` | 删除设备 WL-BZQ-0002/0003/0004、WL-HJ-0001/0002/0003 及关联单据 |
 | `V111__supplier_inspection_sheet_v2.sql` | 供应商考察对齐 0916 版汇总表：公司业务范围/业绩/社保员工/产品图片说明/考察观后感 |
-| `V112__asset_contract_no_boq.sql` | 设备合同编号/合同税率、合同清单（工程量清单计价表）、配件 BOM 补序号/型号/规格/单位 |
+| `V112__asset_contract_no_boq.sql` | （口径已由 V113 纠正）设备侧合同编号/税率与设备级清单、配件 BOM 补序号/型号/规格/单位 |
+| `V113__contract_boq.sql` | 合同清单（工程量清单计价表）挂到合同：合同税率/设备总价、yc_rent_contract_boq、设备 boq_line_id，并把设备级清单搬到合同 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

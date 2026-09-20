@@ -39,6 +39,12 @@ public class Contract {
 
     private BigDecimal targetIrr;
 
+    /** 合同税率(0-1);合同清单金额为含税价 */
+    private BigDecimal taxRate;
+
+    /** 设备总价(含税)= 合同清单合计 */
+    private BigDecimal equipmentTotal;
+
     /** 合同性质(固定分期收款销售) */
     private String nature;
 
