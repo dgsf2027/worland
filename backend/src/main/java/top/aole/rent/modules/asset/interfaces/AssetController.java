@@ -13,7 +13,20 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
 import top.aole.rent.common.auth.RequireRole;
+import top.aole.rent.modules.asset.domain.Asset;
+import top.aole.rent.modules.asset.dto.BomSheetDtos;
+import top.aole.rent.modules.asset.service.AssetBomExcelService;
+
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.asset.dto.AssetDetailResponse;
@@ -39,6 +52,7 @@ import top.aole.rent.modules.asset.service.AssetService;
 public class AssetController {
 
     private final AssetService assetService;
+    private final AssetBomExcelService bomExcelService;
 
     @ApiOperation("设备台账:按状态/品类/关键词筛选 + 分页")
     @GetMapping
@@ -146,5 +160,28 @@ public class AssetController {
     public R<Void> deleteBom(@PathVariable Long bomId) {
         assetService.deleteBom(bomId);
         return R.ok();
+    }
+
+    @ApiOperation("导出配件 BOM 明细 Excel(与合同清单同列 + BOM 字段;template=true 只导表头模板)")
+    @RequireRole(value = {"老板", "财务", "供应链", "业务"}, action = "配件BOM导出", targetType = "asset")
+    @GetMapping("/{id}/bom/export")
+    public ResponseEntity<ByteArrayResource> exportBom(@PathVariable Long id,
+                                                       @RequestParam(defaultValue = "false") boolean template) {
+        Asset asset = assetService.requireAsset(id);
+        byte[] data = bomExcelService.export(asset, template);
+        String name = "配件BOM明细-" + asset.getSerialNo()
+                + (template ? "-模板" : "-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)) + ".xlsx";
+        ContentDisposition cd = ContentDisposition.attachment().filename(name, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(new ByteArrayResource(data));
+    }
+
+    @ApiOperation("导入配件 BOM 明细 Excel(整表替换;挂了附件的配件会拦下)")
+    @RequireRole(value = {"老板", "财务", "供应链", "业务"}, action = "配件BOM导入", targetType = "asset")
+    @PostMapping("/{id}/bom/import")
+    public R<BomSheetDtos.ImportResult> importBom(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        return R.ok(bomExcelService.importFile(assetService.requireAsset(id), file));
     }
 }

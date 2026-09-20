@@ -233,6 +233,38 @@ export function checkTermRows(rows: TermRow[]): string | null {
   return null
 }
 
+/** 配件 BOM 明细导入回执 */
+export interface BomImportResult {
+  total: number
+  imported: number
+  skipped: number
+  bomTotal?: number
+  messages: string[]
+}
+/** 导入配件 BOM 明细(.xls/.xlsx,整表替换) */
+export function importBom(id: number, file: File): Promise<BomImportResult> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post(`/rent/assets/${id}/bom/import`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+  })
+}
+/** 导出配件 BOM 明细;template=true 只下载表头模板 */
+export async function exportBom(id: number, fileLabel: string, template = false) {
+  const blob: Blob = await request.get(`/rent/assets/${id}/bom/export`, {
+    params: { template }, responseType: 'blob', timeout: 0,
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `配件BOM明细-${fileLabel}${template ? '-模板' : ''}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
+
 /** 单台收益手工覆盖(某项传 null = 恢复自动计算) */
 export function updateSingleUnitReturn(id: number, body: Record<string, number | null>): Promise<void> {
   return request.put(`/rent/assets/${id}/single-unit-return`, body)

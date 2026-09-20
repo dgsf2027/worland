@@ -9,9 +9,9 @@ import {
   addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
   updateSingleUnitReturn, updateIntendedCustomer,
   updatePaymentTerms, toTermInputs, toTermRows, checkTermRows, type TermRow,
-  uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile,
+  uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile, importBom, exportBom,
   BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB,
-  type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem,
+  type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem, type BomImportResult,
 } from '@/api/asset'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import { createSupplier, fetchSupplierPool, type SupplierPoolItem } from '@/api/supplier'
@@ -333,6 +333,53 @@ function removeQueuedBomFile(index: number) {
 
 async function downloadBomAttachment(file: BomAttachment) {
   await saveFile(file.id, file.fileName)
+}
+
+// ---- 配件 BOM：导入 / 导出 ----
+const bomImporting = ref(false)
+const bomExporting = ref(false)
+const bomImportResult = ref<BomImportResult | null>(null)
+const bomImportVisible = ref(false)
+
+function beforeBomImport(file: File) {
+  const err = checkUploadFile(file, ['xls', 'xlsx'], 10)
+  if (err) {
+    ElMessage.warning(err)
+    return false
+  }
+  return true
+}
+async function bomImportRequest(options: any) {
+  const d = detail.value
+  if (!d) return
+  const file = options.file as File
+  try {
+    await ElMessageBox.confirm(
+      `导入「${file.name}」会整表替换本设备的配件 BOM 明细（原有配件删除，挂了附件的配件会拦下来）。配件 BOM 不影响合同金额。确认导入？`,
+      '导入配件 BOM 明细', { type: 'warning', confirmButtonText: '确认导入' },
+    )
+  } catch {
+    return
+  }
+  bomImporting.value = true
+  try {
+    bomImportResult.value = await importBom(d.id, file)
+    bomImportVisible.value = true
+    await openDetail(d.id)
+  } finally {
+    bomImporting.value = false
+  }
+}
+async function onExportBom(template = false) {
+  const d = detail.value
+  if (!d) return
+  bomExporting.value = true
+  try {
+    await exportBom(d.id, d.serialNo, template)
+    ElMessage.success(template ? '模板已下载' : '已导出，可修改后再导入回系统')
+  } finally {
+    bomExporting.value = false
+  }
 }
 
 // ---- 配件 BOM：行内改数量/单价 ----
@@ -835,7 +882,15 @@ onMounted(async () => {
         <!-- 配件 BOM 明细(同清单格式,不参与合同价) -->
         <div class="block-title block-title-row">
           <span>配件 BOM 明细</span>
-          <el-button v-if="!detail.sensitiveMasked" type="primary" link size="small" @click="openAddBom()">+ 新增配件</el-button>
+          <span v-if="!detail.sensitiveMasked" class="boq-actions">
+            <el-button link type="primary" size="small" :loading="bomExporting" @click="onExportBom(false)">⬇ 导出</el-button>
+            <el-button link type="primary" size="small" :loading="bomExporting" @click="onExportBom(true)">下载模板</el-button>
+            <el-upload :http-request="bomImportRequest" :before-upload="beforeBomImport" accept=".xls,.xlsx"
+              :show-file-list="false" :disabled="bomImporting" style="display:inline-block">
+              <el-button link type="primary" size="small" :loading="bomImporting">⬆ 导入</el-button>
+            </el-upload>
+            <el-button type="primary" link size="small" @click="openAddBom()">+ 新增配件</el-button>
+          </span>
         </div>
         <el-table :data="detail.bom" row-key="id" default-expand-all size="small"
           :tree-props="{ children: 'children' }" border>
@@ -1009,6 +1064,22 @@ onMounted(async () => {
         <el-button @click="rentDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="statusChanging" @click="confirmRented">确认在租</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 配件 BOM 导入结果 -->
+    <el-dialog v-model="bomImportVisible" title="导入结果" width="560px">
+      <template v-if="bomImportResult">
+        <div class="import-kpi">
+          <span>导入 <b>{{ bomImportResult.imported }}</b> 行</span>
+          <span v-if="bomImportResult.skipped">跳过 <b>{{ bomImportResult.skipped }}</b></span>
+          <span>一级项合计 <b>{{ money(bomImportResult.bomTotal) }}</b></span>
+        </div>
+        <ul v-if="bomImportResult.messages.length" class="import-msg">
+          <li v-for="(m, i) in bomImportResult.messages" :key="i">{{ m }}</li>
+        </ul>
+        <div v-else class="upload-tip">没有需要注意的行，配件明细与表格一致。</div>
+      </template>
+      <template #footer><el-button type="primary" @click="bomImportVisible = false">知道了</el-button></template>
     </el-dialog>
 
     <!-- 新建 / 编辑设备弹窗 -->
