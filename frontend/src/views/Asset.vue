@@ -816,14 +816,14 @@ onMounted(async () => {
       <el-table-column label="集采价🔒" width="100"><template #default="{ row }">{{ money(row.purchasePrice) }}</template></el-table-column>
       <el-table-column label="账面价🔒" width="100"><template #default="{ row }">{{ money(row.bookValue) }}</template></el-table-column>
       <el-table-column label="残值" width="90"><template #default="{ row }">{{ money(row.residualValue) }}</template></el-table-column>
-      <el-table-column label="承接客户" width="150">
+      <el-table-column label="承接客户" min-width="170">
         <template #default="{ row }">
           <a v-if="row.currentHolderCustomerId" class="lnk" @click.stop="goCustomer(row.currentHolderCustomerId)">{{ row.currentHolderName }}</a>
-          <template v-else-if="row.intendedCustomerId">
+          <div v-if="row.intendedCustomerId" :class="row.currentHolderCustomerId ? 'upload-tip' : ''">
             <a class="lnk" @click.stop="goCustomer(row.intendedCustomerId)">{{ row.intendedCustomerName }}</a>
             <el-tag size="small" type="warning" effect="plain" class="manual-tag">意向</el-tag>
-          </template>
-          <span v-else>—</span>
+          </div>
+          <span v-if="!row.currentHolderCustomerId && !row.intendedCustomerId">—</span>
         </template>
       </el-table-column>
     </el-table>
@@ -858,12 +858,12 @@ onMounted(async () => {
               <el-tag size="small" type="success" class="manual-tag">在租</el-tag>
               <span v-if="detail.contractNo" class="upload-tip inline-tip">合同 <a class="lnk" @click="goContract(detail.contractId)">{{ detail.contractNo }}</a></span>
             </template>
-            <template v-else-if="detail.intendedCustomerId">
+            <template v-if="detail.intendedCustomerId">
               <a class="lnk" @click="goCustomer(detail.intendedCustomerId)">{{ detail.intendedCustomerName }}</a>
               <el-tag size="small" type="warning" effect="plain" class="manual-tag">意向</el-tag>
             </template>
-            <span v-else class="upload-tip inline-tip">未签约，暂无承接客户</span>
-            <el-button v-if="!detail.sensitiveMasked && !detail.currentHolderCustomerId" link type="primary" size="small" class="manual-tag" @click="openIntended">
+            <span v-else-if="!detail.currentHolderCustomerId" class="upload-tip inline-tip">未签约，暂无承接客户</span>
+            <el-button v-if="!detail.sensitiveMasked" link type="primary" size="small" class="manual-tag" @click="openIntended">
               {{ detail.intendedCustomerId ? '更换意向客户' : '设置意向客户' }}
             </el-button>
           </el-descriptions-item>
@@ -1323,7 +1323,11 @@ onMounted(async () => {
             <el-option v-for="c in customers" :key="c.id" :label="c.name + (c.contact ? ' · ' + c.contact : '')" :value="c.id" />
           </el-select>
         </el-form-item>
-        <div class="upload-tip fault-tip">未签约设备可先预设意向客户，客户详情里能看到；签约起租后自动以合同客户为准。清空后保存即取消。</div>
+        <div v-if="detail?.currentHolderCustomerId" class="upload-tip fault-tip">
+          本设备在租中（承接客户：{{ detail.currentHolderName }}，以合同为准）。这里设的意向客户只表示「下一手/在谈的承接方」，
+          不会改动当前承租关系；签下一份合同时会以新合同的客户为准。清空后保存即取消。
+        </div>
+        <div v-else class="upload-tip fault-tip">未签约设备可先预设意向客户，客户详情里能看到；签约起租后自动以合同客户为准。清空后保存即取消。</div>
       </el-form>
       <template #footer>
         <el-button :disabled="intendedSaving" @click="intendedVisible = false">取消</el-button>

@@ -364,17 +364,21 @@ public class AssetService {
     public void updateIntendedCustomer(Long assetId, AssetLinkDtos.IntendedCustomerRequest req) {
         requireCostRole("设置意向承接客户");
         Asset a = load(assetId);
+        String name = null;
         if (req.getCustomerId() != null) {
             Customer c = customerMapper.selectById(req.getCustomerId());
             if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
                 throw new BizException(404, "客户不存在: id=" + req.getCustomerId());
             }
-            if (a.getCurrentHolderCustomerId() != null) {
-                throw new BizException(400, "设备已签约在租,承接客户以合同客户为准,不能再设意向客户");
-            }
+            name = c.getName();
         }
+        // 在租设备也允许改意向客户(如已在谈下一手承接方):只改意向,当前承租关系仍以合同为准,不受影响
         assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
                 .eq(Asset::getId, assetId).set(Asset::getIntendedCustomerId, req.getCustomerId()));
+        String before = a.getIntendedCustomerId() == null ? "无" : customerName(a.getIntendedCustomerId());
+        auditLogService.record("设备意向客户", "asset", assetId, AuditLogService.EXECUTED,
+                before + " → " + (name == null ? "无" : name)
+                        + (a.getCurrentHolderCustomerId() != null ? "(设备在租中,当前承租客户不变)" : ""));
     }
 
     /** 合同作废:释放设备(在租→投放·再投放),清承租关系(走事件流)。 */
