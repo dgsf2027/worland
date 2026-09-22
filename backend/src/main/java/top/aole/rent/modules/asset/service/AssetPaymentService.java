@@ -150,10 +150,60 @@ public class AssetPaymentService {
     /** 下单:为采购明细保存付款条件,并生成 触发=下单 的逐台应付。 */
     @Transactional
     public void onOrder(PurchaseIn p, PurchaseItem item, List<PaymentTermDtos.TermInput> terms) {
+        onOrder(p, item, terms, item.getAssetId());
+    }
+
+    /**
+     * 下单(勾选台账设备):付款条件与应付直接挂到设备上,设备详情立刻能看到预计付款金额。
+     * assetId 为空(老式手填明细)时退化为只挂采购明细,入库生成设备后再回填。
+     */
+    @Transactional
+    public void onOrder(PurchaseIn p, PurchaseItem item, List<PaymentTermDtos.TermInput> terms, Long assetId) {
         List<PaymentTermDtos.TermInput> normalized = normalize(terms);
-        List<AssetPaymentTerm> saved = insertTerms(null, item.getId(), normalized);
-        generate(p, null, item.getId(), item.getSerialNo(), item.getPurchasePrice(), saved,
+        if (assetId != null) {
+            // 设备上已有条件(如合同清单生成后单独设过)先清掉,以本次下单的条件为准
+            for (AssetPaymentTerm old : termsOf(assetId)) {
+                termMapper.deleteById(old.getId());
+            }
+        }
+        List<AssetPaymentTerm> saved = insertTerms(assetId, item.getId(), normalized);
+        generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), saved,
                 new HashSet<>(), true, false);
+    }
+
+    /** 设备上已有的付款条件 → 入参格式(下单时沿用)。 */
+    public List<PaymentTermDtos.TermInput> termsAsInput(Long assetId) {
+        List<PaymentTermDtos.TermInput> out = new ArrayList<>();
+        for (AssetPaymentTerm t : termsOf(assetId)) {
+            PaymentTermDtos.TermInput in = new PaymentTermDtos.TermInput();
+            in.setStageName(t.getStageName());
+            in.setRatio(t.getRatio());
+            in.setTriggerPoint(t.getTriggerPoint());
+            in.setDueDays(t.getDueDays());
+            out.add(in);
+        }
+        return out;
+    }
+
+    /** 付款条件摘要:首付30%(下单)/验收60%(入库)… */
+    public String describeTerms(Long assetId) {
+        List<AssetPaymentTerm> terms = termsOf(assetId);
+        if (terms.isEmpty()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        for (AssetPaymentTerm t : terms) {
+            parts.add(t.getStageName() + percent(t.getRatio()) + "(" + t.getTriggerPoint()
+                    + (t.getDueDays() != null && t.getDueDays() > 0 ? "+" + t.getDueDays() + "天" : "") + ")");
+        }
+        return String.join(" / ", parts);
+    }
+
+    private static String percent(BigDecimal ratio) {
+        if (ratio == null) {
+            return "";
+        }
+        return ratio.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString() + "%";
     }
 
     /** 入库:付款条件回填设备(旧单无条件则按默认模板补齐),已生成应付回填设备,并生成 触发=入库 的逐台应付。 */

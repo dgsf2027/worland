@@ -6,7 +6,8 @@ import {
   fetchPurchases, fetchPurchaseDetail, createPurchaseOrder, receivePurchase, returnPurchase,
   type PurchaseListItem, type PurchaseDetail,
 } from '@/api/purchase'
-import { toTermInputs, checkTermRows, type TermRow } from '@/api/asset'
+import { toTermInputs, checkTermRows, fetchAssets, type TermRow, type AssetListItem } from '@/api/asset'
+import { fetchContracts, type ContractListItem } from '@/api/contract'
 import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
 
 const route = useRoute()
@@ -33,39 +34,75 @@ async function openDetail(id: number) {
   activeTab.value = 'detail'
 }
 
-// ---- 下单 ----
+// ---- 下单:选合同 → 勾该合同下的台账设备(供应商/付款条件/预计付款金额自动带出) ----
 const orderDlg = ref(false)
-const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, supplierId: undefined, items: [] })
+const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, remark: '' })
+const contracts = ref<ContractListItem[]>([])
+const contractsLoading = ref(false)
+const candidateAssets = ref<AssetListItem[]>([])
+const assetsLoading = ref(false)
+const pickedAssets = ref<AssetListItem[]>([])
+
+async function loadContracts() {
+  contractsLoading.value = true
+  try {
+    contracts.value = (await fetchContracts({ page: 1, size: 200 })).records.filter((c) => c.status !== '已作废')
+  } finally {
+    contractsLoading.value = false
+  }
+}
+async function loadCandidateAssets(contractId?: number) {
+  candidateAssets.value = []
+  pickedAssets.value = []
+  if (!contractId) return
+  assetsLoading.value = true
+  try {
+    candidateAssets.value = (await fetchAssets({ contractId, page: 1, size: 500 })).records
+  } finally {
+    assetsLoading.value = false
+  }
+}
 const defaultTermRows = (): TermRow[] => [
   { stageName: '首付', ratioPct: 30, triggerPoint: '下单', dueDays: 0 },
   { stageName: '验收', ratioPct: 60, triggerPoint: '入库', dueDays: 0 },
   { stageName: '尾款', ratioPct: 10, triggerPoint: '入库', dueDays: 90 },
 ]
 const orderTermRows = ref<TermRow[]>(defaultTermRows())
-const orderTotal = computed(() => oForm.items.reduce((s: number, it: any) => s + Number(it.purchasePrice || 0), 0))
-function openOrder() {
-  Object.assign(oForm, { no: '', contractId: undefined, supplierId: undefined, items: [{ serialNo: '', category: '货架', model: '', marketPrice: undefined, purchasePrice: undefined }] })
+/** 预计付款金额合计 = 勾选设备的合同价合计 */
+const orderTotal = computed(() => pickedAssets.value.reduce((s, a) => s + Number(a.purchasePrice || 0), 0))
+const unavailableTip = (row: AssetListItem) => (row.purchasePrice == null ? '该设备没有合同价，请先在合同清单里填单价' : '')
+async function openOrder() {
+  Object.assign(oForm, { no: '', contractId: undefined, remark: '' })
+  candidateAssets.value = []
+  pickedAssets.value = []
   orderTermRows.value = defaultTermRows()
   orderDlg.value = true
+  if (!contracts.value.length) await loadContracts()
 }
-function addItem() { oForm.items.push({ serialNo: '', category: '货架', model: '', marketPrice: undefined, purchasePrice: undefined }) }
-function removeItem(i: number) { oForm.items.splice(i, 1) }
 async function submitOrder() {
-  if (!oForm.no || !oForm.contractId) { ElMessage.warning('单号与合同ID必填（先签约后采购）'); return }
-  if (!oForm.items.length || oForm.items.some((it: any) => !it.serialNo || !it.category)) { ElMessage.warning('每件需序列号+品类'); return }
+  if (!oForm.no || !oForm.contractId) { ElMessage.warning('采购单号与合同必填（先签约后采购）'); return }
+  if (!pickedAssets.value.length) { ElMessage.warning('请在下方勾选要采购的设备'); return }
+  const noPrice = pickedAssets.value.filter((a) => a.purchasePrice == null)
+  if (noPrice.length) { ElMessage.warning(`有 ${noPrice.length} 台设备没有合同价，请先在合同清单里填单价`); return }
   const termErr = checkTermRows(orderTermRows.value)
   if (termErr) { ElMessage.warning('付款条件：' + termErr); return }
   try {
-    await createPurchaseOrder({ ...oForm, paymentTerms: toTermInputs(orderTermRows.value) })
+    await createPurchaseOrder({
+      no: oForm.no,
+      contractId: oForm.contractId,
+      remark: oForm.remark,
+      items: pickedAssets.value.map((a) => ({ assetId: a.id })),
+      paymentTerms: toTermInputs(orderTermRows.value),
+    })
     ElMessage.success('采购下单成功（已按付款条件逐台生成「下单」阶段应付）')
     orderDlg.value = false
     loadList()
   } catch { /* 无合同拒绝已提示 */ }
 }
 async function doReceive(row: PurchaseListItem) {
-  await ElMessageBox.confirm(`入库将逐件生成设备，并按付款条件逐台生成「入库」阶段应付，确认？`, '采购入库', { type: 'warning' })
+  await ElMessageBox.confirm(`入库将给单上的设备登记入库，并按付款条件逐台生成「入库」阶段应付，确认？`, '采购入库', { type: 'warning' })
   await receivePurchase(row.id)
-  ElMessage.success('已入库（逐件生成设备+应付凭证）')
+  ElMessage.success('已入库（设备回写入库留痕 + 应付凭证）')
   loadList()
 }
 async function doReturn(row: PurchaseListItem) {
@@ -142,28 +179,33 @@ onMounted(() => {
 
           <h4>明细（逐件·入库生成设备）</h4>
           <el-table :data="detail.items" size="small" border>
-            <el-table-column prop="serialNo" label="序列号" width="120" />
-            <el-table-column prop="category" label="品类" width="90" />
-            <el-table-column prop="model" label="型号" min-width="120" />
-            <el-table-column label="市场价" width="110"><template #default="{ row }">{{ money(row.marketPrice) }}</template></el-table-column>
-            <el-table-column label="集采价" width="110"><template #default="{ row }">{{ money(row.purchasePrice) }}</template></el-table-column>
-            <el-table-column label="设备" width="130">
+            <el-table-column label="设备（租赁台账）" min-width="180">
+              <template #default="{ row }">
+                <a v-if="row.assetId" class="lnk" @click="goAsset(row.assetId)">{{ row.assetLabel || ('#' + row.assetId) }}</a>
+                <span v-else>{{ row.assetLabel || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="supplierName" label="供应商" min-width="130"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
+            <el-table-column label="付款条件" min-width="240"><template #default="{ row }">{{ row.paymentTerms || '—' }}</template></el-table-column>
+            <el-table-column label="预计付款金额" width="130"><template #default="{ row }">{{ money(row.expectedAmount) }}</template></el-table-column>
+            <el-table-column label="已生成应付" width="130"><template #default="{ row }">{{ money(row.payableAmount) }}<div v-if="row.payableOutstanding" class="muted">待付 {{ money(row.payableOutstanding) }}</div></template></el-table-column>
+            <el-table-column label="台账状态" width="110">
               <template #default="{ row }"><span v-if="row.assetId">#{{ row.assetId }} · {{ row.assetStatus }}</span><span v-else>未入库</span></template>
             </el-table-column>
           </el-table>
 
           <h4>应付计划（按设备付款条件逐台生成 = 负债）</h4>
           <el-table :data="detail.payables" size="small" border>
-            <el-table-column label="设备" width="140">
+            <el-table-column label="设备（租赁台账）" min-width="170">
               <template #default="{ row }">
-                <a v-if="row.assetId" class="lnk" @click="goAsset(row.assetId)">{{ row.serialNo || ('#' + row.assetId) }}</a>
-                <span v-else-if="row.serialNo">{{ row.serialNo }}（未入库）</span>
+                <a v-if="row.assetId" class="lnk" @click="goAsset(row.assetId)">{{ row.assetLabel || row.serialNo || ('#' + row.assetId) }}</a>
                 <span v-else class="muted">整单</span>
               </template>
             </el-table-column>
-            <el-table-column prop="stage" label="阶段" width="100" />
+            <el-table-column prop="supplierName" label="供应商" min-width="120"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
+            <el-table-column prop="stage" label="付款阶段" width="100" />
             <el-table-column prop="dueDate" label="到期日" width="120" />
-            <el-table-column label="金额" width="130"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
+            <el-table-column label="预计付款金额" width="130"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }"><el-tag size="small" :type="payTag[row.status] || 'info'">{{ row.status }}</el-tag></template>
             </el-table-column>
@@ -177,21 +219,42 @@ onMounted(() => {
     <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="800px">
       <el-form :inline="true">
         <el-form-item label="采购单号"><el-input v-model="oForm.no" placeholder="CG-2026-xxx" /></el-form-item>
-        <el-form-item label="合同ID"><el-input-number v-model="oForm.contractId" :min="1" /></el-form-item>
-        <el-form-item label="供应商ID"><el-input-number v-model="oForm.supplierId" :min="1" /></el-form-item>
+        <el-form-item label="合同">
+          <el-select v-model="oForm.contractId" filterable clearable style="width:280px" :loading="contractsLoading"
+            placeholder="选合同（先签约后采购）" @change="loadCandidateAssets">
+            <el-option v-for="c in contracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.status}`" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="oForm.remark" style="width:200px" /></el-form-item>
       </el-form>
-      <el-table :data="oForm.items" size="small" border>
-        <el-table-column label="序列号"><template #default="{ row }"><el-input v-model="row.serialNo" size="small" /></template></el-table-column>
-        <el-table-column label="品类" width="110"><template #default="{ row }"><el-input v-model="row.category" size="small" /></template></el-table-column>
-        <el-table-column label="型号"><template #default="{ row }"><el-input v-model="row.model" size="small" /></template></el-table-column>
-        <el-table-column label="市场价" width="120"><template #default="{ row }"><el-input-number v-model="row.marketPrice" size="small" :controls="false" style="width:100%" /></template></el-table-column>
-        <el-table-column label="集采价" width="120"><template #default="{ row }"><el-input-number v-model="row.purchasePrice" size="small" :controls="false" style="width:100%" /></template></el-table-column>
-        <el-table-column label="操作" width="60"><template #default="{ $index }"><el-button link type="danger" size="small" @click="removeItem($index)">删</el-button></template></el-table-column>
+      <h4>勾选设备（该合同下的设备租赁台账；供应商、付款条件、预计付款金额自动带出）</h4>
+      <el-table :data="candidateAssets" v-loading="assetsLoading" size="small" border max-height="300"
+        @selection-change="(v: AssetListItem[]) => (pickedAssets = v)">
+        <el-table-column type="selection" width="40" :selectable="(row: AssetListItem) => row.purchasePrice != null" />
+        <el-table-column label="设备" min-width="170">
+          <template #default="{ row }">
+            {{ row.category }}{{ row.model ? ' · ' + row.model : '' }}
+            <div class="muted">{{ row.serialNo }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="supplierName" label="供应商" min-width="120"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
+        <el-table-column label="预计付款金额" width="130">
+          <template #default="{ row }">
+            {{ money(row.purchasePrice) }}
+            <div v-if="unavailableTip(row)" class="muted">{{ unavailableTip(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="台账状态" width="100" />
       </el-table>
-      <el-button size="small" style="margin-top:8px" @click="addItem">＋ 加一件</el-button>
-      <h4>合同付款条件（整单默认，逐台按各自集采价 × 比例生成应付）</h4>
+      <div v-if="oForm.contractId && !candidateAssets.length && !assetsLoading" class="muted">
+        该合同下还没有设备：请先在「合同 · 签约与租金计划」的合同清单里按数量一键生成设备。
+      </div>
+      <h4>合同付款条件（整单默认，逐台按各自合同价 × 比例生成应付）</h4>
       <PaymentTermsEditor v-model="orderTermRows" :base-price="orderTotal || null" />
-      <div class="muted">上方预计付款按本单集采价合计展示；入库后可在设备详情里单独调整某台设备的付款条件。</div>
+      <div class="muted">
+        已勾 {{ pickedAssets.length }} 台，预计付款合计 {{ money(orderTotal) }}。
+        设备详情里单独设过付款条件的，按设备自己的条件走；其余用这里的整单条件。
+      </div>
       <template #footer><el-button @click="orderDlg = false">取消</el-button><el-button type="primary" @click="submitOrder">下单</el-button></template>
     </el-dialog>
   </div>

@@ -125,33 +125,52 @@ public class PurchaseService {
         if (dup != null) {
             throw new BizException(400, "采购单号已存在: " + req.getNo());
         }
-        // 序列号预校验(与已有设备/本单内不重复)
-        List<String> serials = new ArrayList<>();
+        // 明细 = 勾选该合同下设备租赁台账里的设备(供应商/价格/付款条件都从台账带出)
+        List<Asset> assets = new ArrayList<>();
+        List<Long> pickedIds = new ArrayList<>();
         for (PurchaseOrderRequest.Item item : req.getItems()) {
-            String sn = item.getSerialNo().trim();
-            if (serials.contains(sn)) {
-                throw new BizException(400, "本单序列号重复: " + sn);
+            Long assetId = item.getAssetId();
+            if (pickedIds.contains(assetId)) {
+                throw new BizException(400, "同一台设备在本单里勾了多次: assetId=" + assetId);
             }
-            serials.add(sn);
-            Asset exist = assetMapper.selectOne(new LambdaQueryWrapper<Asset>().eq(Asset::getSerialNo, sn));
-            if (exist != null) {
-                throw new BizException(400, "序列号已被设备占用: " + sn);
+            pickedIds.add(assetId);
+            Asset a = assetMapper.selectById(assetId);
+            if (a == null || Integer.valueOf(1).equals(a.getIsDeleted())) {
+                throw new BizException(404, "设备不存在: id=" + assetId);
             }
+            if (!req.getContractId().equals(a.getContractId())) {
+                throw new BizException(400, "设备「" + assetLabel(a) + "」不属于合同 " + c.getNo() + ",不能采购");
+            }
+            if (a.getPurchaseInId() != null) {
+                PurchaseIn other = purchaseInMapper.selectById(a.getPurchaseInId());
+                throw new BizException(400, "设备「" + assetLabel(a) + "」已在采购单 "
+                        + (other == null ? a.getPurchaseInId() : other.getNo()) + " 里,不能重复采购");
+            }
+            if (a.getPurchasePrice() == null) {
+                throw new BizException(400, "设备「" + assetLabel(a) + "」没有合同价,请先在合同清单里填单价");
+            }
+            assets.add(a);
         }
 
         LocalDate orderDate = req.getOrderDate() != null ? req.getOrderDate() : LocalDate.now();
         BigDecimal total = BigDecimal.ZERO;
-        for (PurchaseOrderRequest.Item item : req.getItems()) {
-            if (item.getPurchasePrice() != null) {
-                total = total.add(item.getPurchasePrice());
-            }
+        for (Asset a : assets) {
+            total = total.add(a.getPurchasePrice());
         }
         total = total.setScale(2, RoundingMode.HALF_UP);
+
+        // 单头供应商:入参优先;没给就取设备台账上的供应商(全单同一家时)
+        Long headSupplier = req.getSupplierId();
+        if (headSupplier == null) {
+            List<Long> distinct = assets.stream().map(Asset::getSupplierId)
+                    .filter(java.util.Objects::nonNull).distinct().collect(java.util.stream.Collectors.toList());
+            headSupplier = distinct.size() == 1 ? distinct.get(0) : null;
+        }
 
         PurchaseIn p = new PurchaseIn();
         p.setNo(req.getNo().trim());
         p.setContractId(req.getContractId());
-        p.setSupplierId(req.getSupplierId());
+        p.setSupplierId(headSupplier);
         p.setStatus("已下单");
         p.setTotalAmount(total);
         p.setFirstPayRatio(req.getFirstPayRatio());
@@ -163,25 +182,35 @@ public class PurchaseService {
         // 付款条件:明细级 > 整单级 > 默认三段(首付取整单首付比例);逐台生成 触发=下单 的应付
         List<PaymentTermDtos.TermInput> orderTerms = req.getPaymentTerms() != null && !req.getPaymentTerms().isEmpty()
                 ? req.getPaymentTerms() : paymentService.defaultTerms(req.getFirstPayRatio(), req.getAccountDays());
-        for (PurchaseOrderRequest.Item item : req.getItems()) {
+        for (int i = 0; i < req.getItems().size(); i++) {
+            PurchaseOrderRequest.Item item = req.getItems().get(i);
+            Asset a = assets.get(i);
             PurchaseItem pi = new PurchaseItem();
             pi.setPurchaseInId(p.getId());
-            pi.setSerialNo(item.getSerialNo().trim());
-            pi.setCategory(item.getCategory().trim());
-            pi.setModel(item.getModel());
-            pi.setMarketPrice(item.getMarketPrice());
-            pi.setPurchasePrice(item.getPurchasePrice());
-            pi.setSupplierId(item.getSupplierId() != null ? item.getSupplierId() : req.getSupplierId());
-            pi.setMonthlyLaborValue(item.getMonthlyLaborValue());
-            pi.setReplaceHeadcount(item.getReplaceHeadcount());
+            pi.setAssetId(a.getId());
+            // 快照设备台账字段(单据留痕用,页面不再展示)
+            pi.setSerialNo(a.getSerialNo());
+            pi.setCategory(a.getCategory());
+            pi.setModel(a.getModel());
+            pi.setMarketPrice(a.getMarketPrice());
+            pi.setPurchasePrice(a.getPurchasePrice());
+            pi.setSupplierId(a.getSupplierId() != null ? a.getSupplierId() : req.getSupplierId());
+            pi.setMonthlyLaborValue(a.getMonthlyLaborValue());
+            pi.setReplaceHeadcount(a.getReplaceHeadcount());
             pi.setRemark(item.getRemark());
             purchaseItemMapper.insert(pi);
-            paymentService.onOrder(p, pi, item.getPaymentTerms() != null && !item.getPaymentTerms().isEmpty()
-                    ? item.getPaymentTerms() : orderTerms);
+            // 付款条件:明细级 > 设备台账上已设的 > 整单级
+            List<PaymentTermDtos.TermInput> terms = item.getPaymentTerms() != null && !item.getPaymentTerms().isEmpty()
+                    ? item.getPaymentTerms() : paymentService.termsAsInput(a.getId());
+            if (terms.isEmpty()) {
+                terms = orderTerms;
+            }
+            assetService.bindPurchase(a.getId(), p.getId(), p.getNo());
+            paymentService.onOrder(p, pi, terms, a.getId());
         }
 
-        log.info("采购下单: no={}, id={}, contract={}, items={}, total={}, 下单应付={}",
-                p.getNo(), p.getId(), c.getNo(), req.getItems().size(), total, outstanding(p.getId()));
+        log.info("采购下单: no={}, id={}, contract={}, 勾选设备{}台, total={}, 下单应付={}",
+                p.getNo(), p.getId(), c.getNo(), assets.size(), total, outstanding(p.getId()));
         return p.getId();
     }
 
@@ -202,15 +231,20 @@ public class PurchaseService {
         p.setReceiveDate(receiveDate);
         purchaseInMapper.updateById(p);
 
-        // 逐件生成设备(状态机 owner=AssetService),回填 asset_id;
-        // 付款条件回填设备并逐台生成 触发=入库 的应付(到期=入库日+N 天),各段合计=该设备集采价
+        // 明细已关联台账设备:入库只回填留痕;老单据(改造前手填的明细)仍按原逻辑逐件建档。
+        // 付款条件回填设备并逐台生成 触发=入库 的应付(到期=入库日+N 天),各段合计=该设备合同价
         for (PurchaseItem pi : items) {
-            Long assetId = assetService.createForPurchase(
-                    pi.getSerialNo(), pi.getCategory(), pi.getModel(),
-                    pi.getMarketPrice(), pi.getPurchasePrice(), pi.getSupplierId(),
-                    pi.getMonthlyLaborValue(), pi.getReplaceHeadcount(), id, "采购入库");
-            pi.setAssetId(assetId);
-            purchaseItemMapper.updateById(pi);
+            Long assetId = pi.getAssetId();
+            if (assetId == null) {
+                assetId = assetService.createForPurchase(
+                        pi.getSerialNo(), pi.getCategory(), pi.getModel(),
+                        pi.getMarketPrice(), pi.getPurchasePrice(), pi.getSupplierId(),
+                        pi.getMonthlyLaborValue(), pi.getReplaceHeadcount(), id, "采购入库");
+                pi.setAssetId(assetId);
+                purchaseItemMapper.updateById(pi);
+            } else {
+                assetService.markPurchaseReceived(assetId, id, p.getNo());
+            }
             paymentService.onReceive(p, pi, assetId);
         }
         BigDecimal total = p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO;
@@ -218,7 +252,7 @@ public class PurchaseService {
         // M3-01 钩子:采购入库 → 应付凭证(税务账·dr 固定资产 / cr 应付账款·借贷平衡·幂等)
         voucherService.postPayable(id, total, receiveDate,
                 "采购入库应付 " + p.getNo() + " " + total + "元");
-        log.info("采购入库: id={}, 生成设备{}件, 待付应付={}", id, items.size(), outstanding(id));
+        log.info("采购入库: id={}, 设备{}台, 待付应付={}", id, items.size(), outstanding(id));
     }
 
     // ============ 退货红冲(整单红冲·设备报废释放·应付红字) ============
@@ -231,10 +265,19 @@ public class PurchaseService {
         }
         String reason = req != null && req.getReason() != null ? req.getReason() : "采购退货红冲";
 
-        // 对应设备报废释放(在租设备由 AssetService 拒绝)
+        // 设备处理:合同清单生成的台账设备只解除采购关系(设备留在台账,可重新采购);
+        // 老单据里由采购入库建的设备仍按原口径报废释放(在租设备由 AssetService 拒绝)
         int scrapped = 0;
+        int released = 0;
         for (PurchaseItem pi : itemsOf(id)) {
-            if (pi.getAssetId() != null) {
+            if (pi.getAssetId() == null) {
+                continue;
+            }
+            Asset a = assetMapper.selectById(pi.getAssetId());
+            if (a != null && a.getBoqLineId() != null) {
+                assetService.releaseOnPurchaseReturn(pi.getAssetId(), id);
+                released++;
+            } else {
                 assetService.scrapOnPurchaseReturn(pi.getAssetId(), id);
                 scrapped++;
             }
@@ -297,10 +340,38 @@ public class PurchaseService {
             il.setPurchasePrice(seeCost ? pi.getPurchasePrice() : null);
             il.setSupplierName(supplierName(pi.getSupplierId()));
             il.setAssetId(pi.getAssetId());
-            if (pi.getAssetId() != null) {
-                Asset a = assetMapper.selectById(pi.getAssetId());
-                il.setAssetStatus(a != null ? a.getStatus() : null);
+            il.setRemark(pi.getRemark());
+            Asset a = pi.getAssetId() == null ? null : assetMapper.selectById(pi.getAssetId());
+            if (a != null) {
+                il.setAssetStatus(a.getStatus());
+                il.setAssetLabel(assetLabel(a));
+                if (a.getSupplierId() != null) {
+                    il.setSupplierName(supplierName(a.getSupplierId()));
+                }
+                il.setPaymentTerms(paymentService.describeTerms(a.getId()));
+                il.setExpectedAmount(seeCost ? a.getPurchasePrice() : null);
+            } else {
+                il.setAssetLabel(assetLabel(pi.getCategory(), pi.getModel(), pi.getSerialNo()));
+                il.setExpectedAmount(seeCost ? pi.getPurchasePrice() : null);
             }
+            // 本件已生成的应付与待付
+            BigDecimal itemPayable = BigDecimal.ZERO;
+            BigDecimal itemOutstanding = BigDecimal.ZERO;
+            for (Payable pay : payablesOf(id)) {
+                if (!pi.getId().equals(pay.getPurchaseItemId())
+                        && !(pi.getAssetId() != null && pi.getAssetId().equals(pay.getAssetId()))) {
+                    continue;
+                }
+                if ("红冲".equals(pay.getStatus())) {
+                    continue;
+                }
+                itemPayable = itemPayable.add(pay.getAmount());
+                if ("待付".equals(pay.getStatus())) {
+                    itemOutstanding = itemOutstanding.add(pay.getAmount());
+                }
+            }
+            il.setPayableAmount(seeCost ? itemPayable : null);
+            il.setPayableOutstanding(seeCost ? itemOutstanding : null);
             itemLines.add(il);
         }
         r.setItems(itemLines);
@@ -313,6 +384,13 @@ public class PurchaseService {
             pl.setId(pay.getId());
             pl.setAssetId(pay.getAssetId());
             pl.setSerialNo(serialByItem.get(pay.getPurchaseItemId()));
+            Asset pa = pay.getAssetId() == null ? null : assetMapper.selectById(pay.getAssetId());
+            if (pa != null) {
+                pl.setAssetLabel(assetLabel(pa));
+                pl.setSupplierName(supplierName(pa.getSupplierId() != null ? pa.getSupplierId() : p.getSupplierId()));
+            } else {
+                pl.setSupplierName(supplierName(p.getSupplierId()));
+            }
             pl.setStage(pay.getStage());
             pl.setDueDate(pay.getDueDate());
             pl.setAmount(seeCost ? pay.getAmount() : null);
@@ -383,6 +461,20 @@ public class PurchaseService {
         }
         Customer cust = customerMapper.selectById(c.getCustomerId());
         return cust != null ? cust.getName() : ("客户#" + c.getCustomerId());
+    }
+
+    /** 设备显示名:品类 · 型号(型号为空时退回序列号)。 */
+    static String assetLabel(Asset a) {
+        return assetLabel(a.getCategory(), a.getModel(), a.getSerialNo());
+    }
+
+    static String assetLabel(String category, String model, String serialNo) {
+        String head = category == null ? "" : category;
+        String tail = model != null && !model.trim().isEmpty() ? model.trim() : serialNo;
+        if (head.isEmpty()) {
+            return tail;
+        }
+        return tail == null || tail.isEmpty() ? head : head + " · " + tail;
     }
 
     private String supplierName(Long supplierId) {

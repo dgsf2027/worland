@@ -12,6 +12,9 @@ import java.util.List;
 
 /**
  * 采购下单请求(M1-12)。先签约后采购:{@code contractId} 必填且合同须存续。
+ *
+ * <p>明细直接勾选该合同下「设备 · 租赁台账」里的设备:供应商名称、付款条件、预计付款金额
+ * 都从设备台账带出(预计付款金额 = 设备合同价 × 各段比例),不再在采购单里手填这些字段。
  */
 @Data
 public class PurchaseOrderRequest {
@@ -42,29 +45,15 @@ public class PurchaseOrderRequest {
     @Valid
     private List<Item> items;
 
+    /** 一条明细 = 一台设备(从该合同下的设备租赁台账里勾选;不再手填序列号/品类/型号/价格) */
     @Data
     public static class Item {
-        @NotBlank(message = "序列号必填")
-        private String serialNo;
-
-        @NotBlank(message = "品类必填")
-        private String category;
-
-        private String model;
-
-        private BigDecimal marketPrice;
-
-        private BigDecimal purchasePrice;
-
-        private Long supplierId;
-
-        private BigDecimal monthlyLaborValue;
-
-        private BigDecimal replaceHeadcount;
+        @NotNull(message = "请选择设备(设备租赁台账)")
+        private Long assetId;
 
         private String remark;
 
-        /** 本件付款条件;空=沿用整单付款条件 */
+        /** 本件付款条件;空=沿用设备上已有的条件,再空=整单付款条件 */
         @Valid
         private List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> paymentTerms;
     }

@@ -20,19 +20,30 @@ export interface PurchaseListItem {
 
 export interface PurchaseItemLine {
   id: number
-  serialNo: string
-  category: string
-  model?: string
-  marketPrice?: number
-  purchasePrice?: number
-  supplierName?: string
+  /** 关联的设备(设备租赁台账) */
   assetId?: number
+  /** 设备显示名:品类 · 型号 */
+  assetLabel?: string
   assetStatus?: string
+  /** 供应商(取自设备台账) */
+  supplierName?: string
+  /** 付款条件摘要 */
+  paymentTerms?: string
+  /** 预计付款金额(= 设备合同价) */
+  expectedAmount?: number
+  /** 已生成应付 / 其中待付 */
+  payableAmount?: number
+  payableOutstanding?: number
+  remark?: string
 }
 
 export interface PayableLine {
   /** 逐台应付对应的设备(旧版整单应付为空) */
   assetId?: number
+  /** 设备显示名:品类 · 型号 */
+  assetLabel?: string
+  /** 供应商(取自设备台账) */
+  supplierName?: string
   serialNo?: string
   id: number
   stage: string

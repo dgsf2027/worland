@@ -423,6 +423,45 @@ public class AssetService {
         return a.getId();
     }
 
+    /**
+     * 采购下单勾选台账设备:把设备挂到采购单上(purchase_in_id),留痕。
+     * 设备本身由合同清单生成/手工建档,这里只建立采购关系,不改状态。
+     */
+    @Transactional
+    public void bindPurchase(Long assetId, Long purchaseInId, String purchaseNo) {
+        Asset a = requireAsset(assetId);
+        if (a.getPurchaseInId() != null && !a.getPurchaseInId().equals(purchaseInId)) {
+            throw new BizException(400, "设备已挂在其它采购单上,不能重复采购");
+        }
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getPurchaseInId, purchaseInId));
+        writeEvent(assetId, "采购下单", "purchase_in", purchaseInId, "采购单 " + purchaseNo + " 勾选本设备");
+    }
+
+    /** 采购入库:台账里已有的设备只回填入库留痕(状态仍由投放流程推进)。 */
+    @Transactional
+    public void markPurchaseReceived(Long assetId, Long purchaseInId, String purchaseNo) {
+        Asset a = requireAsset(assetId);
+        if (a.getPurchaseInId() == null) {
+            assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                    .eq(Asset::getId, assetId)
+                    .set(Asset::getPurchaseInId, purchaseInId));
+        }
+        writeEvent(assetId, "采购入库", "purchase_in", purchaseInId, "采购单 " + purchaseNo + " 入库");
+    }
+
+    /** 采购退货红冲:台账设备(合同清单生成的)只解除采购关系,不报废。 */
+    @Transactional
+    public void releaseOnPurchaseReturn(Long assetId, Long purchaseInId) {
+        Asset a = requireAsset(assetId);
+        assetMapper.update(null, new LambdaUpdateWrapper<Asset>()
+                .eq(Asset::getId, assetId)
+                .set(Asset::getPurchaseInId, null));
+        writeEvent(assetId, "采购退货", "purchase_in", purchaseInId, "采购单红冲,解除采购关系(设备保留在台账)");
+        log.info("采购退货释放设备: assetId={}, purchaseInId={}, serialNo={}", assetId, purchaseInId, a.getSerialNo());
+    }
+
     /** 采购退货红冲:设备报废释放(在租设备禁退货)。走事件流。 */
     @Transactional
     public void scrapOnPurchaseReturn(Long assetId, Long purchaseInId) {

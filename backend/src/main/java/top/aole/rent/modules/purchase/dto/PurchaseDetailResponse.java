@@ -49,16 +49,29 @@ public class PurchaseDetailResponse {
     @Data
     public static class ItemLine {
         private Long id;
+        /** 设备(设备租赁台账) */
+        private Long assetId;
+        /** 设备显示名:品类 · 型号 */
+        private String assetLabel;
+        private String assetStatus;
+        /** 供应商(取自设备台账) */
+        private String supplierName;
+        /** 付款条件摘要:首付30%(下单)/验收60%(入库)… */
+        private String paymentTerms;
+        /** 预计付款金额合计(= 设备合同价) */
+        private BigDecimal expectedAmount;
+        /** 已生成应付合计 */
+        private BigDecimal payableAmount;
+        /** 待付 */
+        private BigDecimal payableOutstanding;
+        private String remark;
+        // —— 以下为历史字段,页面已不再展示(老单据仍保留数据) ——
         private String serialNo;
         private String category;
         private String model;
         private BigDecimal marketPrice;
         /** 集采价(敏感·GP/LP 为 null) */
         private BigDecimal purchasePrice;
-        private String supplierName;
-        /** 【回填】入库生成的设备 id */
-        private Long assetId;
-        private String assetStatus;
     }
 
     @Data
@@ -66,6 +79,10 @@ public class PurchaseDetailResponse {
         private Long id;
         /** 逐台应付对应的设备(旧版整单应付为 null) */
         private Long assetId;
+        /** 设备显示名:品类 · 型号 */
+        private String assetLabel;
+        /** 供应商(取自设备台账) */
+        private String supplierName;
         private String serialNo;
         private String stage;
         private LocalDate dueDate;
