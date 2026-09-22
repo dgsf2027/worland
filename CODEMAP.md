@@ -192,6 +192,7 @@ modules/<module>/
 | `V111__supplier_inspection_sheet_v2.sql` | 供应商考察对齐 0916 版汇总表：公司业务范围/业绩/社保员工/产品图片说明/考察观后感 |
 | `V112__asset_contract_no_boq.sql` | （口径已由 V113 纠正）设备侧合同编号/税率与设备级清单、配件 BOM 补序号/型号/规格/单位 |
 | `V113__contract_boq.sql` | 合同清单（工程量清单计价表）挂到合同：合同税率/设备总价、yc_rent_contract_boq、设备 boq_line_id，并把设备级清单搬到合同 |
+| `V114__purge_soft_deleted_rent_schedule.sql` | 清理已逻辑删除的租金计划行（配合计划行改物理删，修编辑生效合同 500） |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

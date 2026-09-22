@@ -449,10 +449,11 @@ public class ContractService {
             for (RentSchedule s : all) {
                 if (s.getPeriodNo() <= maxBilled && "已生成单".equals(s.getPlanStatus())) {
                     kept++;
-                } else {
-                    rentScheduleMapper.deleteById(s.getId());
                 }
             }
+            // 计划行是派生数据,重排要用同样的期次号重新插入;必须物理删(逻辑删的行还占着
+            // uk_schedule_period(contract_id, period_no),再插入会报 Duplicate entry → 500)
+            rentScheduleMapper.hardDeleteReplaceable(id, maxBilled);
             for (int p = maxBilled + 1; p <= req.getTermMonths(); p++) {
                 RentSchedule rs = new RentSchedule();
                 rs.setContractId(id);
@@ -607,6 +608,8 @@ public class ContractService {
                 ? (c.getStartDate() != null ? c.getStartDate() : LocalDate.now())
                 : existing.get(existing.size() - 1).getDueDate();
 
+        // 之前被截断/重排的同期次行可能还以逻辑删除的形式占着唯一键,先物理清掉
+        rentScheduleMapper.hardDeleteFrom(id, maxPeriod + 1);
         for (int i = 1; i <= add; i++) {
             RentSchedule rs = new RentSchedule();
             rs.setContractId(id);
@@ -641,7 +644,8 @@ public class ContractService {
                 .eq(RentSchedule::getPlanStatus, "未到期"));
         int truncated = 0;
         for (RentSchedule s : future) {
-            rentScheduleMapper.deleteById(s.getId());
+            // 同上:物理删,别在表里留下占着唯一键的空行(以后续租/重排会用回这些期次号)
+            rentScheduleMapper.hardDeleteById(s.getId());
             truncated++;
         }
         int remaining = rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()

@@ -140,7 +140,9 @@ class ContractEditTest {
 
         service.edit(1L, req);
 
-        verify(scheduleMapper, times(9)).deleteById(anyLong()); // 第 4~12 期
+        // 计划行必须物理删(逻辑删的行会继续占着 uk_schedule_period,重排再插入就 Duplicate entry → 500)
+        verify(scheduleMapper).hardDeleteReplaceable(1L, 3); // 保留已出单的第 1~3 期,其余物理删
+        verify(scheduleMapper, never()).deleteById(anyLong());
         ArgumentCaptor<RentSchedule> inserted = ArgumentCaptor.forClass(RentSchedule.class);
         verify(scheduleMapper, times(3)).insert(inserted.capture()); // 重排第 4~6 期
         assertEquals(Integer.valueOf(4), inserted.getAllValues().get(0).getPeriodNo());
@@ -163,6 +165,7 @@ class ContractEditTest {
         BizException e = assertThrows(BizException.class, () -> service.edit(1L, request(2, "1000", "2000", 7L)));
         assertTrue(e.getMessage().contains("前 3 期已生成收租单"));
         verify(scheduleMapper, never()).deleteById(anyLong());
+        verify(scheduleMapper, never()).hardDeleteReplaceable(anyLong(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
