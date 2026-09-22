@@ -6,7 +6,7 @@ import { calcQuote, type QuoteRequest, type QuoteResponse } from '@/api/quote'
 const form = reactive<QuoteRequest>({
   marketPrice: 200000,
   category: '播种墙',
-  customerType: '云山快仓',
+  customerType: '其他',
   monthlyLaborValue: 11200,
   firstPayRatio: 0.3,
 })
@@ -45,7 +45,6 @@ async function onCalc() {
           </el-form-item>
           <el-form-item label="客户类型">
             <el-select v-model="form.customerType" style="width: 100%">
-              <el-option label="云山快仓(目标25%)" value="云山快仓" />
               <el-option label="其他客户(30-35%)" value="其他" />
             </el-select>
           </el-form-item>

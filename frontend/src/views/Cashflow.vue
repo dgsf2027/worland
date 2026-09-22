@@ -205,7 +205,6 @@ onMounted(() => { loadCashflow(); loadGap(); loadAttr(); loadDists() })
     <div class="section-title">🧭 回报四源(总税后 IRR = 集采差价 + 资金时间价值 + 价值定价 + 残值回收)
       <el-select v-model="custType" size="small" style="width:130px" @change="loadAttr">
         <el-option label="其他客户(30%)" value="其他" />
-        <el-option label="云山快仓(25%)" value="云山快仓" />
       </el-select>
     </div>
     <el-card shadow="never" v-if="attr">

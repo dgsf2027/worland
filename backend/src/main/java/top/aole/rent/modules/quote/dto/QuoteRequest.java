@@ -23,7 +23,8 @@ public class QuoteRequest {
     @NotBlank(message = "品类必填")
     private String category;
 
-    @ApiModelProperty(value = "客户类型:云山快仓 / 其他", example = "云山快仓", required = true)
+    @ApiModelProperty(value = "客户类型(取 rule_config[target_irr] 的 scope_key;V116 起只剩「其他」)",
+            example = "其他", required = true)
     @NotBlank(message = "客户类型必填")
     private String customerType;
 
