@@ -38,6 +38,15 @@ public class PurchaseListItem {
     /** 待付应付合计(负债口径) */
     private BigDecimal payableOutstanding;
 
+    /** 【收租对照】该合同已收租金净额 */
+    private BigDecimal rentCollected;
+
+    /** 【收租对照】该合同逾期未收 */
+    private BigDecimal rentOverdueAmount;
+
+    /** 【收租对照】该合同逾期单张数 */
+    private Integer rentOverdueCount;
+
     /** 敏感成本字段是否被打码(GP/LP) */
     private Boolean sensitiveMasked;
 }

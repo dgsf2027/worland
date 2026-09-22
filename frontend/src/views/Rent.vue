@@ -21,12 +21,20 @@ const stepType: Record<string, string> = { 延期: 'info', 罚息: 'warning', �
 // ---- 收租单列表 ----
 const filters = reactive<{ status: string; billKind: string; contractId?: number; customerId?: number }>({ status: '', billKind: '' })
 // 从客户详情「查看收租」跳转过来(?customerId=):只看该客户合同下的收租单
+// 从采购应付「查看收租单」跳转过来(?contractId=):只看该合同的收租单
 const route = useRoute()
 const router = useRouter()
 const customerName = ref('')
+const contractNo = ref('')
 function clearCustomer() {
   filters.customerId = undefined
   customerName.value = ''
+  router.replace({ path: '/rent' })
+  loadBills()
+}
+function clearContract() {
+  filters.contractId = undefined
+  contractNo.value = ''
   router.replace({ path: '/rent' })
   loadBills()
 }
@@ -156,6 +164,11 @@ onMounted(() => {
     filters.customerId = cid
     customerName.value = String(route.query.customerName || `客户#${cid}`)
   }
+  const ctId = Number(route.query.contractId)
+  if (ctId) {
+    filters.contractId = ctId
+    contractNo.value = String(route.query.contractNo || `合同#${ctId}`)
+  }
   loadBills(); loadCashCheck(); loadOverdue()
 })
 </script>
@@ -191,6 +204,7 @@ onMounted(() => {
           </el-select>
           <el-button size="small" @click="loadBills">查询</el-button>
           <el-tag v-if="filters.customerId" size="small" closable @close="clearCustomer">只看客户：{{ customerName }}</el-tag>
+          <el-tag v-if="filters.contractId" size="small" type="warning" closable @close="clearContract">只看合同：{{ contractNo }}</el-tag>
           <el-button size="small" type="primary" @click="doGen">⏱ 生成到期收租单(T-3)</el-button>
           <el-button size="small" type="success" :disabled="!selectableCount" @click="doBatchMatch">
             ✓ 批量核销{{ selectableCount ? `(${selectableCount}张 · ${money(selectedSum)})` : '' }}

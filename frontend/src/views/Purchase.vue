@@ -118,6 +118,33 @@ function money(v?: number) { return v == null ? '🔒' : '¥' + v.toLocaleString
 function goAsset(id?: number) {
   if (id) router.push({ path: '/asset', query: { id: String(id) } })
 }
+/** 跳收租 · 收租单，按合同过滤 */
+function goRent(contractId?: number, contractNo?: string) {
+  if (!contractId) return
+  router.push({ path: '/rent', query: { contractId: String(contractId), contractNo: contractNo || '' } })
+}
+
+// ---- 收租对照：本单货款 vs 这份合同收回来的租金 ----
+const cov = computed(() => detail.value?.rentCoverage || null)
+/** 覆盖率百分比（后端只给经营角色，GP/LP 为空） */
+const coveragePct = computed(() => {
+  const r = cov.value?.coverageRatio
+  return r == null ? null : Math.round(r * 1000) / 10
+})
+/** 进度条颜色：有逾期红、已覆盖绿、其余灰蓝 */
+const coverageColor = computed(() => {
+  if (cov.value?.overdueCount) return '#f56c6c'
+  return (coveragePct.value ?? 0) >= 100 ? '#67c23a' : '#409eff'
+})
+const coverageNote = computed(() => {
+  const c = cov.value
+  if (!c) return ''
+  if (detail.value?.status === '已红冲') return '本单已退货红冲，货款已整单冲销，覆盖率不适用'
+  if (c.overdueCount) return `该合同有 ${c.overdueCount} 张收租单逾期，共 ${money(c.overdueAmount)}，先催收再排付款`
+  if (coveragePct.value == null) return '租金覆盖率对当前角色不可见（含成本口径）'
+  if (coveragePct.value >= 100) return '已收租金已覆盖本单货款'
+  return `已收租金覆盖本单货款的 ${coveragePct.value}%，剩余靠后续租期回收`
+})
 
 onMounted(() => {
   loadList()
@@ -152,6 +179,13 @@ onMounted(() => {
           <el-table-column label="采购总额" width="120"><template #default="{ row }">{{ money(row.totalAmount) }}</template></el-table-column>
           <el-table-column prop="itemCount" label="件数" width="70" />
           <el-table-column label="待付应付" width="120"><template #default="{ row }">{{ money(row.payableOutstanding) }}</template></el-table-column>
+          <el-table-column label="租金回款（本合同）" width="170">
+            <template #default="{ row }">
+              <span v-if="row.rentCollected != null">已收 {{ money(row.rentCollected) }}</span>
+              <span v-else class="muted">—</span>
+              <div v-if="row.rentOverdueCount" class="over">逾期 {{ money(row.rentOverdueAmount) }}（{{ row.rentOverdueCount }} 张）</div>
+            </template>
+          </el-table-column>
           <el-table-column prop="orderDate" label="下单日" width="110" />
           <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
@@ -176,6 +210,53 @@ onMounted(() => {
             <el-descriptions-item label="下单日">{{ detail.orderDate }}</el-descriptions-item>
             <el-descriptions-item label="入库日">{{ detail.receiveDate || '—' }}</el-descriptions-item>
           </el-descriptions>
+
+          <template v-if="cov">
+            <h4>收租对照（本单货款 ←→ 这份合同收回来的租金）</h4>
+            <el-card shadow="never" class="cov">
+              <div class="cov-head">
+                <span>合同 <b>{{ cov.contractNo || '—' }}</b> · {{ cov.customerName || '—' }} · 在册收租单 {{ cov.billCount ?? 0 }} 张</span>
+                <el-button link type="primary" @click="goRent(cov.contractId, cov.contractNo)">查看收租单 →</el-button>
+              </div>
+              <el-row :gutter="12" class="cov-row">
+                <el-col :span="8">
+                  <div class="cov-box">
+                    <div class="cov-t">本单货款</div>
+                    <div class="cov-v">{{ money(cov.purchaseTotal) }}</div>
+                    <div class="muted">已付 {{ money(cov.paidAmount) }} · 待付 {{ money(cov.unpaidAmount) }}</div>
+                  </div>
+                </el-col>
+                <el-col :span="8">
+                  <div class="cov-box">
+                    <div class="cov-t">该合同租金</div>
+                    <div class="cov-v ok">已收 {{ money(cov.collectedAmount) }}</div>
+                    <div class="muted">
+                      待收 {{ money(cov.pendingAmount) }}
+                      <span v-if="cov.overdueCount" class="over">· 逾期 {{ money(cov.overdueAmount) }}（{{ cov.overdueCount }} 张）</span>
+                    </div>
+                  </div>
+                </el-col>
+                <el-col :span="8">
+                  <div class="cov-box">
+                    <div class="cov-t">下一期到期</div>
+                    <div class="cov-v">{{ cov.nextDueDate || '—' }}</div>
+                    <div class="muted">
+                      <span v-if="cov.nextDueAmount != null">应收 {{ money(cov.nextDueAmount) }}</span>
+                      <span v-else>该合同已无未收租金</span>
+                    </div>
+                  </div>
+                </el-col>
+              </el-row>
+              <div v-if="coveragePct != null" class="cov-bar">
+                <span class="cov-t">租金覆盖率</span>
+                <el-progress :percentage="Math.min(coveragePct, 100)" :color="coverageColor" :stroke-width="14"
+                  :format="() => coveragePct + '%'" style="flex:1" />
+              </div>
+              <el-alert v-if="cov.openCaseCount" type="error" :closable="false" show-icon style="margin-top:8px"
+                :title="`该合同有 ${cov.openCaseCount} 个逾期案开启中，当前处置步骤：${cov.openCaseStep}`" />
+              <div class="muted" style="margin-top:6px">{{ coverageNote }}</div>
+            </el-card>
+          </template>
 
           <h4>明细（逐件·入库生成设备）</h4>
           <el-table :data="detail.items" size="small" border>
@@ -266,4 +347,13 @@ h4 { margin: 16px 0 8px; }
 .lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
 .lnk:hover { text-decoration: underline; }
 .muted { color: #909399; font-size: 12px; }
+.over { color: #f56c6c; font-size: 12px; }
+.cov { background: #fafcff; }
+.cov-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.cov-row { margin-bottom: 4px; }
+.cov-box { padding: 8px 10px; background: #fff; border: 1px solid #ebeef5; border-radius: 4px; }
+.cov-t { color: #909399; font-size: 12px; }
+.cov-v { font-size: 18px; font-weight: 600; margin: 2px 0; }
+.cov-v.ok { color: #67c23a; }
+.cov-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 </style>

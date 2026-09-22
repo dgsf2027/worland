@@ -15,6 +15,8 @@ import top.aole.rent.modules.asset.mapper.AssetMapper;
 import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.asset.service.AssetPaymentService;
 import top.aole.rent.modules.asset.service.AssetService;
+import top.aole.rent.modules.billing.dto.RentCoverageDto;
+import top.aole.rent.modules.billing.service.RentCoverageService;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.customer.domain.Customer;
@@ -39,6 +41,8 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 采购服务(M1-12/13)。下单(先签约后采购校验)→入库(逐件生成 asset)→应付计划;退货红冲(设备报废释放+应付红字)。
@@ -52,6 +56,8 @@ import java.util.List;
  * <p>应付按设备逐台生成({@link AssetPaymentService}):每台设备的付款条件自定义多段(下单/入库触发 + 到期天数),
  * 各段合计=该设备集采价;未指定条件时默认 首付(下单)/验收(入库)/尾款(入库+账期),比例走 rule_config[payable_stage_ratio]。
  * 敏感成本(集采价/应付金额)对 GP/LP 打码。
+ * <p>收租对照({@link RentCoverageService}):采购与收租都挂在同一份合同上,按 {@code contract_id} 反查
+ * 「这笔货款靠哪些租金还」—— 已收/待收/逾期/下一期到期/开启中的逾期案,不新建绑定关系表。
  */
 @Slf4j
 @Service
@@ -70,6 +76,7 @@ public class PurchaseService {
     private final VoucherService voucherService;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    private final RentCoverageService rentCoverageService;
 
     // ============ 列表 ============
 
@@ -81,6 +88,10 @@ public class PurchaseService {
                 .and(keyword != null && !keyword.trim().isEmpty(), w -> w.like(PurchaseIn::getNo, keyword.trim()))
                 .orderByDesc(PurchaseIn::getId);
         List<PurchaseIn> all = purchaseInMapper.selectList(qw);
+        // 收租对照一次性批量查完(两条 in 查询),避免逐单反查收租单造成 N+1
+        Map<Long, RentCoverageDto> coverage = rentCoverageService.byContract(all.stream()
+                .map(PurchaseIn::getContractId).filter(java.util.Objects::nonNull)
+                .distinct().collect(Collectors.toList()));
 
         List<PurchaseListItem> items = new ArrayList<>();
         for (PurchaseIn p : all) {
@@ -98,6 +109,12 @@ public class PurchaseService {
             it.setOrderDate(p.getOrderDate());
             it.setReceiveDate(p.getReceiveDate());
             it.setPayableOutstanding(seeCost ? outstanding(p.getId()) : null);
+            RentCoverageDto rc = coverage.get(p.getContractId());
+            if (rc != null) {
+                it.setRentCollected(rc.getCollectedAmount());
+                it.setRentOverdueAmount(rc.getOverdueAmount());
+                it.setRentOverdueCount(rc.getOverdueCount());
+            }
             it.setSensitiveMasked(!seeCost);
             items.add(it);
         }
@@ -400,7 +417,49 @@ public class PurchaseService {
             payLines.add(pl);
         }
         r.setPayables(payLines);
+        r.setRentCoverage(buildCoverage(p, seeCost));
         return r;
+    }
+
+    /**
+     * 收租对照:左边本单货款(总额/已付/待付),右边同一份合同的租金(已收/待收/逾期/下一期/逾期案)。
+     * 覆盖率=已收租金÷货款总额,和货款一样属成本口径,对 GP/LP 打码(否则能由覆盖率反推出货款)。
+     */
+    private PurchaseDetailResponse.RentCoverage buildCoverage(PurchaseIn p, boolean seeCost) {
+        RentCoverageDto rc = rentCoverageService.of(p.getContractId());
+        if (rc == null) {
+            return null;
+        }
+        PurchaseDetailResponse.RentCoverage c = new PurchaseDetailResponse.RentCoverage();
+        c.setContractId(p.getContractId());
+        c.setContractNo(contractNo(p.getContractId()));
+        c.setCustomerName(customerNameOfContract(p.getContractId()));
+        c.setCollectedAmount(rc.getCollectedAmount());
+        c.setPendingAmount(rc.getPendingAmount());
+        c.setOverdueAmount(rc.getOverdueAmount());
+        c.setOverdueCount(rc.getOverdueCount());
+        c.setBillCount(rc.getBillCount());
+        c.setNextDueDate(rc.getNextDueDate());
+        c.setNextDueAmount(rc.getNextDueAmount());
+        c.setOpenCaseCount(rc.getOpenCaseCount());
+        c.setOpenCaseStep(rc.getOpenCaseStep());
+        if (!seeCost) {
+            return c;
+        }
+        BigDecimal total = p.getTotalAmount() != null ? p.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal paid = payablesOf(p.getId()).stream()
+                .filter(pay -> "已付".equals(pay.getStatus()))
+                .map(Payable::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        c.setPurchaseTotal(total.setScale(2, RoundingMode.HALF_UP));
+        c.setPaidAmount(paid);
+        c.setUnpaidAmount(outstanding(p.getId()));
+        // 已红冲的单子货款已整单冲销,再算覆盖率没有意义(会得出 575% 这种数)
+        if (total.signum() != 0 && !"已红冲".equals(p.getStatus())) {
+            c.setCoverageRatio(rc.getCollectedAmount().divide(total, 4, RoundingMode.HALF_UP));
+        }
+        return c;
     }
 
     // ============ 工具 ============

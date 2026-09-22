@@ -15,7 +15,35 @@ export interface PurchaseListItem {
   orderDate?: string
   receiveDate?: string
   payableOutstanding?: number
+  /** 收租对照：该合同已收租金净额 */
+  rentCollected?: number
+  /** 收租对照：该合同逾期未收 */
+  rentOverdueAmount?: number
+  rentOverdueCount?: number
   sensitiveMasked?: boolean
+}
+
+/** 收租对照：本单货款靠这份合同的哪些租金还（按 contractId 反查收租单/逾期案） */
+export interface RentCoverage {
+  contractId?: number
+  contractNo?: string
+  customerName?: string
+  /** 本单货款（敏感·GP/LP 为空） */
+  purchaseTotal?: number
+  paidAmount?: number
+  unpaidAmount?: number
+  /** 该合同租金 */
+  collectedAmount?: number
+  pendingAmount?: number
+  overdueAmount?: number
+  overdueCount?: number
+  billCount?: number
+  nextDueDate?: string
+  nextDueAmount?: number
+  openCaseCount?: number
+  openCaseStep?: string
+  /** 已收租金 ÷ 本单货款（敏感） */
+  coverageRatio?: number
 }
 
 export interface PurchaseItemLine {
@@ -69,6 +97,7 @@ export interface PurchaseDetail {
   remark?: string
   sensitiveMasked?: boolean
   payableOutstanding?: number
+  rentCoverage?: RentCoverage
   items: PurchaseItemLine[]
   payables: PayableLine[]
 }

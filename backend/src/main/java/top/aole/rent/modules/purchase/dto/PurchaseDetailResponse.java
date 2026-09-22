@@ -42,9 +42,46 @@ public class PurchaseDetailResponse {
     /** 待付应付合计(负债口径) */
     private BigDecimal payableOutstanding;
 
+    /** 收租对照:本单货款靠这份合同的哪些租金还(按 contract_id 反查收租单/逾期案) */
+    private RentCoverage rentCoverage;
+
     private List<ItemLine> items;
 
     private List<PayableLine> payables;
+
+    /**
+     * 收租对照卡片(M1-12 × M2)。左边是本单要付给供应商的货款,右边是同一份合同收回来的租金。
+     * 成本口径字段(货款/覆盖率)对 GP/LP 打码;租金金额沿用收租模块口径,对所有角色可见。
+     */
+    @Data
+    public static class RentCoverage {
+        private Long contractId;
+        private String contractNo;
+        private String customerName;
+        /** 本单货款总额(敏感) */
+        private BigDecimal purchaseTotal;
+        /** 本单已付货款(敏感) */
+        private BigDecimal paidAmount;
+        /** 本单待付货款(敏感) */
+        private BigDecimal unpaidAmount;
+        /** 该合同已收租金净额 */
+        private BigDecimal collectedAmount;
+        /** 该合同待收租金 */
+        private BigDecimal pendingAmount;
+        /** 该合同逾期未收 */
+        private BigDecimal overdueAmount;
+        private Integer overdueCount;
+        /** 在册收租单张数(不含红冲) */
+        private Integer billCount;
+        private LocalDate nextDueDate;
+        private BigDecimal nextDueAmount;
+        /** 开启中的逾期案件数 */
+        private Integer openCaseCount;
+        /** 开启中最紧迫的一步:延期/罚息/锁机/收回 */
+        private String openCaseStep;
+        /** 租金覆盖率 = 已收租金 ÷ 本单货款总额(敏感·货款为 0 时为 null) */
+        private BigDecimal coverageRatio;
+    }
 
     @Data
     public static class ItemLine {

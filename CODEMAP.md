@@ -77,8 +77,8 @@ modules/<module>/
 | `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
 | `contract` | Contract / ContractAsset / ContractBoq（合同清单） / ContractChange / RentSchedule / DepositLedger | `/rent/contracts`（含 `/{id}/boq` 清单读写、导入导出、按清单生成设备） | — |
-| `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase` | — |
-| `billing` | RentBill / OverdueCase / RepossessOrder / AccountingPeriod | `/rent/bills`、`/rent/overdue` | 收租单生成 01:00；逾期扫描 02:00 |
+| `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase`（详情含「收租对照」：按 contract_id 反查收租单/逾期案） | — |
+| `billing` | RentBill / OverdueCase / RepossessOrder / AccountingPeriod（+ `RentCoverageService` 按合同聚合收租对照，供采购应付反查） | `/rent/bills`、`/rent/overdue` | 收租单生成 01:00；逾期扫描 02:00 |
 | `finance` | Voucher / VoucherLine / LedgerBook | `/rent/vouchers`、`/rent/depreciation/run`、`/rent/tax/threshold` | 折旧计提 每月 1 日 03:00 |
 | `distribution` | Distribution / Investor | `/rent/distribution`、`/rent/investors` | 结账分配 每月 5 日 04:00 |
 | `analytics` | 无实体（只读聚合） | `/rent/cashflow`、`/rent/analytics/return-attribution` | 兑付缺口扫描 05:00 |
@@ -193,6 +193,7 @@ modules/<module>/
 | `V112__asset_contract_no_boq.sql` | （口径已由 V113 纠正）设备侧合同编号/税率与设备级清单、配件 BOM 补序号/型号/规格/单位 |
 | `V113__contract_boq.sql` | 合同清单（工程量清单计价表）挂到合同：合同税率/设备总价、yc_rent_contract_boq、设备 boq_line_id，并把设备级清单搬到合同 |
 | `V114__purge_soft_deleted_rent_schedule.sql` | 清理已逻辑删除的租金计划行（配合计划行改物理删，修编辑生效合同 500） |
+| `V115__purge_unlinked_purchase.sql` | 清理未关联设备台账的历史采购单与应付（仅「已下单 + 明细无 asset_id（或合同已删） + 无已付应付」，单号加 `#DEL{id}`） |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 
