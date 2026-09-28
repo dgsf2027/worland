@@ -21,7 +21,22 @@ export interface AssetListItem {
   currentHolderName?: string
   intendedCustomerId?: number
   intendedCustomerName?: string
+  /** 处置状态：最近一次转让/处置的「类型 · 状态」，无记录为空 */
+  disposalStatus?: string
   sensitiveMasked?: boolean
+}
+
+/** 设备的一条转让/处置记录（台账详情反向展示） */
+export interface DisposalLine {
+  id: number
+  orderId?: number
+  orderNo?: string
+  /** 类型：转让/收回/二手/报废 */
+  type?: string
+  transferPrice?: number
+  gain?: number
+  status?: string
+  bizTime?: string
 }
 
 export interface BomNode {
@@ -159,6 +174,8 @@ export interface AssetDetail {
     manualFields: string[]
   }
   timeline: { eventType: string; bizTime: string; refDocType?: string; refDocId?: number; operatorName?: string; remark?: string }[]
+  /** 转让/处置记录（按业务时间倒序；无记录时后端返回 undefined） */
+  disposals?: DisposalLine[]
 }
 
 export function fetchAssets(params: Record<string, any>): Promise<PageResult<AssetListItem>> {

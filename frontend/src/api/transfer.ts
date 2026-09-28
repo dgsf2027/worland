@@ -6,6 +6,8 @@ export interface TransferItem {
   no: string
   contractId?: number
   contractNo?: string
+  /** 合同客户（到期转让必有；二手/报废按台处置时为空） */
+  customerName?: string
   type: string
   assetCount?: number
   totalPrice?: number
@@ -22,8 +24,13 @@ export interface TransferItem {
 export interface TransferLineItem {
   id: number
   assetId: number
+  /** 设备显示名：品类 · 型号（设备已删则为「#id」） */
+  assetLabel?: string
   serialNo?: string
   category?: string
+  model?: string
+  /** 设备当前台账状态（设备已删为空） */
+  assetStatus?: string
   bookValue?: number
   marketPrice?: number
   transferPrice?: number

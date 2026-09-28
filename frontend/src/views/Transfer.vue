@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchTransfers, fetchTransferDetail, createExpiryTransfer, approveTransfer,
   disposeAsset, redeployAsset,
   type TransferItem, type TransferDetail, type TransferResult,
 } from '@/api/transfer'
+import { fetchAssets, type AssetListItem } from '@/api/asset'
+import { fetchContracts, type ContractListItem } from '@/api/contract'
+
+const route = useRoute()
+const router = useRouter()
+/** 跳设备 · 租赁台账 */
+function goAsset(id?: number) {
+  if (id) router.push({ path: '/asset', query: { id: String(id) } })
+}
 
 const activeTab = ref('list')
 const list = ref<TransferItem[]>([])
@@ -42,13 +52,35 @@ async function openDetail(id: number) {
   activeTab.value = 'detail'
 }
 
-// ---- 到期转让 ----
+// ---- 到期转让:从合同列表里选,选中后列出该合同挂载的设备 ----
 const expiryForm = reactive<{ contractId?: number; approvalReason: string; remark: string }>({
   approvalReason: '', remark: '',
 })
+const contracts = ref<ContractListItem[]>([])
+const contractsLoading = ref(false)
+const contractAssets = ref<AssetListItem[]>([])
+const contractAssetsLoading = ref(false)
+async function loadContracts() {
+  contractsLoading.value = true
+  try {
+    contracts.value = (await fetchContracts({ page: 1, size: 200 })).records.filter((c) => c.status !== '已作废')
+  } finally {
+    contractsLoading.value = false
+  }
+}
+async function loadContractAssets(contractId?: number) {
+  contractAssets.value = []
+  if (!contractId) return
+  contractAssetsLoading.value = true
+  try {
+    contractAssets.value = (await fetchAssets({ contractId, page: 1, size: 500 })).records
+  } finally {
+    contractAssetsLoading.value = false
+  }
+}
 const lastResult = ref<TransferResult | null>(null)
 async function submitExpiry() {
-  if (!expiryForm.contractId) { ElMessage.warning('请填写合同ID'); return }
+  if (!expiryForm.contractId) { ElMessage.warning('请先选择合同'); return }
   const body: Record<string, any> = { contractId: expiryForm.contractId }
   if (expiryForm.approvalReason) body.approvalReason = expiryForm.approvalReason
   if (expiryForm.remark) body.remark = expiryForm.remark
@@ -73,12 +105,27 @@ async function onApprove(row: TransferItem) {
   } catch { /* 取消 */ }
 }
 
-// ---- 复投飞轮 ----
+// ---- 复投飞轮:从台账里选设备,选中后显示账面价(判断是否会触发名义价守卫) ----
 const disposeForm = reactive<{ assetId?: number; action: string; transferPrice?: number; approvalReason: string }>({
   action: '二手', approvalReason: '',
 })
+const disposeAssets = ref<AssetListItem[]>([])
+const disposeAssetsLoading = ref(false)
+async function loadDisposeAssets() {
+  disposeAssetsLoading.value = true
+  try {
+    // 已转让/已报废是终态,不再出现在可处置列表里
+    disposeAssets.value = (await fetchAssets({ page: 1, size: 500 })).records
+      .filter((a) => a.status !== '已转让' && a.status !== '已报废')
+  } finally {
+    disposeAssetsLoading.value = false
+  }
+}
+const pickedDisposeAsset = computed(() => disposeAssets.value.find((a) => a.id === disposeForm.assetId) || null)
+const assetOptionLabel = (a: AssetListItem) =>
+  `${a.category}${a.model ? ' · ' + a.model : ''} · ${a.serialNo}（${a.status}）`
 async function submitDispose() {
-  if (!disposeForm.assetId) { ElMessage.warning('请填写设备ID'); return }
+  if (!disposeForm.assetId) { ElMessage.warning('请先选择设备'); return }
   const body: Record<string, any> = { assetId: disposeForm.assetId, action: disposeForm.action }
   if (disposeForm.transferPrice != null) body.transferPrice = disposeForm.transferPrice
   if (disposeForm.approvalReason) body.approvalReason = disposeForm.approvalReason
@@ -89,7 +136,14 @@ async function submitDispose() {
   loadList()
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  loadContracts()
+  loadDisposeAssets()
+  // 从设备详情的「转让/处置记录」跳过来(?id=):直接打开该处置单详情
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
+})
 </script>
 
 <template>
@@ -117,7 +171,12 @@ onMounted(loadList)
           <el-table-column label="类型" width="80">
             <template #default="{ row }"><el-tag :type="(typeTag[row.type] as any) || 'info'" size="small">{{ row.type }}</el-tag></template>
           </el-table-column>
-          <el-table-column prop="contractNo" label="合同" width="140" />
+          <el-table-column label="合同 / 客户" min-width="180">
+            <template #default="{ row }">
+              <span v-if="row.contractNo">{{ row.contractNo }}</span><span v-else class="muted">按台处置</span>
+              <div v-if="row.customerName" class="mini2">{{ row.customerName }}</div>
+            </template>
+          </el-table-column>
           <el-table-column prop="assetCount" label="台数" width="60" align="right" />
           <el-table-column label="转让价" width="120" align="right"><template #default="{ row }">{{ money(row.totalPrice) }}</template></el-table-column>
           <el-table-column label="处置损益" width="120" align="right">
@@ -143,11 +202,33 @@ onMounted(loadList)
         <div class="panel">
           <h4>到期转让：挂合同 N 台 → 逐台残值凭证 + 资产出账(→已转让) → 合同关闭</h4>
           <div class="frm">
-            <el-input-number v-model="expiryForm.contractId" :min="1" placeholder="合同ID" controls-position="right" style="width: 160px" />
+            <el-select v-model="expiryForm.contractId" filterable clearable style="width: 340px"
+              :loading="contractsLoading" placeholder="选合同（到期转让挂合同）" @change="loadContractAssets">
+              <el-option v-for="c in contracts" :key="c.id"
+                :label="`${c.no} · ${c.customerName || ''} · ${c.status}`" :value="c.id" />
+            </el-select>
             <el-input v-model="expiryForm.approvalReason" placeholder="低价转让理由(触发名义价守卫时必填)" style="width: 320px" />
             <el-input v-model="expiryForm.remark" placeholder="备注" style="width: 200px" />
             <el-button type="primary" @click="submitExpiry">提交到期转让</el-button>
           </div>
+          <template v-if="expiryForm.contractId">
+            <div class="mini">该合同下的设备（提交后逐台建行）：</div>
+            <el-table :data="contractAssets" v-loading="contractAssetsLoading" size="small" border max-height="240" style="margin-top:6px">
+              <el-table-column label="设备" min-width="200">
+                <template #default="{ row }">
+                  <a class="lnk" @click="goAsset(row.id)">{{ row.category }}{{ row.model ? ' · ' + row.model : '' }}</a>
+                  <div class="mini2">{{ row.serialNo }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="台账状态" width="110" />
+              <el-table-column label="账面价" width="120" align="right"><template #default="{ row }">{{ money(row.bookValue) }}</template></el-table-column>
+              <el-table-column label="残值" width="110" align="right"><template #default="{ row }">{{ money(row.residualValue) }}</template></el-table-column>
+              <el-table-column label="处置状态" width="140">
+                <template #default="{ row }">{{ row.disposalStatus || '—' }}</template>
+              </el-table-column>
+            </el-table>
+            <div v-if="!contractAssets.length && !contractAssetsLoading" class="mini">该合同下还没有挂载设备。</div>
+          </template>
           <div class="mini">默认取合同全部在租设备，转让价按 endTransferPrice 均摊；触发名义价守卫(&lt;账面/市场×下限)则转「待审批」。</div>
         </div>
         <div v-if="lastResult" class="panel result">
@@ -163,13 +244,26 @@ onMounted(loadList)
         <div class="panel">
           <h4>收回待处置 → 再投放(回在租池) / 二手 / 报废</h4>
           <div class="frm">
-            <el-input-number v-model="disposeForm.assetId" :min="1" placeholder="设备ID" controls-position="right" style="width: 140px" />
+            <el-select v-model="disposeForm.assetId" filterable clearable style="width: 340px"
+              :loading="disposeAssetsLoading" placeholder="选设备（台账里可处置的）">
+              <el-option v-for="a in disposeAssets" :key="a.id" :label="assetOptionLabel(a)" :value="a.id" />
+            </el-select>
             <el-select v-model="disposeForm.action" style="width: 120px">
               <el-option v-for="a in ['再投放','二手','报废']" :key="a" :label="a" :value="a" />
             </el-select>
             <el-input-number v-if="disposeForm.action === '二手'" v-model="disposeForm.transferPrice" :min="0" placeholder="二手价" controls-position="right" style="width: 140px" />
             <el-input v-if="disposeForm.action === '二手'" v-model="disposeForm.approvalReason" placeholder="低价理由(触发守卫时必填)" style="width: 260px" />
             <el-button type="primary" @click="submitDispose">执行处置</el-button>
+          </div>
+          <div v-if="pickedDisposeAsset" class="picked">
+            <a class="lnk" @click="goAsset(pickedDisposeAsset.id)">{{ pickedDisposeAsset.serialNo }}</a>
+            · 台账状态 <b>{{ pickedDisposeAsset.status }}</b>
+            · 账面价 <b>{{ money(pickedDisposeAsset.bookValue) }}</b>
+            · 残值 <b>{{ money(pickedDisposeAsset.residualValue) }}</b>
+            <span v-if="pickedDisposeAsset.disposalStatus" class="mini2">已有处置记录：{{ pickedDisposeAsset.disposalStatus }}</span>
+            <div v-if="disposeForm.action === '二手' && disposeForm.transferPrice != null
+              && pickedDisposeAsset.bookValue != null && disposeForm.transferPrice < pickedDisposeAsset.bookValue"
+              class="guard-hint">⚠️ 二手价低于账面价，提交后会触发名义价守卫转「待审批」，低价理由必填</div>
           </div>
           <div class="mini">再投放需老板；二手/报废需财务+老板。二手低价触发名义价守卫→待审批。</div>
         </div>
@@ -191,12 +285,19 @@ onMounted(loadList)
             <el-tag :type="(statusTag[detail.order.status] as any) || 'info'" size="small">{{ detail.order.status }}</el-tag>
             <el-tag v-if="detail.order.needApproval" type="danger" size="small">名义价守卫</el-tag>
             <span v-if="detail.order.contractNo" class="muted">合同 {{ detail.order.contractNo }}</span>
+            <span v-if="detail.order.customerName" class="muted">· {{ detail.order.customerName }}</span>
           </h3>
           <div v-if="detail.order.approvalReason" class="kv"><span>审批理由</span><b>{{ detail.order.approvalReason }}</b></div>
           <div v-if="detail.order.approvedByName" class="kv"><span>审批人</span><b>{{ detail.order.approvedByName }} · {{ detail.order.approvedAt }}</b></div>
           <el-table :data="detail.lines" border size="small" style="margin-top:10px">
-            <el-table-column prop="serialNo" label="序列号" min-width="120" />
-            <el-table-column prop="category" label="品类" width="90" />
+            <el-table-column label="设备（租赁台账）" min-width="190">
+              <template #default="{ row }">
+                <a class="lnk" @click="goAsset(row.assetId)">{{ row.assetLabel || row.serialNo || ('#' + row.assetId) }}</a>
+                <div class="mini2">
+                  {{ row.serialNo || '设备已删除' }}<span v-if="row.assetStatus"> · {{ row.assetStatus }}</span>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="市场价" width="110" align="right"><template #default="{ row }">{{ money(row.marketPrice) }}</template></el-table-column>
             <el-table-column label="账面快照" width="110" align="right"><template #default="{ row }">{{ money(row.bookValue) }}</template></el-table-column>
             <el-table-column label="转让价" width="110" align="right"><template #default="{ row }">{{ money(row.transferPrice) }}</template></el-table-column>
@@ -234,4 +335,7 @@ onMounted(loadList)
 .result .hits, .result .impact { margin: 6px 0; padding-left: 18px; font-size: 13px; }
 .result .hits li { color: #d9534f; }
 .result .impact li { color: #555; }
+.mini2 { color: #909399; font-size: 12px; }
+.picked { background: #f6f9ff; border: 1px solid #e3ecff; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.guard-hint { color: #d9534f; font-size: 12px; width: 100%; }
 </style>

@@ -581,6 +581,14 @@ async function submitPay() {
     paySaving.value = false
   }
 }
+/** 跳转让·处置单 */
+function goTransfer(orderId?: number) {
+  if (orderId) router.push({ path: '/transfer', query: { id: String(orderId) } })
+}
+const disposalTypeTag: Record<string, string> = {
+  转让: 'success', 二手: 'primary', 报废: 'danger', 收回: 'warning', 再投放: 'info',
+}
+
 function goPurchase() {
   if (detail.value?.paymentPlan.purchaseInId) router.push({ path: '/purchase', query: { id: String(detail.value.paymentPlan.purchaseInId) } })
 }
@@ -826,6 +834,11 @@ onMounted(async () => {
           <span v-if="!row.currentHolderCustomerId && !row.intendedCustomerId">—</span>
         </template>
       </el-table-column>
+      <el-table-column label="处置状态" width="130">
+        <template #default="{ row }">
+          <span v-if="row.disposalStatus">{{ row.disposalStatus }}</span><span v-else>—</span>
+        </template>
+      </el-table-column>
     </el-table>
 
     <!-- 详情抽屉 -->
@@ -1030,6 +1043,31 @@ onMounted(async () => {
         </el-table>
         <el-empty v-else :description="detail.sensitiveMasked ? '当前角色不可见' : '尚未设置付款条件，点「设置付款条件」'" :image-size="50" />
         <div v-if="detail.paymentPlan.note" class="upload-tip">{{ detail.paymentPlan.note }}</div>
+
+        <!-- 转让/处置记录(转让模块反向关联) -->
+        <div class="block-title">转让 / 处置记录</div>
+        <el-table v-if="detail.disposals && detail.disposals.length" :data="detail.disposals" size="small" border>
+          <el-table-column label="单号" min-width="150">
+            <template #default="{ row }">
+              <a v-if="row.orderId" class="lnk" @click="goTransfer(row.orderId)">{{ row.orderNo || ('#' + row.orderId) }}</a>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="disposalTypeTag[row.type] || 'info'">{{ row.type || '—' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="处置价" width="120" align="right"><template #default="{ row }">{{ money(row.transferPrice) }}</template></el-table-column>
+          <el-table-column label="处置损益" width="120" align="right">
+            <template #default="{ row }">
+              <span :class="(row.gain ?? 0) >= 0 ? 'gain-up' : 'gain-down'">{{ money(row.gain) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100"><template #default="{ row }">{{ row.status || '—' }}</template></el-table-column>
+          <el-table-column prop="bizTime" label="业务时间" min-width="160"><template #default="{ row }">{{ row.bizTime || '—' }}</template></el-table-column>
+        </el-table>
+        <el-empty v-else description="本设备还没有转让/处置记录" :image-size="50" />
 
         <!-- 状态机时间轴 -->
         <div class="block-title">状态机时间轴</div>
@@ -1420,4 +1458,6 @@ onMounted(async () => {
 .lnk { color: #2e6da4; cursor: pointer; font-weight: 600; }
 .lnk:hover { text-decoration: underline; }
 .fault-tip { margin-left: 110px; }
+.gain-up { color: #2f9e44; }
+.gain-down { color: #d9534f; }
 </style>
