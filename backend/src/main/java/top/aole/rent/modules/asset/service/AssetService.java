@@ -90,6 +90,7 @@ public class AssetService {
     private final RentScheduleMapper rentScheduleMapper;
     private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
+    private final top.aole.rent.modules.transfer.service.TransferQueryService transferQueryService;
     private final AssetPaymentService paymentService;
 
     /** 设备状态集合。状态可直接改(不限先后顺序),改为「在租」须带承租客户与合同。 */
@@ -129,6 +130,10 @@ public class AssetService {
                 .orderByAsc(Asset::getId);
         List<Asset> all = assetMapper.selectList(qw);
 
+        // 处置状态批量查(一次查完,避免逐台反查转让单)
+        java.util.Map<Long, String> disposalStatus = transferQueryService.disposalStatusByAsset(
+                all.stream().map(Asset::getId).collect(Collectors.toList()));
+
         List<AssetListItem> items = new ArrayList<>();
         for (Asset a : all) {
             AssetListItem it = new AssetListItem();
@@ -149,6 +154,7 @@ public class AssetService {
             it.setCurrentHolderName(customerName(a.getCurrentHolderCustomerId()));
             it.setIntendedCustomerId(a.getIntendedCustomerId());
             it.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
+            it.setDisposalStatus(disposalStatus.get(a.getId()));
             it.setSensitiveMasked(!seeCost);
             items.add(it);
         }
@@ -201,6 +207,8 @@ public class AssetService {
         r.setSingleUnitReturn(singleUnitReturn(a, seeCost));
         r.setPaymentPlan(paymentService.plan(a, seeCost));
         r.setTimeline(timeline(id));
+        r.setDisposals(transferQueryService.disposalsByAsset(
+                java.util.Collections.singletonList(id)).get(id));
         return r;
     }
 

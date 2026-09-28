@@ -23,6 +23,7 @@ import top.aole.rent.modules.transfer.domain.TransferOrderLine;
 import top.aole.rent.modules.transfer.dto.TransferDtos;
 import top.aole.rent.modules.transfer.mapper.TransferOrderLineMapper;
 import top.aole.rent.modules.transfer.mapper.TransferOrderMapper;
+import top.aole.rent.modules.transfer.service.TransferQueryService;
 import top.aole.rent.modules.transfer.service.TransferService;
 
 import java.math.BigDecimal;
@@ -47,6 +48,7 @@ class TransferLinkTest {
     private CustomerMapper customerMapper;
     private AssetMapper assetMapper;
     private TransferService service;
+    private TransferQueryService query;
 
     @BeforeAll
     static void initLambdaCache() {
@@ -66,6 +68,7 @@ class TransferLinkTest {
                 mock(ContractAssetMapper.class), mock(ContractService.class), mock(AssetService.class),
                 mock(VoucherService.class), mock(RuleConfigService.class), mock(AuditLogService.class),
                 assetMapper, customerMapper);
+        query = new TransferQueryService(orderMapper, lineMapper);
     }
 
     private TransferOrder order(long id, Long contractId) {
@@ -155,6 +158,68 @@ class TransferLinkTest {
         TransferDtos.TransferItem it = service.detail(4L).getOrder();
         assertNull(it.getContractNo());
         assertNull(it.getCustomerName());
+    }
+
+    // ============ 设备侧反向:处置记录 ============
+
+    private TransferOrderLine disposalLine(long id, long orderId, long assetId, String price, String gain) {
+        TransferOrderLine l = new TransferOrderLine();
+        l.setId(id);
+        l.setTransferOrderId(orderId);
+        l.setAssetId(assetId);
+        l.setBookValue(new BigDecimal("17000.00"));
+        l.setTransferPrice(new BigDecimal(price));
+        l.setGain(new BigDecimal(gain));
+        l.setNominalFlag(0);
+        return l;
+    }
+
+    private TransferOrder disposalOrder(long id, String no, String type, String status, String bizTime) {
+        TransferOrder o = new TransferOrder();
+        o.setId(id);
+        o.setNo(no);
+        o.setType(type);
+        o.setStatus(status);
+        o.setBizTime(java.time.LocalDateTime.parse(bizTime));
+        return o;
+    }
+
+    @Test
+    void 按设备聚合处置记录_业务时间倒序() {
+        when(lineMapper.selectList(any())).thenReturn(Arrays.asList(
+                disposalLine(21L, 31L, 7L, "10000", "2000"),
+                disposalLine(22L, 32L, 7L, "20000", "3000")));
+        when(orderMapper.selectBatchIds(any())).thenReturn(Arrays.asList(
+                disposalOrder(31L, "TR-2026-001", "转让", "已完成", "2026-01-15T10:00:00"),
+                disposalOrder(32L, "TR-2026-002", "二手", "待过账", "2026-03-01T09:00:00")));
+
+        java.util.Map<Long, java.util.List<TransferDtos.DisposalLine>> m =
+                query.disposalsByAsset(Collections.singletonList(7L));
+        java.util.List<TransferDtos.DisposalLine> d = m.get(7L);
+        assertEquals(2, d.size());
+        assertEquals("二手", d.get(0).getType());           // 最近的在前
+        assertEquals("待过账", d.get(0).getStatus());
+        assertEquals("TR-2026-002", d.get(0).getOrderNo());
+        assertEquals(new BigDecimal("20000"), d.get(0).getTransferPrice());   // 原样传出行上存的值,不改标度
+        assertEquals("转让", d.get(1).getType());
+    }
+
+    @Test
+    void 处置状态摘要取最近一次_无记录为空() {
+        when(lineMapper.selectList(any())).thenReturn(Collections.singletonList(
+                disposalLine(21L, 31L, 7L, "10000", "2000")));
+        when(orderMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(
+                disposalOrder(31L, "TR-2026-001", "报废", "已完成", "2026-01-15T10:00:00")));
+
+        java.util.Map<Long, String> m = query.disposalStatusByAsset(Arrays.asList(7L, 9L));
+        assertEquals("报废 · 已完成", m.get(7L));
+        assertNull(m.get(9L));
+    }
+
+    @Test
+    void 处置记录批量查询传空集合不查库() {
+        assertEquals(0, query.disposalsByAsset(Collections.emptyList()).size());
+        org.mockito.Mockito.verify(lineMapper, org.mockito.Mockito.times(0)).selectList(any());
     }
 
     @Test

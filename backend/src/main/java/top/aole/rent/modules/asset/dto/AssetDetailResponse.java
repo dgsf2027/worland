@@ -60,6 +60,9 @@ public class AssetDetailResponse {
     /** 状态机事件时间轴(倒序) */
     private List<EventItem> timeline;
 
+    /** 转让/处置记录(按业务时间倒序;来自转让模块的反向关联) */
+    private List<top.aole.rent.modules.transfer.dto.TransferDtos.DisposalLine> disposals;
+
     @Data
     public static class BomNode {
         private Long id;

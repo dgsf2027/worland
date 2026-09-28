@@ -98,6 +98,26 @@ public class TransferDtos {
         private List<TransferLineItem> lines;
     }
 
+    /**
+     * 设备的一条转让/处置记录(设备租赁台账详情反向展示用)。
+     * 台账 → 转让 的反向入口:一台设备可能先被转让、再走二手/报废,逐条列出来。
+     */
+    @Data
+    public static class DisposalLine {
+        /** 转让单行 id */
+        private Long id;
+        private Long orderId;
+        private String orderNo;
+        /** 类型:转让/收回/二手/报废 */
+        private String type;
+        private BigDecimal transferPrice;
+        /** 处置损益 */
+        private BigDecimal gain;
+        /** 单据状态:待审批/待过账/已完成/已作废 */
+        private String status;
+        private LocalDateTime bizTime;
+    }
+
     /** 到期转让创建结果:含名义价守卫结论 + 逐台损益 + 凭证/出账影响清单。 */
     @Data
     public static class TransferResult {

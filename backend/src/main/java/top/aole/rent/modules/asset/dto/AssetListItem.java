@@ -33,5 +33,8 @@ public class AssetListItem {
     private Long intendedCustomerId;
     private String intendedCustomerName;
     /** 敏感字段是否已打码(GP/LP=true) */
+    /** 处置状态:最近一次转让/处置的「类型 · 状态」,无记录为 null */
+    private String disposalStatus;
+
     private Boolean sensitiveMasked;
 }
