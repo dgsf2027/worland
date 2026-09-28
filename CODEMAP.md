@@ -84,7 +84,7 @@ modules/<module>/
 | `analytics` | 无实体（只读聚合） | `/rent/cashflow`、`/rent/analytics/return-attribution` | 兑付缺口扫描 05:00 |
 | `monthly` | MonthlyReport | `/rent/monthly-report` | 报表包生成 每月 2 日 02:00 |
 | `transfer` | TransferOrder / TransferOrderLine | `/rent/transfer` | — |
-| `maintenance` | Maintenance | `/rent/maintenance` | — |
+| `maintenance` | Maintenance（两类对象：设备台账 / 仓库物品） | `/rent/maintenance` | — |
 | `inventory` | InvItem / InvRental / InvMovement / InvDamage / InvCompPrice / InvCompany | `/rent/inventory`、`/rent/inv-public`（扫码免登） | — |
 | `reminder` | Reminder | `/rent/reminders` | 合同到期提醒 06:00；跟进到期提醒 07:00 |
 | `task` | Task | `/rent/tasks` | 任务派发 03:00 |
@@ -139,8 +139,8 @@ modules/<module>/
 | `/contract` | `Contract.vue` | `contract.ts` | `contract` |
 | `/rent` | `Rent.vue` | `rent.ts` | `billing` |
 | `/transfer` | `Transfer.vue` | `transfer.ts` | `transfer` |
-| `/maintenance` | `Maintenance.vue` | `maintenance.ts` | `maintenance` |
-| `/inventory` | `Inventory.vue` | `inventory.ts` | `inventory` |
+| `/maintenance` | → 重定向到 `/inventory?tab=maintenance`（V119 并入资产管理） | `maintenance.ts` | `maintenance` |
+| `/inventory` | `Inventory.vue` | `inventory.ts` + `maintenance.ts` | `inventory` |
 | `/scan/:token`（public） | `InventoryScan.vue` | `inventory.ts` | `inventory-scan` |
 | `/voucher` | `Voucher.vue` | `voucher.ts` | `finance` |
 | `/cashflow` | `Cashflow.vue` | `distribution.ts` | `analytics` + `distribution` |
@@ -196,6 +196,7 @@ modules/<module>/
 | `V115__purge_unlinked_purchase.sql` | 清理未关联设备台账的历史采购单与应付（仅「已下单 + 明细无 asset_id（或合同已删） + 无已付应付」，单号加 `#DEL{id}`） |
 | `V116__remove_demo_customers_contracts.sql` | 删除演示数据及全链关联：供应商「科瑞电控」、客户「德邦仓配/顺丰园区仓/京东云仓(华南)/云山快仓/阿昌仓储/微仓科技」、设备「设备1」(WL-BZQ-0001 及型号/序列号叫设备1的)、合同 WL-C-2026-001/002/003 —— 连带收租单/逾期案/租金计划/押金/清单/采购应付/凭证与总账行；并删报价定价档 `target_irr[云山快仓]`（前端下拉同步移除） |
 | `V117__purge_orphan_finance_data.sql` | 清理来源单据已不存在的凭证/分录/总账行/折旧行，清空结账分配与月度报表（两者物理删：月报唯一键含 `is_deleted`、分配单号唯一）；出资人名册与 LLM 调用日志保留 |
+| `V119__maintenance_target_type.sql` | 维保工单增加对象类型维度（asset 设备台账 / inv_item 仓库物品）、送修数量与两个流转 id；`asset_id` 放开可空 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

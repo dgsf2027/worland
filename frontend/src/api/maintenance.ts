@@ -4,7 +4,15 @@ import type { PageResult } from '@/api/supplier'
 export interface MaintenanceItem {
   id: number
   no: string
-  assetId: number
+  /** 对象类型：asset 设备租赁台账 / inv_item 资产管理仓库物品 */
+  targetType?: string
+  /** 对象显示名：设备「品类 · 序列号」/ 物品「名称 · 编号」 */
+  targetLabel?: string
+  /** 仓库物品 id（设备工单为空） */
+  invItemId?: number
+  /** 送修数量（仓库物品工单） */
+  qty?: number
+  assetId?: number
   serialNo?: string
   assetCategory?: string
   bomId?: number

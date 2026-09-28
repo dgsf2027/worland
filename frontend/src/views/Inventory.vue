@@ -13,6 +13,11 @@ import {
 } from '@/api/inventory'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
+import {
+  fetchMaintenances, createMaintenance, assignMaintenance, handleMaintenance, fetchSpareAlert,
+  type MaintenanceItem, type SparePartAlertResponse,
+} from '@/api/maintenance'
+import { fetchAssets, type AssetListItem } from '@/api/asset'
 import PhotoGallery from '@/components/PhotoGallery.vue'
 import MovementForm from '@/components/inventory/MovementForm.vue'
 import { printQrLabels, qrDataUrl } from '@/utils/qrLabel'
@@ -420,12 +425,122 @@ async function saveCompany() {
 }
 
 // ============ 公共 ============
+// ============ 维保工单(V119 并入本模块:设备台账 + 仓库物品两类对象) ============
+const mtTag: Record<string, string> = { 待派工: 'warning', 处理中: 'primary', 已完成: 'success', 已关闭: 'info' }
+const mtTypeTag: Record<string, string> = { 报修: 'danger', 预防: 'primary', 巡检: 'info' }
+const mtList = ref<MaintenanceItem[]>([])
+const mtTotal = ref(0)
+const mtLoading = ref(false)
+const mtFilters = reactive<{ status: string; type: string; targetType: string }>({ status: '', type: '', targetType: '' })
+const spare = ref<SparePartAlertResponse | null>(null)
+/** 报修时可选的台账设备(仓库物品用本模块已加载的 allItems) */
+const mtAssets = ref<AssetListItem[]>([])
+
+async function loadMaintenances() {
+  mtLoading.value = true
+  try {
+    const params: Record<string, any> = { page: 1, size: 100 }
+    if (mtFilters.status) params.status = mtFilters.status
+    if (mtFilters.type) params.type = mtFilters.type
+    if (mtFilters.targetType) params.targetType = mtFilters.targetType
+    const res = await fetchMaintenances(params)
+    mtList.value = res.records
+    mtTotal.value = res.total
+  } finally {
+    mtLoading.value = false
+  }
+}
+async function loadMaintenanceRefs() {
+  if (!mtAssets.value.length) {
+    mtAssets.value = (await fetchAssets({ page: 1, size: 500 })).records
+  }
+  if (!allItems.value.length) {
+    allItems.value = (await fetchInvItems({ page: 1, size: 5000 })).records
+  }
+  spare.value = await fetchSpareAlert()
+}
+
+// ---- 报修建单 ----
+const mtCreateDlg = ref(false)
+const mtForm = reactive<{
+  targetType: 'asset' | 'inv_item'; assetId?: number; invItemId?: number; qty: number
+  bomId?: number; type: string; faultDesc: string
+}>({ targetType: 'asset', qty: 1, type: '报修', faultDesc: '' })
+const mtPickedItem = computed(() => allItems.value.find((i) => i.id === mtForm.invItemId) || null)
+const mtAssetLabel = (a: AssetListItem) =>
+  `${a.category}${a.model ? ' · ' + a.model : ''} · ${a.serialNo}（${a.status}）`
+function openMtCreate() {
+  Object.assign(mtForm, { targetType: 'asset', assetId: undefined, invItemId: undefined, qty: 1, bomId: undefined, type: '报修', faultDesc: '' })
+  mtCreateDlg.value = true
+  loadMaintenanceRefs()
+}
+async function submitMtCreate() {
+  if (mtForm.targetType === 'asset' && !mtForm.assetId) { ElMessage.warning('请选择台账设备'); return }
+  if (mtForm.targetType === 'inv_item' && !mtForm.invItemId) { ElMessage.warning('请选择仓库物品'); return }
+  const body: Record<string, any> = { targetType: mtForm.targetType, type: mtForm.type }
+  if (mtForm.faultDesc) body.faultDesc = mtForm.faultDesc
+  if (mtForm.targetType === 'asset') {
+    body.assetId = mtForm.assetId
+    if (mtForm.bomId) body.bomId = mtForm.bomId
+  } else {
+    body.invItemId = mtForm.invItemId
+    body.qty = mtForm.qty
+  }
+  await createMaintenance(body)
+  ElMessage.success(mtForm.targetType === 'inv_item'
+    ? `工单已创建（待派工）· 已把 ${mtForm.qty} 件从库存转入维修中`
+    : '工单已创建（待派工）')
+  mtCreateDlg.value = false
+  loadMaintenances()
+  refreshAfterChange()
+}
+
+// ---- 派工 ----
+async function onMtAssign(row: MaintenanceItem) {
+  try {
+    const { value } = await ElMessageBox.prompt('责任方(我方/供应商)', `派工 ${row.no}`, {
+      confirmButtonText: '派工', cancelButtonText: '取消', inputValue: '我方',
+      inputValidator: (v) => (['我方', '供应商'].includes((v || '').trim()) ? true : '填 我方 或 供应商'),
+    })
+    await assignMaintenance(row.id, { responsibleParty: value.trim() })
+    ElMessage.success('已派工(处理中)')
+    loadMaintenances()
+  } catch { /* 取消 */ }
+}
+
+// ---- 完工回写 ----
+const mtHandleDlg = reactive<{
+  show: boolean; id?: number; no?: string; targetType?: string; qty?: number
+  cost: number; inWarranty: boolean; handleNote: string; recordFault: boolean; scrapped: boolean
+}>({ show: false, cost: 0, inWarranty: false, handleNote: '', recordFault: true, scrapped: false })
+function openMtHandle(row: MaintenanceItem) {
+  Object.assign(mtHandleDlg, {
+    show: true, id: row.id, no: row.no, targetType: row.targetType, qty: row.qty,
+    cost: 0, inWarranty: false, handleNote: '', recordFault: row.type === '报修', scrapped: false,
+  })
+}
+async function submitMtHandle() {
+  await handleMaintenance(mtHandleDlg.id!, {
+    cost: mtHandleDlg.cost, inWarranty: mtHandleDlg.inWarranty,
+    handleNote: mtHandleDlg.handleNote, recordFault: mtHandleDlg.recordFault,
+    scrapped: mtHandleDlg.scrapped,
+  })
+  const tail = mtHandleDlg.targetType === 'inv_item'
+    ? (mtHandleDlg.scrapped ? `· ${mtHandleDlg.qty} 件已转报废` : `· ${mtHandleDlg.qty} 件已回库存`)
+    : (mtHandleDlg.inWarranty ? '(质保内→转供应商·费用不计我方)' : '')
+  ElMessage.success('已完工 ' + tail)
+  mtHandleDlg.show = false
+  loadMaintenances()
+  refreshAfterChange()
+}
+
 function loadTab(t: string) {
   if (t === 'overview') return loadOverview()
   if (t === 'items') return loadItems()
   if (t === 'rentals') return loadRentals()
   if (t === 'movements') return loadMovements()
   if (t === 'damages') return loadDamages()
+  if (t === 'maintenance') { loadMaintenanceRefs(); return loadMaintenances() }
   if (t === 'settings') return loadSettings()
 }
 async function refreshAfterChange() {
@@ -687,6 +802,76 @@ onMounted(() => {
         </el-table>
       </el-tab-pane>
 
+      <!-- ============ 维保工单(并入自原「维保工单」模块) ============ -->
+      <el-tab-pane label="维保工单" name="maintenance">
+        <div class="bar">
+          <el-select v-model="mtFilters.targetType" placeholder="对象" clearable size="small" style="width:130px" @change="loadMaintenances">
+            <el-option label="台账设备" value="asset" />
+            <el-option label="仓库物品" value="inv_item" />
+          </el-select>
+          <el-select v-model="mtFilters.status" placeholder="状态" clearable size="small" style="width:120px" @change="loadMaintenances">
+            <el-option v-for="st in ['待派工','处理中','已完成','已关闭']" :key="st" :label="st" :value="st" />
+          </el-select>
+          <el-select v-model="mtFilters.type" placeholder="类型" clearable size="small" style="width:110px" @change="loadMaintenances">
+            <el-option v-for="t in ['报修','预防','巡检']" :key="t" :label="t" :value="t" />
+          </el-select>
+          <el-button size="small" @click="loadMaintenances">查询</el-button>
+          <el-button v-if="canOperate" size="small" type="primary" @click="openMtCreate">＋ 报修</el-button>
+          <span class="muted">共 {{ mtTotal }} 单</span>
+        </div>
+        <el-table :data="mtList" v-loading="mtLoading" size="small" border>
+          <el-table-column prop="no" label="工单号" min-width="130" />
+          <el-table-column label="对象" min-width="180">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.targetType === 'inv_item' ? 'warning' : 'info'" effect="plain">
+                {{ row.targetType === 'inv_item' ? '仓库物品' : '台账设备' }}
+              </el-tag>
+              <span style="margin-left:6px">{{ row.targetLabel || '—' }}</span>
+              <span v-if="row.targetType === 'inv_item' && row.qty" class="muted"> × {{ row.qty }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="70">
+            <template #default="{ row }"><el-tag size="small" :type="mtTypeTag[row.type] || 'info'">{{ row.type }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="bomName" label="故障配件" width="110"><template #default="{ row }">{{ row.bomName || '—' }}</template></el-table-column>
+          <el-table-column prop="faultDesc" label="故障描述" min-width="150" show-overflow-tooltip />
+          <el-table-column label="责任方" width="100">
+            <template #default="{ row }">
+              {{ row.responsibleParty }}<el-tag v-if="row.inWarranty" type="success" size="small">质保</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="我方成本" width="110" align="right"><template #default="{ row }">{{ money(row.ourCost) }}</template></el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }"><el-tag size="small" :type="mtTag[row.status] || 'info'">{{ row.status }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button v-if="row.status === '待派工' && canOperate" link type="primary" size="small" @click="onMtAssign(row)">派工</el-button>
+              <el-button v-if="row.status === '处理中' && canOperate" link type="success" size="small" @click="openMtHandle(row)">完工</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="muted" style="margin-top:8px">
+          我方成本 = 责任方我方 且 非质保内 才计入；质保内自动转供应商，费用记录但我方成本为 0。
+          仓库物品报修会把数量从「库存」转入「维修中」，完工按结果回库存或转报废——数量只由「出入库记录」一处记账。
+        </div>
+
+        <el-card v-if="spare && spare.alertCount" shadow="never" style="margin-top:12px">
+          <template #header>高故障配件备件提示（故障次数 &gt; {{ spare.threshold }}）· 共 {{ spare.alertCount }} 项</template>
+          <el-table :data="spare.items" size="small" border>
+            <el-table-column prop="serialNo" label="设备" width="140" />
+            <el-table-column prop="bomName" label="配件" min-width="130" />
+            <el-table-column label="故障次数" width="90" align="right">
+              <template #default="{ row }"><b class="danger-text">{{ row.faultCount }}</b></template>
+            </el-table-column>
+            <el-table-column label="可维修" width="90">
+              <template #default="{ row }"><el-tag size="small" :type="row.repairable ? 'success' : 'danger'">{{ row.repairable ? '可修' : '不可修' }}</el-tag></template>
+            </el-table-column>
+            <el-table-column prop="suggestion" label="建议" min-width="200" />
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
       <!-- ============ 设置 ============ -->
       <el-tab-pane label="设置" name="settings">
         <div v-loading="settingsLoading" class="settings">
@@ -924,6 +1109,87 @@ onMounted(() => {
         </template>
       </div>
     </el-drawer>
+
+    <!-- 维保报修建单 -->
+    <el-dialog v-model="mtCreateDlg" title="报修 / 预防 / 巡检 建单" width="620px">
+      <el-form label-width="96px">
+        <el-form-item label="报修对象">
+          <el-radio-group v-model="mtForm.targetType">
+            <el-radio-button label="asset">台账设备</el-radio-button>
+            <el-radio-button label="inv_item">仓库物品</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <template v-if="mtForm.targetType === 'asset'">
+          <el-form-item label="设备">
+            <el-select v-model="mtForm.assetId" filterable clearable style="width:100%" placeholder="从设备 · 租赁台账里选">
+              <el-option v-for="a in mtAssets" :key="a.id" :label="mtAssetLabel(a)" :value="a.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="故障配件">
+            <el-input-number v-model="mtForm.bomId" :min="1" placeholder="配件 BOM 的序号(可空)" controls-position="right" style="width:220px" />
+            <span class="muted" style="margin-left:8px">填了会在完工时回写该配件的故障次数</span>
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="物品">
+            <el-select v-model="mtForm.invItemId" filterable clearable style="width:100%" placeholder="从资产台账里选">
+              <el-option v-for="i in allItems" :key="i.id"
+                :label="`${i.name} · ${i.code}（库存 ${i.stockQty} ${i.unit}）`" :value="i.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="送修数量">
+            <el-input-number v-model="mtForm.qty" :min="1" :max="mtPickedItem?.stockQty || 1" controls-position="right" style="width:160px" />
+            <span v-if="mtPickedItem" class="muted" style="margin-left:8px">
+              当前库存 {{ mtPickedItem.stockQty }} {{ mtPickedItem.unit }}；建单后这 {{ mtForm.qty }} 件转入「维修中」
+            </span>
+          </el-form-item>
+        </template>
+        <el-form-item label="工单类型">
+          <el-select v-model="mtForm.type" style="width:140px">
+            <el-option v-for="t in ['报修','预防','巡检']" :key="t" :label="t" :value="t" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="故障描述">
+          <el-input v-model="mtForm.faultDesc" type="textarea" :rows="2" maxlength="512" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mtCreateDlg = false">取消</el-button>
+        <el-button type="primary" @click="submitMtCreate">提交建单</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 维保完工回写 -->
+    <el-dialog v-model="mtHandleDlg.show" :title="'处理完工 ' + (mtHandleDlg.no || '')" width="520px">
+      <el-form label-width="110px">
+        <el-form-item label="维修费用">
+          <el-input-number v-model="mtHandleDlg.cost" :min="0" controls-position="right" style="width:180px" />
+        </el-form-item>
+        <el-form-item label="质保内">
+          <el-switch v-model="mtHandleDlg.inWarranty" />
+          <span class="muted" style="margin-left:8px">质保内 → 转供应商，费用不计我方</span>
+        </el-form-item>
+        <el-form-item v-if="mtHandleDlg.targetType === 'inv_item'" label="处理结果">
+          <el-switch v-model="mtHandleDlg.scrapped" active-text="修不好，报废" inactive-text="修好，回库存" />
+          <div class="muted">
+            {{ mtHandleDlg.scrapped
+              ? `${mtHandleDlg.qty} 件从「维修中」转「已报废」`
+              : `${mtHandleDlg.qty} 件从「维修中」回「库存」` }}
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="回写故障计数">
+          <el-switch v-model="mtHandleDlg.recordFault" />
+          <span class="muted" style="margin-left:8px">给故障配件的故障次数 +1（报修默认开）</span>
+        </el-form-item>
+        <el-form-item label="处理记录">
+          <el-input v-model="mtHandleDlg.handleNote" type="textarea" :rows="2" maxlength="512" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mtHandleDlg.show = false">取消</el-button>
+        <el-button type="primary" @click="submitMtHandle">确认完工</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
