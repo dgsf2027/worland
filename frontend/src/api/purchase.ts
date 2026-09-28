@@ -66,6 +66,8 @@ export interface PurchaseItemLine {
 }
 
 export interface PayableLine {
+  /** 到期日是否为预估（按预计入库日推算，入库后改为真实日期） */
+  dueProvisional?: boolean
   /** 逐台应付对应的设备(旧版整单应付为空) */
   assetId?: number
   /** 设备显示名:品类 · 型号 */
@@ -94,6 +96,10 @@ export interface PurchaseDetail {
   totalAmount?: number
   orderDate?: string
   receiveDate?: string
+  /** 预计入库日（未入库时「入库」阶段应付的到期日基准） */
+  expectReceiveDate?: string
+  /** 继承的合同付款方式摘要 */
+  contractPaymentTerms?: string
   remark?: string
   sensitiveMasked?: boolean
   payableOutstanding?: number

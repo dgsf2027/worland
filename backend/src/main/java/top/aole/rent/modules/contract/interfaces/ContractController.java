@@ -27,10 +27,14 @@ import top.aole.rent.modules.contract.dto.ContractEditRequest;
 import top.aole.rent.modules.contract.dto.ContractListItem;
 import top.aole.rent.modules.contract.dto.ContractSignRequest;
 import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.contract.dto.BoqDtos;
+import top.aole.rent.modules.contract.dto.ContractPaymentDtos;
 import top.aole.rent.modules.contract.service.ContractBoqExcelService;
 import top.aole.rent.modules.contract.service.ContractBoqService;
 import top.aole.rent.modules.contract.service.ContractService;
+
+import javax.validation.Valid;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -100,6 +104,22 @@ public class ContractController {
     public R<Void> change(@PathVariable Long id, @RequestBody(required = false) ContractChangeRequest req) {
         contractService.change(id, req);
         return R.ok();
+    }
+
+    // ============ 合同付款方式(V118:唯一真相源,设备与采购单继承) ============
+
+    @ApiOperation("合同付款方式:多段(阶段名/比例/触发时点/账期),该合同下设备与采购单全部继承")
+    @GetMapping("/{id}/payment-terms")
+    public R<ContractPaymentDtos.PaymentTermView> paymentTerms(@PathVariable Long id) {
+        return R.ok(contractService.paymentTermView(id));
+    }
+
+    @ApiOperation("保存合同付款方式(已付阶段锁定;保存后重算该合同下设备的待付应付)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "合同付款方式", targetType = "contract")
+    @PutMapping("/{id}/payment-terms")
+    public R<ContractPaymentDtos.PaymentTermView> savePaymentTerms(
+            @PathVariable Long id, @Valid @RequestBody PaymentTermDtos.SaveRequest req) {
+        return R.ok(contractService.savePaymentTerms(id, req.getTerms()));
     }
 
     // ============ 合同清单(《工程量清单计价表》) ============

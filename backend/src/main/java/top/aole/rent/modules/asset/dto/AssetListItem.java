@@ -36,5 +36,8 @@ public class AssetListItem {
     /** 处置状态:最近一次转让/处置的「类型 · 状态」,无记录为 null */
     private String disposalStatus;
 
+    /** 本设备待付应付合计(成本口径·敏感) */
+    private BigDecimal payablePending;
+
     private Boolean sensitiveMasked;
 }

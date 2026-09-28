@@ -77,6 +77,7 @@ public class PurchaseService {
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
     private final RentCoverageService rentCoverageService;
+    private final top.aole.rent.modules.contract.service.ContractPaymentService contractPaymentService;
 
     // ============ 列表 ============
 
@@ -193,12 +194,14 @@ public class PurchaseService {
         p.setFirstPayRatio(req.getFirstPayRatio());
         p.setAccountDays(req.getAccountDays());
         p.setOrderDate(orderDate);
+        p.setExpectReceiveDate(req.getExpectReceiveDate() != null ? req.getExpectReceiveDate()
+                : orderDate.plusDays(purchaseLeadDays()));
         p.setRemark(req.getRemark());
         purchaseInMapper.insert(p);
 
         // 付款条件:明细级 > 整单级 > 默认三段(首付取整单首付比例);逐台生成 触发=下单 的应付
-        List<PaymentTermDtos.TermInput> orderTerms = req.getPaymentTerms() != null && !req.getPaymentTerms().isEmpty()
-                ? req.getPaymentTerms() : paymentService.defaultTerms(req.getFirstPayRatio(), req.getAccountDays());
+        // 合同还没设付款方式时按规则写入默认三段(以合同为唯一真相源)
+        contractPaymentService.ensureDefault(req.getContractId(), req.getFirstPayRatio(), req.getAccountDays());
         for (int i = 0; i < req.getItems().size(); i++) {
             PurchaseOrderRequest.Item item = req.getItems().get(i);
             Asset a = assets.get(i);
@@ -216,14 +219,10 @@ public class PurchaseService {
             pi.setReplaceHeadcount(a.getReplaceHeadcount());
             pi.setRemark(item.getRemark());
             purchaseItemMapper.insert(pi);
-            // 付款条件:明细级 > 设备台账上已设的 > 整单级
-            List<PaymentTermDtos.TermInput> terms = item.getPaymentTerms() != null && !item.getPaymentTerms().isEmpty()
-                    ? item.getPaymentTerms() : paymentService.termsAsInput(a.getId());
-            if (terms.isEmpty()) {
-                terms = orderTerms;
-            }
             assetService.bindPurchase(a.getId(), p.getId(), p.getNo());
-            paymentService.onOrder(p, pi, terms, a.getId());
+            // 付款条件以合同为准(V118):不再接收明细级/整单级条件,
+            // 下单即按合同付款方式一次生成全部阶段的应付
+            paymentService.onOrder(p, pi, a.getId(), req.getContractId());
         }
 
         log.info("采购下单: no={}, id={}, contract={}, 勾选设备{}台, total={}, 下单应付={}",
@@ -342,6 +341,8 @@ public class PurchaseService {
         r.setTotalAmount(seeCost ? p.getTotalAmount() : null);
         r.setOrderDate(p.getOrderDate());
         r.setReceiveDate(p.getReceiveDate());
+        r.setExpectReceiveDate(p.getExpectReceiveDate());
+        r.setContractPaymentTerms(contractPaymentService.describe(p.getContractId()));
         r.setRemark(p.getRemark());
         r.setSensitiveMasked(!seeCost);
         r.setPayableOutstanding(seeCost ? outstanding(id) : null);
@@ -365,7 +366,7 @@ public class PurchaseService {
                 if (a.getSupplierId() != null) {
                     il.setSupplierName(supplierName(a.getSupplierId()));
                 }
-                il.setPaymentTerms(paymentService.describeTerms(a.getId()));
+                il.setPaymentTerms(paymentService.describeTerms(p.getContractId()));
                 il.setExpectedAmount(seeCost ? a.getPurchasePrice() : null);
             } else {
                 il.setAssetLabel(assetLabel(pi.getCategory(), pi.getModel(), pi.getSerialNo()));
@@ -410,6 +411,7 @@ public class PurchaseService {
             }
             pl.setStage(pay.getStage());
             pl.setDueDate(pay.getDueDate());
+            pl.setDueProvisional(Integer.valueOf(1).equals(pay.getDueProvisional()));
             pl.setAmount(seeCost ? pay.getAmount() : null);
             pl.setStatus(pay.getStatus());
             pl.setPaidDate(pay.getPaidDate());
@@ -473,6 +475,16 @@ public class PurchaseService {
         pay.setStatus("待付");
         pay.setRemark(remark);
         payableMapper.insert(pay);
+    }
+
+    /** 采购提前期(天):rule_config[purchase_lead_days],缺配置按 30 天。 */
+    private int purchaseLeadDays() {
+        try {
+            BigDecimal v = rules.getValue("purchase_lead_days", "", LocalDate.now());
+            return v != null && v.intValue() > 0 ? v.intValue() : 30;
+        } catch (Exception e) {
+            return 30;
+        }
     }
 
     /** 待付应付合计(负债口径:排除红冲)。 */

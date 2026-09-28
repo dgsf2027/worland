@@ -12,6 +12,9 @@ import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.domain.AssetPaymentTerm;
 import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.asset.mapper.AssetPaymentTermMapper;
+import top.aole.rent.modules.contract.domain.ContractPaymentTerm;
+import top.aole.rent.modules.contract.mapper.ContractPaymentTermMapper;
+import top.aole.rent.modules.contract.service.ContractPaymentService;
 import top.aole.rent.modules.purchase.domain.Payable;
 import top.aole.rent.modules.purchase.domain.PurchaseIn;
 import top.aole.rent.modules.purchase.domain.PurchaseItem;
@@ -31,13 +34,17 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 设备合同付款条件 + 逐台应付(@owner=本服务)。
+ * 逐台应付(@owner=本服务)。
  *
  * <ul>
- *   <li>付款条件:自定义多段(名称/比例/触发时点/到期天数),各段比例合计必须 100%。</li>
- *   <li>预计付款金额 = 集采价 × 比例,前 N-1 段四舍五入到分,末段补差保证合计 = 集采价。</li>
- *   <li>应付:触发时点=下单 的阶段在采购下单时生成(到期=下单日+N 天),=入库 的在入库时生成(到期=入库日+N 天),
- *       每条应付挂设备/采购明细/条件。条件或集采价变更时,重算本设备 待付 应付;已付 的阶段锁定不动。</li>
+ *   <li><b>付款条件来源:合同</b>(V118 起)。条件挂在 {@code yc_rent_contract_payment_term},
+ *       本服务只消费不维护;{@code yc_rent_asset_payment_term} 停止写入,只为历史应付保留读取。</li>
+ *   <li>预计付款金额 = 该设备合同价 × 比例,前 N-1 段四舍五入到分,末段补差保证合计 = 合同价。</li>
+ *   <li><b>应付一次性全量生成</b>(V118 起):采购下单时把合同付款方式的所有阶段都生成出来,
+ *       任一条件挂上即计入累计应付与未付。{@code 触发=下单} 的到期 = 下单日+N;
+ *       {@code 触发=入库} 的在入库前按采购单的「预计入库日」+N 推算并标 {@code due_provisional=1},
+ *       实际入库时改写为真实入库日+N 并清标记 —— 每笔应付都有到期日,现金流分层与兑付缺口口径不变。</li>
+ *   <li>条件或合同价变更时,重算本设备 待付 应付;已付 的阶段锁定不动。</li>
  *   <li>兼容旧版整单应付(asset_id/purchase_item_id 为空):已有整单「首付」则不再逐台生成下单阶段,
  *       已有整单「验收/尾款」则不再逐台生成入库阶段,避免重复计负债。</li>
  * </ul>
@@ -58,6 +65,8 @@ public class AssetPaymentService {
     private final PurchaseInMapper purchaseInMapper;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    private final ContractPaymentService contractPaymentService;
+    private final ContractPaymentTermMapper contractTermMapper;
 
     // ============ 默认条件 / 校验 ============
 
@@ -147,56 +156,24 @@ public class AssetPaymentService {
 
     // ============ 采购下单 / 入库 ============
 
-    /** 下单:为采购明细保存付款条件,并生成 触发=下单 的逐台应付。 */
-    @Transactional
-    public void onOrder(PurchaseIn p, PurchaseItem item, List<PaymentTermDtos.TermInput> terms) {
-        onOrder(p, item, terms, item.getAssetId());
-    }
-
     /**
-     * 下单(勾选台账设备):付款条件与应付直接挂到设备上,设备详情立刻能看到预计付款金额。
-     * assetId 为空(老式手填明细)时退化为只挂采购明细,入库生成设备后再回填。
+     * 下单:按合同付款方式一次生成该设备的全部阶段应付。
+     *
+     * <p>{@code 触发=下单} 的到期 = 下单日+N;{@code 触发=入库} 的在入库前按采购单的预计入库日+N 推算,
+     * 并标 {@code due_provisional=1}。合同没设付款方式时直接拒绝 —— 付款方式是合同的必备要素。
      */
     @Transactional
-    public void onOrder(PurchaseIn p, PurchaseItem item, List<PaymentTermDtos.TermInput> terms, Long assetId) {
-        List<PaymentTermDtos.TermInput> normalized = normalize(terms);
-        if (assetId != null) {
-            // 设备上已有条件(如合同清单生成后单独设过)先清掉,以本次下单的条件为准
-            for (AssetPaymentTerm old : termsOf(assetId)) {
-                termMapper.deleteById(old.getId());
-            }
-        }
-        List<AssetPaymentTerm> saved = insertTerms(assetId, item.getId(), normalized);
-        generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), saved,
-                new HashSet<>(), true, false);
-    }
-
-    /** 设备上已有的付款条件 → 入参格式(下单时沿用)。 */
-    public List<PaymentTermDtos.TermInput> termsAsInput(Long assetId) {
-        List<PaymentTermDtos.TermInput> out = new ArrayList<>();
-        for (AssetPaymentTerm t : termsOf(assetId)) {
-            PaymentTermDtos.TermInput in = new PaymentTermDtos.TermInput();
-            in.setStageName(t.getStageName());
-            in.setRatio(t.getRatio());
-            in.setTriggerPoint(t.getTriggerPoint());
-            in.setDueDays(t.getDueDays());
-            out.add(in);
-        }
-        return out;
-    }
-
-    /** 付款条件摘要:首付30%(下单)/验收60%(入库)… */
-    public String describeTerms(Long assetId) {
-        List<AssetPaymentTerm> terms = termsOf(assetId);
+    public void onOrder(PurchaseIn p, PurchaseItem item, Long assetId, Long contractId) {
+        List<ContractPaymentTerm> terms = contractPaymentService.terms(contractId);
         if (terms.isEmpty()) {
-            return null;
+            throw new BizException(400, "合同还没设置付款方式,请先到合同里设置后再下单");
         }
-        List<String> parts = new ArrayList<>();
-        for (AssetPaymentTerm t : terms) {
-            parts.add(t.getStageName() + percent(t.getRatio()) + "(" + t.getTriggerPoint()
-                    + (t.getDueDays() != null && t.getDueDays() > 0 ? "+" + t.getDueDays() + "天" : "") + ")");
-        }
-        return String.join(" / ", parts);
+        generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), terms, new HashSet<>());
+    }
+
+    /** 付款条件摘要:首付30%(下单)/验收60%(入库)…(取该设备所属合同的付款方式) */
+    public String describeTerms(Long contractId) {
+        return contractPaymentService.describe(contractId);
     }
 
     private static String percent(BigDecimal ratio) {
@@ -206,22 +183,45 @@ public class AssetPaymentService {
         return ratio.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString() + "%";
     }
 
-    /** 入库:付款条件回填设备(旧单无条件则按默认模板补齐),已生成应付回填设备,并生成 触发=入库 的逐台应付。 */
+    /**
+     * 入库:把该设备「到期日为预估」的待付应付改写为真实入库日 + 账期,并清掉预估标记。
+     *
+     * <p>V118 起应付在下单时已全量生成,入库不再新增应付 —— 只做到期日兑现。
+     * 老单据(下单时明细没挂设备)会把已生成应付回填 asset_id;若该设备一条应付都没有
+     * (V118 之前的历史单),按合同付款方式补生成一次。
+     */
     @Transactional
     public void onReceive(PurchaseIn p, PurchaseItem item, Long assetId) {
-        List<AssetPaymentTerm> terms = termMapper.selectList(new LambdaQueryWrapper<AssetPaymentTerm>()
-                .eq(AssetPaymentTerm::getPurchaseItemId, item.getId()).orderByAsc(AssetPaymentTerm::getSeq));
-        if (terms.isEmpty()) {
-            terms = insertTerms(assetId, item.getId(), defaultTerms(p.getFirstPayRatio(), p.getAccountDays()));
-        } else {
-            termMapper.update(null, new LambdaUpdateWrapper<AssetPaymentTerm>()
-                    .eq(AssetPaymentTerm::getPurchaseItemId, item.getId()).set(AssetPaymentTerm::getAssetId, assetId));
-        }
+        // 老单据:应付当时只挂了采购明细,入库生成设备后回填
         payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
                 .eq(Payable::getPurchaseItemId, item.getId()).set(Payable::getAssetId, assetId));
-        boolean legacyReceive = hasLegacy(p.getId(), "验收", "尾款");
-        generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), terms,
-                new HashSet<>(), false, !legacyReceive);
+
+        LocalDate receiveDate = p.getReceiveDate() != null ? p.getReceiveDate() : LocalDate.now();
+        List<Payable> payables = payablesOf(assetId);
+        if (payables.isEmpty()) {
+            // V118 之前的历史单:该设备没有任何应付,按合同付款方式补一次
+            List<ContractPaymentTerm> terms = contractPaymentService.terms(p.getContractId());
+            if (!terms.isEmpty()) {
+                generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(),
+                        terms, new HashSet<>());
+            }
+            return;
+        }
+        int fixed = 0;
+        for (Payable pay : payables) {
+            if (!"待付".equals(pay.getStatus()) || !Integer.valueOf(1).equals(pay.getDueProvisional())) {
+                continue;
+            }
+            int days = dueDaysOf(pay.getTermId());
+            payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
+                    .eq(Payable::getId, pay.getId())
+                    .set(Payable::getDueDate, receiveDate.plusDays(days))
+                    .set(Payable::getDueProvisional, 0));
+            fixed++;
+        }
+        if (fixed > 0) {
+            log.info("[应付] 入库兑现到期日: 设备{} 共{}笔按入库日 {} 重算", assetId, fixed, receiveDate);
+        }
     }
 
     // ============ 设备详情 / 编辑 ============
@@ -235,9 +235,11 @@ public class AssetPaymentService {
             plan.setPurchaseStatus(p.getStatus());
         }
         plan.setBasePrice(seeCost ? a.getPurchasePrice() : null);
-        plan.setDefaultTemplate(defaultTerms(null, null));
+        plan.setDefaultTemplate(contractPaymentService.defaultTerms(null, null));
 
-        List<AssetPaymentTerm> terms = termsOf(a.getId());
+        List<ContractPaymentTerm> terms = contractPaymentService.terms(a.getContractId());
+        plan.setContractId(a.getContractId());
+        plan.setInherited(true);
         Map<Long, Payable> payableByTerm = new HashMap<>();
         BigDecimal pending = BigDecimal.ZERO;
         BigDecimal paid = BigDecimal.ZERO;
@@ -257,7 +259,7 @@ public class AssetPaymentService {
         BigDecimal ratioTotal = BigDecimal.ZERO;
         BigDecimal expectedTotal = BigDecimal.ZERO;
         for (int i = 0; i < terms.size(); i++) {
-            AssetPaymentTerm t = terms.get(i);
+            ContractPaymentTerm t = terms.get(i);
             PaymentTermDtos.TermLine line = new PaymentTermDtos.TermLine();
             line.setId(t.getId());
             line.setSeq(t.getSeq());
@@ -272,6 +274,7 @@ public class AssetPaymentService {
                 line.setPayableAmount(seeCost ? pay.getAmount() : null);
                 line.setPayableDueDate(pay.getDueDate());
                 line.setPayableStatus(pay.getStatus());
+                line.setDueProvisional(Integer.valueOf(1).equals(pay.getDueProvisional()));
             }
             ratioTotal = ratioTotal.add(t.getRatio());
             if (amounts.get(i) != null) {
@@ -283,7 +286,9 @@ public class AssetPaymentService {
         plan.setExpectedTotal(seeCost && a.getPurchasePrice() != null ? expectedTotal : null);
         plan.setPendingTotal(seeCost ? pending.setScale(2, RoundingMode.HALF_UP) : null);
         plan.setPaidTotal(seeCost ? paid.setScale(2, RoundingMode.HALF_UP) : null);
-        if (p == null) {
+        if (terms.isEmpty()) {
+            plan.setNote("所属合同还没设置付款方式,请到合同里设置(付款条件以合同为准,不在设备上单独维护)");
+        } else if (p == null) {
             plan.setNote("该设备不是采购入库建档,付款条件只计算预计付款,不生成应付");
         } else if ("已红冲".equals(p.getStatus())) {
             plan.setNote("采购单已退货红冲,不再生成应付");
@@ -293,82 +298,83 @@ public class AssetPaymentService {
         return plan;
     }
 
-    /** 编辑设备付款条件:已付阶段锁定;其余 待付 应付按新条件与当前集采价重生成。 */
-    @Transactional
-    public void updateTerms(Asset a, List<PaymentTermDtos.TermInput> input) {
-        List<PaymentTermDtos.TermInput> normalized = normalize(input);
-        Map<String, BigDecimal> locked = paidStages(a.getId());
-        for (Map.Entry<String, BigDecimal> e : locked.entrySet()) {
-            PaymentTermDtos.TermInput match = normalized.stream()
-                    .filter(t -> t.getStageName().equals(e.getKey())).findFirst().orElse(null);
-            if (match == null || match.getRatio().compareTo(e.getValue()) != 0) {
-                throw new BizException(400, "阶段「" + e.getKey() + "」已付款,不能删除或修改比例");
-            }
-        }
-        List<AssetPaymentTerm> old = termsOf(a.getId());
-        Long purchaseItemId = old.stream().map(AssetPaymentTerm::getPurchaseItemId)
-                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
-        old.forEach(t -> termMapper.deleteById(t.getId()));
-        List<AssetPaymentTerm> saved = insertTerms(a.getId(), purchaseItemId, normalized);
-        regenerate(a, saved, purchaseItemId);
-        auditLogService.record("设备付款条件", "asset", a.getId(), AuditLogService.EXECUTED, describe(normalized));
-    }
-
-    /** 集采价变化后重算本设备 待付 应付(条件不变)。 */
+    /**
+     * 合同价或合同付款方式变化后,重算本设备的 待付 应付(已付阶段锁定不动)。
+     * 付款方式本身由 {@link ContractPaymentService} 维护,本方法只负责把变化落到应付上。
+     */
     @Transactional
     public void resyncPending(Asset a) {
-        List<AssetPaymentTerm> terms = termsOf(a.getId());
+        List<ContractPaymentTerm> terms = contractPaymentService.terms(a.getContractId());
         if (terms.isEmpty()) {
             return;
         }
-        Long purchaseItemId = terms.stream().map(AssetPaymentTerm::getPurchaseItemId)
-                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
-        regenerate(a, terms, purchaseItemId);
+        regenerate(a, terms);
     }
 
     // ============ 内部 ============
 
-    private void regenerate(Asset a, List<AssetPaymentTerm> terms, Long purchaseItemId) {
-        PurchaseIn p = a.getPurchaseInId() == null ? null : purchaseInMapper.selectById(a.getPurchaseInId());
+    private void regenerate(Asset a, List<ContractPaymentTerm> terms) {
+        List<Payable> existing = payablesOf(a.getId());
+        // 采购单优先取设备上回填的;老数据没回填时退回从已有应付上找,否则改了合同付款方式
+        // 这台设备的应付金额会停在旧比例上,和合同对不上
+        Long purchaseInId = a.getPurchaseInId() != null ? a.getPurchaseInId()
+                : existing.stream().map(Payable::getPurchaseInId)
+                        .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        PurchaseIn p = purchaseInId == null ? null : purchaseInMapper.selectById(purchaseInId);
         if (p == null || "已红冲".equals(p.getStatus())) {
             return;
         }
         Set<String> paidNames = paidStages(a.getId()).keySet();
+        Long purchaseItemId = existing.stream().map(Payable::getPurchaseItemId)
+                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
         for (Payable pay : payablesOf(a.getId())) {
             if ("待付".equals(pay.getStatus())) {
                 payableMapper.deleteById(pay.getId());
             }
         }
-        boolean orderAllowed = !hasLegacy(p.getId(), "首付");
-        boolean receiveAllowed = p.getReceiveDate() != null && !hasLegacy(p.getId(), "验收", "尾款");
-        generate(p, a.getId(), purchaseItemId, a.getSerialNo(), a.getPurchasePrice(), terms, paidNames,
-                orderAllowed, receiveAllowed);
+        generate(p, a.getId(), purchaseItemId, a.getSerialNo(), a.getPurchasePrice(), terms, paidNames);
     }
 
+    /**
+     * 按合同付款方式一次生成全部阶段的应付。
+     *
+     * <p>到期日:{@code 触发=下单} → 下单日+N;{@code 触发=入库} → 已入库用真实入库日+N,
+     * 未入库用预计入库日(缺失则退回下单日)+N 并标 {@code due_provisional=1}。
+     * {@code skipNames} 里的阶段(已付)跳过;旧版整单应付已覆盖的阶段也跳过,避免重复计负债。
+     */
     private void generate(PurchaseIn p, Long assetId, Long purchaseItemId, String serialNo, BigDecimal price,
-                          List<AssetPaymentTerm> terms, Set<String> skipNames, boolean orderStages, boolean receiveStages) {
+                          List<ContractPaymentTerm> terms, Set<String> skipNames) {
         if (price == null || "已红冲".equals(p.getStatus())) {
             return;
         }
+        boolean legacyOrder = hasLegacy(p.getId(), "首付");
+        boolean legacyReceive = hasLegacy(p.getId(), "验收", "尾款");
         List<BigDecimal> ratios = new ArrayList<>();
         terms.forEach(t -> ratios.add(t.getRatio()));
         List<BigDecimal> amounts = expectedAmounts(price, ratios);
         for (int i = 0; i < terms.size(); i++) {
-            AssetPaymentTerm t = terms.get(i);
+            ContractPaymentTerm t = terms.get(i);
             if (skipNames.contains(t.getStageName())) {
                 continue;
             }
+            boolean orderStage = TRIGGER_ORDER.equals(t.getTriggerPoint());
+            if (orderStage && legacyOrder) {
+                continue;
+            }
+            if (!orderStage && legacyReceive) {
+                continue;
+            }
             LocalDate base;
-            if (TRIGGER_ORDER.equals(t.getTriggerPoint())) {
-                if (!orderStages) {
-                    continue;
-                }
+            boolean provisional = false;
+            if (orderStage) {
                 base = p.getOrderDate() != null ? p.getOrderDate() : LocalDate.now();
-            } else {
-                if (!receiveStages || p.getReceiveDate() == null) {
-                    continue;
-                }
+            } else if (p.getReceiveDate() != null) {
                 base = p.getReceiveDate();
+            } else {
+                // 未入库:按预计入库日推算,到期日标为预估,入库时兑现
+                base = p.getExpectReceiveDate() != null ? p.getExpectReceiveDate()
+                        : (p.getOrderDate() != null ? p.getOrderDate() : LocalDate.now());
+                provisional = true;
             }
             Payable pay = new Payable();
             pay.setPurchaseInId(p.getId());
@@ -377,11 +383,22 @@ public class AssetPaymentService {
             pay.setTermId(t.getId());
             pay.setStage(t.getStageName());
             pay.setDueDate(base.plusDays(t.getDueDays() == null ? 0 : t.getDueDays()));
+            pay.setDueProvisional(provisional ? 1 : 0);
             pay.setAmount(amounts.get(i));
             pay.setStatus("待付");
-            pay.setRemark(t.getStageName() + " " + pct(t.getRatio()) + " · 设备 " + serialNo);
+            pay.setRemark(t.getStageName() + " " + pct(t.getRatio()) + " · 设备 " + serialNo
+                    + (provisional ? "(到期日按预计入库日推算)" : ""));
             payableMapper.insert(pay);
         }
+    }
+
+    /** 某条应付对应合同段的账期天数;段已不存在返回 0。 */
+    private int dueDaysOf(Long termId) {
+        if (termId == null) {
+            return 0;
+        }
+        ContractPaymentTerm t = contractTermMapper.selectById(termId);
+        return t == null || t.getDueDays() == null ? 0 : t.getDueDays();
     }
 
     private List<AssetPaymentTerm> insertTerms(Long assetId, Long purchaseItemId, List<PaymentTermDtos.TermInput> terms) {
@@ -415,12 +432,11 @@ public class AssetPaymentService {
 
     /** 已付阶段:阶段名 → 该阶段对应条件的比例(取当前条件,无则 0 表示仅锁名称)。 */
     private Map<String, BigDecimal> paidStages(Long assetId) {
-        Map<Long, AssetPaymentTerm> termById = new HashMap<>();
-        termsOf(assetId).forEach(t -> termById.put(t.getId(), t));
         Map<String, BigDecimal> out = new HashMap<>();
         for (Payable pay : payablesOf(assetId)) {
             if ("已付".equals(pay.getStatus())) {
-                AssetPaymentTerm t = pay.getTermId() == null ? null : termById.get(pay.getTermId());
+                ContractPaymentTerm t = pay.getTermId() == null ? null
+                        : contractTermMapper.selectById(pay.getTermId());
                 out.put(pay.getStage(), t == null ? BigDecimal.ZERO : t.getRatio());
             }
         }

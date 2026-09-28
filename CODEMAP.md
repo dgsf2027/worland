@@ -76,7 +76,7 @@ modules/<module>/
 | `asset` | Asset / AssetBom（配件 BOM 明细） / AssetEvent / AssetDepreciationLine | `/rent/assets`（`?contractId=` 按合同筛设备） | — |
 | `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
-| `contract` | Contract / ContractAsset / ContractBoq（合同清单） / ContractChange / RentSchedule / DepositLedger | `/rent/contracts`（含 `/{id}/boq` 清单读写、导入导出、按清单生成设备） | — |
+| `contract` | Contract / ContractAsset / ContractBoq（合同清单） / ContractChange / RentSchedule / DepositLedger / ContractPaymentTerm（付款方式） | `/rent/contracts`（含 `/{id}/boq` 清单读写、导入导出、按清单生成设备、`/{id}/payment-terms` 付款方式读写） | — |
 | `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase`（详情含「收租对照」：按 contract_id 反查收租单/逾期案） | — |
 | `billing` | RentBill / OverdueCase / RepossessOrder / AccountingPeriod（+ `RentCoverageService` 按合同聚合收租对照，供采购应付反查） | `/rent/bills`、`/rent/overdue` | 收租单生成 01:00；逾期扫描 02:00 |
 | `finance` | Voucher / VoucherLine / LedgerBook | `/rent/vouchers`、`/rent/depreciation/run`、`/rent/tax/threshold` | 折旧计提 每月 1 日 03:00 |
@@ -196,6 +196,7 @@ modules/<module>/
 | `V115__purge_unlinked_purchase.sql` | 清理未关联设备台账的历史采购单与应付（仅「已下单 + 明细无 asset_id（或合同已删） + 无已付应付」，单号加 `#DEL{id}`） |
 | `V116__remove_demo_customers_contracts.sql` | 删除演示数据及全链关联：供应商「科瑞电控」、客户「德邦仓配/顺丰园区仓/京东云仓(华南)/云山快仓/阿昌仓储/微仓科技」、设备「设备1」(WL-BZQ-0001 及型号/序列号叫设备1的)、合同 WL-C-2026-001/002/003 —— 连带收租单/逾期案/租金计划/押金/清单/采购应付/凭证与总账行；并删报价定价档 `target_irr[云山快仓]`（前端下拉同步移除） |
 | `V117__purge_orphan_finance_data.sql` | 清理来源单据已不存在的凭证/分录/总账行/折旧行，清空结账分配与月度报表（两者物理删：月报唯一键含 `is_deleted`、分配单号唯一）；出资人名册与 LLM 调用日志保留 |
+| `V118__contract_payment_term.sql` | 付款条件从设备搬到合同（`yc_rent_contract_payment_term` 唯一真相源）；采购单加预计入库日、应付加「到期日为预估」标记、新增 `purchase_lead_days` 规则；从设备条件反推合同付款方式（不一致取覆盖最多的一套并在合同备注留痕）、`payable.term_id` 按阶段名重映射、补齐未触发阶段的应付（备注「合同付款方式补齐」） |
 | `V119__maintenance_target_type.sql` | 维保工单增加对象类型维度（asset 设备台账 / inv_item 仓库物品）、送修数量与两个流转 id；`asset_id` 放开可空 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。

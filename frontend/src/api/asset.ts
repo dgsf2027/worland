@@ -23,6 +23,8 @@ export interface AssetListItem {
   intendedCustomerName?: string
   /** 处置状态：最近一次转让/处置的「类型 · 状态」，无记录为空 */
   disposalStatus?: string
+  /** 本设备待付应付合计（成本口径，GP/LP 为空） */
+  payablePending?: number
   sensitiveMasked?: boolean
 }
 
@@ -98,8 +100,14 @@ export interface PaymentTermLine {
   payableAmount?: number
   payableDueDate?: string
   payableStatus?: string
+  /** 到期日是否为预估（未入库时按预计入库日推算） */
+  dueProvisional?: boolean
 }
 export interface PaymentPlan {
+  /** 付款方式所属合同（V118 起条件挂合同，设备只继承） */
+  contractId?: number
+  contractNo?: string
+  inherited?: boolean
   purchaseInId?: number
   purchaseNo?: string
   purchaseStatus?: string

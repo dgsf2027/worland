@@ -6,10 +6,14 @@ import {
   fetchContracts, fetchContractDetail, signContract, voidContract, renewContract, changeContract,
   editContract, fetchContractFiles, uploadContractFile, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB,
   saveContractBoq, importContractBoq, exportContractBoq, generateAssetsFromBoq, BOQ_ASSET_CATEGORIES,
+  fetchContractPaymentTerms, saveContractPaymentTerms,
   type ContractListItem, type ContractDetail, type ContractFile, type BoqLine, type BoqImportResult,
+  type ContractPaymentTermView,
 } from '@/api/contract'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
-import { fetchAssets, checkUploadFile, saveFile, type AssetListItem } from '@/api/asset'
+import { fetchAssets, checkUploadFile, saveFile, toTermRows, toTermInputs, checkTermRows,
+  type AssetListItem, type TermRow } from '@/api/asset'
+import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +99,7 @@ async function openDetail(id: number) {
   detail.value = await fetchContractDetail(id)
   drawer.value = true
   loadFiles()
+  loadPaymentTerms(id)
 }
 
 // ---- 签约 ----
@@ -142,6 +147,49 @@ async function submitSign() {
     openDetail(id)
   } finally {
     signSaving.value = false
+  }
+}
+
+// ---- 合同付款方式(V118:唯一真相源,该合同下设备与采购单全部继承) ----
+const payView = ref<ContractPaymentTermView | null>(null)
+const payEditing = ref(false)
+const paySaving = ref(false)
+const payRows = ref<TermRow[]>([])
+async function loadPaymentTerms(id: number) {
+  payView.value = await fetchContractPaymentTerms(id)
+  payEditing.value = false
+}
+function startPayEdit() {
+  const v = payView.value
+  if (!v) return
+  payRows.value = toTermRows(v.terms.length ? v.terms : v.defaultTemplate)
+  payEditing.value = true
+}
+function pctText(r?: number) {
+  if (r == null) return '—'
+  return (r * 100).toFixed(2).replace(/\.?0+$/, '') + '%'
+}
+async function submitPaymentTerms() {
+  const v = payView.value
+  if (!v) return
+  const err = checkTermRows(payRows.value)
+  if (err) { ElMessage.warning('付款方式：' + err); return }
+  const lockedNames = v.terms.filter((t) => t.locked).map((t) => t.stageName)
+  if (lockedNames.length) {
+    try {
+      await ElMessageBox.confirm(
+        `阶段 ${lockedNames.join('、')} 已有付款，比例不能改、段不能删。其余改动保存后会重算该合同下 ${v.assets.length} 台设备的「待付」应付。确认保存？`,
+        '保存合同付款方式', { type: 'warning', confirmButtonText: '确认保存' },
+      )
+    } catch { return }
+  }
+  paySaving.value = true
+  try {
+    payView.value = await saveContractPaymentTerms(v.contractId, toTermInputs(payRows.value))
+    payEditing.value = false
+    ElMessage.success('付款方式已保存，该合同下设备的待付应付已重算')
+  } finally {
+    paySaving.value = false
   }
 }
 
@@ -560,6 +608,60 @@ onMounted(() => {
           <el-descriptions-item label="= 税后净利"><strong style="color:#67c23a">{{ money(detail.pnl.netProfit) }}</strong> ({{ (detail.pnl.netMargin * 100).toFixed(1) }}%)</el-descriptions-item>
         </el-descriptions>
 
+        <!-- 合同付款方式(V118:设备与采购单全部继承) -->
+        <div class="block-title block-title-row">
+          <span>付款方式（该合同下的设备与采购单全部继承；预计付款 = 设备合同价 × 比例）</span>
+          <span v-if="payView">
+            <el-button v-if="!payEditing && !payView.sensitiveMasked" type="primary" link size="small" @click="startPayEdit">
+              {{ payView.terms.length ? '编辑' : '设置付款方式' }}
+            </el-button>
+            <template v-if="payEditing">
+              <el-button link size="small" @click="payEditing = false">取消</el-button>
+              <el-button type="primary" link size="small" :loading="paySaving" @click="submitPaymentTerms">保存</el-button>
+            </template>
+          </span>
+        </div>
+        <template v-if="payView">
+          <div class="pay-sum">
+            <span>{{ payView.describe || '尚未设置' }}</span>
+            <span>覆盖设备 <b>{{ payView.assets.length }}</b> 台</span>
+            <span>设备合同价合计 <b>{{ money(payView.equipmentTotal) }}</b></span>
+          </div>
+          <PaymentTermsEditor v-if="payEditing" v-model="payRows" :base-price="payView.equipmentTotal || null" />
+          <el-table v-else-if="payView.terms.length" :data="payView.terms" size="small" border>
+            <el-table-column label="阶段" width="110">
+              <template #default="{ row }">
+                {{ row.stageName }}
+                <el-tag v-if="row.locked" size="small" type="success" effect="plain">已付</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="比例" width="80" align="right">
+              <template #default="{ row }">{{ pctText(row.ratio) }}</template>
+            </el-table-column>
+            <el-table-column label="触发 / 到期" width="140">
+              <template #default="{ row }">{{ row.triggerPoint }} + {{ row.dueDays }} 天</template>
+            </el-table-column>
+            <el-table-column label="预计付款合计" width="140" align="right">
+              <template #default="{ row }">{{ money(row.expectedTotal) }}</template>
+            </el-table-column>
+            <el-table-column label="已生成应付" min-width="220">
+              <template #default="{ row }">
+                <span>{{ money(row.payableTotal) }}</span>
+                <span v-if="row.paidTotal" class="mini-note">已付 {{ money(row.paidTotal) }}</span>
+                <span v-if="row.pendingTotal" class="mini-note pay-warn">待付 {{ money(row.pendingTotal) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="尚未设置付款方式，点右上「设置付款方式」" :image-size="50" />
+          <div v-if="payView.assets.length" class="pay-assets">
+            <span class="mini-note">覆盖的台账设备：</span>
+            <el-tag v-for="a in payView.assets" :key="a.assetId" size="small" effect="plain" class="pay-asset-tag">
+              {{ a.label }} · {{ money(a.purchasePrice) }}<span v-if="a.pendingTotal"> · 待付 {{ money(a.pendingTotal) }}</span>
+            </el-tag>
+          </div>
+          <div v-if="payView.note" class="mini-note">{{ payView.note }}</div>
+        </template>
+
         <!-- 合同清单(《工程量清单计价表》) -->
         <div class="block-title block-title-row">
           <span>合同清单（工程量清单计价表）</span>
@@ -790,6 +892,11 @@ onMounted(() => {
 .filter-card .total { margin-left: auto; font-size: 12px; color: #666; }
 .detail .block-title { font-weight: 600; margin: 16px 0 8px; border-left: 3px solid #409eff; padding-left: 8px; }
 .block-title-row { display: flex; align-items: center; justify-content: space-between; }
+.pay-sum { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #555; margin-bottom: 8px; }
+.pay-assets { margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pay-asset-tag { margin: 0; }
+.mini-note { color: #909399; font-size: 12px; margin-left: 8px; }
+.pay-warn { color: #e8a33d; }
 .recon { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: #fef0f0; border-radius: 6px; font-size: 13px; }
 .recon.ok { background: #f0f9eb; }
 .recon .eq { font-weight: 600; }

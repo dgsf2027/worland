@@ -7,8 +7,8 @@ import {
   type PurchaseListItem, type PurchaseDetail,
 } from '@/api/purchase'
 import { toTermInputs, checkTermRows, fetchAssets, type TermRow, type AssetListItem } from '@/api/asset'
-import { fetchContracts, type ContractListItem } from '@/api/contract'
-import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
+import { fetchContracts, fetchContractPaymentTerms, type ContractListItem,
+  type ContractPaymentTermView } from '@/api/contract'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,7 +36,7 @@ async function openDetail(id: number) {
 
 // ---- 下单:选合同 → 勾该合同下的台账设备(供应商/付款条件/预计付款金额自动带出) ----
 const orderDlg = ref(false)
-const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, remark: '' })
+const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, remark: '', expectReceiveDate: '' })
 const contracts = ref<ContractListItem[]>([])
 const contractsLoading = ref(false)
 const candidateAssets = ref<AssetListItem[]>([])
@@ -54,6 +54,7 @@ async function loadContracts() {
 async function loadCandidateAssets(contractId?: number) {
   candidateAssets.value = []
   pickedAssets.value = []
+  loadOrderPayTerms(contractId)
   if (!contractId) return
   assetsLoading.value = true
   try {
@@ -62,20 +63,21 @@ async function loadCandidateAssets(contractId?: number) {
     assetsLoading.value = false
   }
 }
-const defaultTermRows = (): TermRow[] => [
-  { stageName: '首付', ratioPct: 30, triggerPoint: '下单', dueDays: 0 },
-  { stageName: '验收', ratioPct: 60, triggerPoint: '入库', dueDays: 0 },
-  { stageName: '尾款', ratioPct: 10, triggerPoint: '入库', dueDays: 90 },
-]
-const orderTermRows = ref<TermRow[]>(defaultTermRows())
+/** 继承的合同付款方式(只读:付款方式以合同为唯一真相源,V118) */
+const orderPayView = ref<ContractPaymentTermView | null>(null)
+async function loadOrderPayTerms(contractId?: number) {
+  orderPayView.value = null
+  if (!contractId) return
+  orderPayView.value = await fetchContractPaymentTerms(contractId)
+}
 /** 预计付款金额合计 = 勾选设备的合同价合计 */
 const orderTotal = computed(() => pickedAssets.value.reduce((s, a) => s + Number(a.purchasePrice || 0), 0))
 const unavailableTip = (row: AssetListItem) => (row.purchasePrice == null ? '该设备没有合同价，请先在合同清单里填单价' : '')
 async function openOrder() {
-  Object.assign(oForm, { no: '', contractId: undefined, remark: '' })
+  Object.assign(oForm, { no: '', contractId: undefined, remark: '', expectReceiveDate: '' })
   candidateAssets.value = []
   pickedAssets.value = []
-  orderTermRows.value = defaultTermRows()
+  orderPayView.value = null
   orderDlg.value = true
   if (!contracts.value.length) await loadContracts()
 }
@@ -84,17 +86,15 @@ async function submitOrder() {
   if (!pickedAssets.value.length) { ElMessage.warning('请在下方勾选要采购的设备'); return }
   const noPrice = pickedAssets.value.filter((a) => a.purchasePrice == null)
   if (noPrice.length) { ElMessage.warning(`有 ${noPrice.length} 台设备没有合同价，请先在合同清单里填单价`); return }
-  const termErr = checkTermRows(orderTermRows.value)
-  if (termErr) { ElMessage.warning('付款条件：' + termErr); return }
   try {
     await createPurchaseOrder({
       no: oForm.no,
       contractId: oForm.contractId,
       remark: oForm.remark,
+      expectReceiveDate: oForm.expectReceiveDate || undefined,
       items: pickedAssets.value.map((a) => ({ assetId: a.id })),
-      paymentTerms: toTermInputs(orderTermRows.value),
     })
-    ElMessage.success('采购下单成功（已按付款条件逐台生成「下单」阶段应付）')
+    ElMessage.success('采购下单成功（已按合同付款方式一次生成全部阶段的应付）')
     orderDlg.value = false
     loadList()
   } catch { /* 无合同拒绝已提示 */ }
@@ -117,6 +117,10 @@ function money(v?: number) { return v == null ? '🔒' : '¥' + v.toLocaleString
 
 function goAsset(id?: number) {
   if (id) router.push({ path: '/asset', query: { id: String(id) } })
+}
+/** 跳合同 · 租金计划 */
+function goContract(contractId?: number) {
+  if (contractId) router.push({ path: '/contract', query: { id: String(contractId) } })
 }
 /** 跳收租 · 收租单，按合同过滤 */
 function goRent(contractId?: number, contractNo?: string) {
@@ -209,6 +213,10 @@ onMounted(() => {
             <el-descriptions-item label="待付应付">{{ money(detail.payableOutstanding) }}</el-descriptions-item>
             <el-descriptions-item label="下单日">{{ detail.orderDate }}</el-descriptions-item>
             <el-descriptions-item label="入库日">{{ detail.receiveDate || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="预计入库日">{{ detail.expectReceiveDate || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="付款方式（继承自合同）" :span="2">
+              {{ detail.contractPaymentTerms || '—' }}
+            </el-descriptions-item>
           </el-descriptions>
 
           <template v-if="cov">
@@ -285,7 +293,12 @@ onMounted(() => {
             </el-table-column>
             <el-table-column prop="supplierName" label="供应商" min-width="120"><template #default="{ row }">{{ row.supplierName || '—' }}</template></el-table-column>
             <el-table-column prop="stage" label="付款阶段" width="100" />
-            <el-table-column prop="dueDate" label="到期日" width="120" />
+            <el-table-column label="到期日" width="150">
+              <template #default="{ row }">
+                {{ row.dueDate || '—' }}
+                <el-tag v-if="row.dueProvisional" size="small" type="info" effect="plain">预计</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="预计付款金额" width="130"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }"><el-tag size="small" :type="payTag[row.status] || 'info'">{{ row.status }}</el-tag></template>
@@ -330,11 +343,25 @@ onMounted(() => {
       <div v-if="oForm.contractId && !candidateAssets.length && !assetsLoading" class="muted">
         该合同下还没有设备：请先在「合同 · 签约与租金计划」的合同清单里按数量一键生成设备。
       </div>
-      <h4>合同付款条件（整单默认，逐台按各自合同价 × 比例生成应付）</h4>
-      <PaymentTermsEditor v-model="orderTermRows" :base-price="orderTotal || null" />
+      <h4>付款方式（继承自合同，不在这里改）</h4>
+      <div v-if="orderPayView" class="inherit-box">
+        <div><b>{{ orderPayView.describe || '该合同还没设付款方式' }}</b></div>
+        <div class="muted">
+          付款方式以合同为准。
+          <a class="lnk" @click="goContract(oForm.contractId)">到合同里修改 →</a>
+          <span v-if="!orderPayView.terms.length">（不设的话，下单时会按规则自动写入默认三段：首付30%下单 / 验收60%入库 / 尾款10%入库+90天）</span>
+        </div>
+      </div>
+      <div v-else class="muted">先选合同，这里会显示继承的付款方式。</div>
+      <el-form :inline="true" style="margin-top:8px">
+        <el-form-item label="预计入库日">
+          <el-date-picker v-model="oForm.expectReceiveDate" type="date" value-format="YYYY-MM-DD"
+            placeholder="默认下单日 + 30 天" style="width:180px" />
+        </el-form-item>
+      </el-form>
       <div class="muted">
         已勾 {{ pickedAssets.length }} 台，预计付款合计 {{ money(orderTotal) }}。
-        设备详情里单独设过付款条件的，按设备自己的条件走；其余用这里的整单条件。
+        下单会按合同付款方式<b>一次生成全部阶段</b>的应付：「入库」阶段在实际入库前按预计入库日推算到期，标注「预计」，入库时自动改成真实日期。
       </div>
       <template #footer><el-button @click="orderDlg = false">取消</el-button><el-button type="primary" @click="submitOrder">下单</el-button></template>
     </el-dialog>
@@ -356,4 +383,5 @@ h4 { margin: 16px 0 8px; }
 .cov-v { font-size: 18px; font-weight: 600; margin: 2px 0; }
 .cov-v.ok { color: #67c23a; }
 .cov-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.inherit-box { background: #f6f9ff; border: 1px solid #e3ecff; border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 </style>

@@ -61,6 +61,11 @@ public final class PaymentTermDtos {
     /** 设备详情:付款条件 + 预计付款 + 对应应付 */
     @Data
     public static class PaymentPlan {
+        /** 付款方式所属合同(V118 起条件挂合同,设备只继承) */
+        private Long contractId;
+        private String contractNo;
+        /** 是否继承自合同(V118 起恒为 true;设备上不再单独维护条件) */
+        private Boolean inherited;
         /** 采购单(非采购建档为 null,不生成应付) */
         private Long purchaseInId;
         private String purchaseNo;
@@ -96,5 +101,7 @@ public final class PaymentTermDtos {
         private BigDecimal payableAmount;
         private LocalDate payableDueDate;
         private String payableStatus;
+        /** 到期日是否为预估(未入库时按预计入库日推算) */
+        private Boolean dueProvisional;
     }
 }

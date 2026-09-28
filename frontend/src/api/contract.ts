@@ -219,3 +219,50 @@ export function uploadContractFile(id: number, file: File, onProgress?: (p: numb
     onUploadProgress: (e) => { if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100)) },
   })
 }
+
+// ---- 合同付款方式（V118：唯一真相源，该合同下设备与采购单全部继承） ----
+
+export interface ContractTermRow {
+  id?: number
+  seq?: number
+  stageName: string
+  ratio: number
+  triggerPoint: string
+  dueDays: number
+  /** 该段在本合同下的预计付款合计 = Σ(设备合同价 × 比例) */
+  expectedTotal?: number
+  payableTotal?: number
+  paidTotal?: number
+  pendingTotal?: number
+  /** 已有付款 → 比例不可改、段不可删 */
+  locked?: boolean
+}
+
+export interface ContractTermAsset {
+  assetId: number
+  label?: string
+  serialNo?: string
+  status?: string
+  purchasePrice?: number
+  pendingTotal?: number
+}
+
+export interface ContractPaymentTermView {
+  contractId: number
+  contractNo?: string
+  customerName?: string
+  describe?: string
+  terms: ContractTermRow[]
+  assets: ContractTermAsset[]
+  equipmentTotal?: number
+  defaultTemplate: { stageName: string; ratio: number; triggerPoint: string; dueDays: number }[]
+  sensitiveMasked?: boolean
+  note?: string
+}
+
+export function fetchContractPaymentTerms(id: number): Promise<ContractPaymentTermView> {
+  return request.get(`/rent/contracts/${id}/payment-terms`)
+}
+export function saveContractPaymentTerms(id: number, terms: Record<string, any>[]): Promise<ContractPaymentTermView> {
+  return request.put(`/rent/contracts/${id}/payment-terms`, { terms })
+}

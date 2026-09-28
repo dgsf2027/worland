@@ -1,5 +1,6 @@
 package top.aole.rent.modules.purchase.dto;
 
+import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
 import javax.validation.Valid;
@@ -27,19 +28,19 @@ public class PurchaseOrderRequest {
 
     private Long supplierId;
 
-    /** 首付比例(空=取 rule 默认 30%) */
+    /** 首付比例:仅当合同还没设付款方式、需要写入默认三段时生效(空=取 rule 默认 30%) */
     private BigDecimal firstPayRatio;
 
-    /** 尾款账期天数(空=取 rule 默认 90 天) */
+    /** 尾款账期天数:同上(空=取 rule 默认 90 天) */
     private Integer accountDays;
+
+    @ApiModelProperty(value = "预计入库日(空=下单日 + rule_config[purchase_lead_days]);"
+            + "未入库时按此推算「入库」阶段应付的到期日", example = "2026-10-31")
+    private java.time.LocalDate expectReceiveDate;
 
     private LocalDate orderDate;
 
     private String remark;
-
-    /** 整单默认付款条件(自定义多段,合计 100%);空=默认 首付/验收/尾款 */
-    @Valid
-    private List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> paymentTerms;
 
     @NotEmpty(message = "至少 1 件采购明细")
     @Valid
@@ -52,9 +53,5 @@ public class PurchaseOrderRequest {
         private Long assetId;
 
         private String remark;
-
-        /** 本件付款条件;空=沿用设备上已有的条件,再空=整单付款条件 */
-        @Valid
-        private List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> paymentTerms;
     }
 }

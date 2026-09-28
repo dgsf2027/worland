@@ -91,6 +91,7 @@ public class AssetService {
     private final ContractMapper contractMapper;
     private final AuditLogService auditLogService;
     private final top.aole.rent.modules.transfer.service.TransferQueryService transferQueryService;
+    private final top.aole.rent.modules.purchase.mapper.PayableMapper payableMapper;
     private final AssetPaymentService paymentService;
 
     /** 设备状态集合。状态可直接改(不限先后顺序),改为「在租」须带承租客户与合同。 */
@@ -131,8 +132,19 @@ public class AssetService {
         List<Asset> all = assetMapper.selectList(qw);
 
         // 处置状态批量查(一次查完,避免逐台反查转让单)
-        java.util.Map<Long, String> disposalStatus = transferQueryService.disposalStatusByAsset(
-                all.stream().map(Asset::getId).collect(Collectors.toList()));
+        List<Long> allIds = all.stream().map(Asset::getId).collect(Collectors.toList());
+        java.util.Map<Long, String> disposalStatus = transferQueryService.disposalStatusByAsset(allIds);
+        // 待付应付按设备批量汇总(一次 in 查完)
+        java.util.Map<Long, BigDecimal> pendingByAsset = new java.util.HashMap<>();
+        if (!allIds.isEmpty()) {
+            for (top.aole.rent.modules.purchase.domain.Payable pay : payableMapper.selectList(
+                    new LambdaQueryWrapper<top.aole.rent.modules.purchase.domain.Payable>()
+                            .in(top.aole.rent.modules.purchase.domain.Payable::getAssetId, allIds)
+                            .eq(top.aole.rent.modules.purchase.domain.Payable::getStatus, "待付"))) {
+                pendingByAsset.merge(pay.getAssetId(),
+                        pay.getAmount() == null ? BigDecimal.ZERO : pay.getAmount(), BigDecimal::add);
+            }
+        }
 
         List<AssetListItem> items = new ArrayList<>();
         for (Asset a : all) {
@@ -155,6 +167,9 @@ public class AssetService {
             it.setIntendedCustomerId(a.getIntendedCustomerId());
             it.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
             it.setDisposalStatus(disposalStatus.get(a.getId()));
+            BigDecimal pending = pendingByAsset.get(a.getId());
+            it.setPayablePending(seeCost ? (pending == null ? BigDecimal.ZERO
+                    : pending.setScale(2, java.math.RoundingMode.HALF_UP)) : null);
             it.setSensitiveMasked(!seeCost);
             items.add(it);
         }
@@ -259,11 +274,28 @@ public class AssetService {
         }
     }
 
-    /** 设置设备合同付款条件(自定义多段);采购入库设备同步重算待付应付。 */
+    /**
+     * 合同付款方式变更后,按设备 id 重算该设备的待付应付(合同服务调用;已付阶段锁定不动)。
+     */
+    @Transactional
+    public void resyncPaymentPending(Long assetId) {
+        Asset a = assetMapper.selectById(assetId);
+        if (a != null && !Integer.valueOf(1).equals(a.getIsDeleted())) {
+            paymentService.resyncPending(a);
+        }
+    }
+
+    /**
+     * 设备上不再单独维护付款条件(V118):付款方式以合同为唯一真相源。
+     * 保留本方法只为给旧调用方一个明确的错误提示，而不是 404。
+     */
     @Transactional
     public void updatePaymentTerms(Long id, PaymentTermDtos.SaveRequest req) {
         requireCostRole("设置合同付款条件");
-        paymentService.updateTerms(load(id), req.getTerms());
+        Asset a = load(id);
+        throw new BizException(400, "付款条件已改为挂在合同上，请到合同"
+                + (a.getContractId() == null ? "" : "#" + a.getContractId())
+                + "的「付款方式」里修改（本设备会自动继承）");
     }
 
     private void applySave(Asset a, AssetSaveRequest req) {

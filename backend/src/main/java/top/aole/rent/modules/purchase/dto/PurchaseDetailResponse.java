@@ -35,6 +35,12 @@ public class PurchaseDetailResponse {
 
     private LocalDate receiveDate;
 
+    /** 预计入库日(未入库时「入库」阶段应付的到期日基准) */
+    private LocalDate expectReceiveDate;
+
+    /** 继承的合同付款方式摘要:首付30%(下单) / 验收66%(入库)… */
+    private String contractPaymentTerms;
+
     private String remark;
 
     private Boolean sensitiveMasked;
@@ -123,6 +129,8 @@ public class PurchaseDetailResponse {
         private String serialNo;
         private String stage;
         private LocalDate dueDate;
+        /** 到期日是否为预估(按预计入库日推算,入库后改为真实日期) */
+        private Boolean dueProvisional;
         /** 金额(敏感·GP/LP 为 null) */
         private BigDecimal amount;
         private String status;

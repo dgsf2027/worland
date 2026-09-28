@@ -14,6 +14,9 @@ import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
 import top.aole.rent.modules.asset.service.AssetService;
 import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.contract.domain.ContractPaymentTerm;
+import top.aole.rent.modules.contract.dto.ContractPaymentDtos;
+import top.aole.rent.modules.purchase.domain.Payable;
 import top.aole.rent.modules.contract.domain.ContractAsset;
 import top.aole.rent.modules.contract.domain.ContractChange;
 import top.aole.rent.modules.contract.domain.DepositLedger;
@@ -63,6 +66,8 @@ public class ContractService {
     private final ContractMapper contractMapper;
     private final ContractAssetMapper contractAssetMapper;
     private final ContractBoqService boqService;
+    private final ContractPaymentService contractPaymentService;
+    private final top.aole.rent.modules.purchase.mapper.PayableMapper payableMapper;
     private final RentScheduleMapper rentScheduleMapper;
     private final DepositLedgerMapper depositLedgerMapper;
     private final ContractChangeMapper contractChangeMapper;
@@ -672,6 +677,113 @@ public class ContractService {
                 "term=" + remaining + ",status=关闭",
                 (req != null && req.getDetail() != null ? req.getDetail() : "提前结清") + "·截断" + truncated + "期");
         log.info("合同提前结清: id={}, 截断{}期, 剩{}期", id, truncated, remaining);
+    }
+
+    // ============ 合同付款方式(V118) ============
+
+    /** 付款方式视图:多段条件 + 它覆盖的台账设备 + 各段合计要付多少。 */
+    public ContractPaymentDtos.PaymentTermView paymentTermView(Long id) {
+        Contract c = load(id);
+        boolean seeCost = DataScope.canSeeCost(UserContext.getRole());
+        ContractPaymentDtos.PaymentTermView v = new ContractPaymentDtos.PaymentTermView();
+        v.setContractId(c.getId());
+        v.setContractNo(c.getNo());
+        Customer cust = c.getCustomerId() == null ? null : customerMapper.selectById(c.getCustomerId());
+        v.setCustomerName(cust != null ? cust.getName() : null);
+        v.setDescribe(contractPaymentService.describe(id));
+        v.setDefaultTemplate(contractPaymentService.defaultTerms(null, null));
+        v.setSensitiveMasked(!seeCost);
+
+        List<Asset> assets = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
+                .eq(Asset::getContractId, id).orderByAsc(Asset::getId));
+        BigDecimal equipTotal = BigDecimal.ZERO;
+        List<Payable> payables = assets.isEmpty() ? new ArrayList<>()
+                : payableMapper.selectList(new LambdaQueryWrapper<Payable>()
+                        .in(Payable::getAssetId, assets.stream().map(Asset::getId).collect(Collectors.toList())));
+        for (Asset a : assets) {
+            ContractPaymentDtos.AssetRow row = new ContractPaymentDtos.AssetRow();
+            row.setAssetId(a.getId());
+            row.setSerialNo(a.getSerialNo());
+            row.setStatus(a.getStatus());
+            String tail = a.getModel() != null && !a.getModel().trim().isEmpty() ? a.getModel().trim() : a.getSerialNo();
+            row.setLabel((a.getCategory() == null ? "" : a.getCategory() + " · ") + tail);
+            row.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
+            BigDecimal pending = BigDecimal.ZERO;
+            for (Payable p : payables) {
+                if (a.getId().equals(p.getAssetId()) && "待付".equals(p.getStatus())) {
+                    pending = pending.add(p.getAmount() == null ? BigDecimal.ZERO : p.getAmount());
+                }
+            }
+            row.setPendingTotal(seeCost ? pending.setScale(2, RoundingMode.HALF_UP) : null);
+            if (a.getPurchasePrice() != null) {
+                equipTotal = equipTotal.add(a.getPurchasePrice());
+            }
+            v.getAssets().add(row);
+        }
+        v.setEquipmentTotal(seeCost ? equipTotal.setScale(2, RoundingMode.HALF_UP) : null);
+
+        for (ContractPaymentTerm t : contractPaymentService.terms(id)) {
+            ContractPaymentDtos.TermRow row = new ContractPaymentDtos.TermRow();
+            row.setId(t.getId());
+            row.setSeq(t.getSeq());
+            row.setStageName(t.getStageName());
+            row.setRatio(t.getRatio());
+            row.setTriggerPoint(t.getTriggerPoint());
+            row.setDueDays(t.getDueDays());
+            BigDecimal expected = BigDecimal.ZERO;
+            for (Asset a : assets) {
+                if (a.getPurchasePrice() != null) {
+                    expected = expected.add(a.getPurchasePrice().multiply(t.getRatio()));
+                }
+            }
+            row.setExpectedTotal(seeCost ? expected.setScale(2, RoundingMode.HALF_UP) : null);
+            BigDecimal total = BigDecimal.ZERO;
+            BigDecimal paid = BigDecimal.ZERO;
+            BigDecimal pending = BigDecimal.ZERO;
+            boolean locked = false;
+            for (Payable p : payables) {
+                if (!t.getId().equals(p.getTermId()) || "红冲".equals(p.getStatus())) {
+                    continue;
+                }
+                BigDecimal amt = p.getAmount() == null ? BigDecimal.ZERO : p.getAmount();
+                total = total.add(amt);
+                if ("已付".equals(p.getStatus())) {
+                    paid = paid.add(amt);
+                    locked = true;
+                } else if ("待付".equals(p.getStatus())) {
+                    pending = pending.add(amt);
+                }
+            }
+            row.setPayableTotal(seeCost ? total.setScale(2, RoundingMode.HALF_UP) : null);
+            row.setPaidTotal(seeCost ? paid.setScale(2, RoundingMode.HALF_UP) : null);
+            row.setPendingTotal(seeCost ? pending.setScale(2, RoundingMode.HALF_UP) : null);
+            row.setLocked(locked);
+            v.getTerms().add(row);
+        }
+
+        if (v.getTerms().isEmpty()) {
+            v.setNote("还没设付款方式。采购下单前必须先设，"
+                    + "不设的话下单时会自动写入默认三段");
+        } else if (assets.isEmpty()) {
+            v.setNote("本合同还没挂设备，各段预计付款为 0；"
+                    + "到合同清单里按数量生成设备后自动带出");
+        }
+        return v;
+    }
+
+    /** 保存合同付款方式并重算该合同下设备的待付应付(已付阶段锁定不动)。 */
+    @Transactional
+    public ContractPaymentDtos.PaymentTermView savePaymentTerms(
+            Long id, List<top.aole.rent.modules.asset.dto.PaymentTermDtos.TermInput> terms) {
+        Contract c = load(id);
+        contractPaymentService.replaceAll(c.getId(), terms);
+        int resynced = 0;
+        for (Asset a : assetMapper.selectList(new LambdaQueryWrapper<Asset>().eq(Asset::getContractId, id))) {
+            assetService.resyncPaymentPending(a.getId());
+            resynced++;
+        }
+        log.info("[合同付款方式] 合同{} 保存后重算 {} 台设备的待付应付", id, resynced);
+        return paymentTermView(id);
     }
 
     // ============ 工具 ============

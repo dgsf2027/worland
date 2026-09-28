@@ -27,6 +27,7 @@ import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.mapper.DepositLedgerMapper;
 import top.aole.rent.modules.contract.mapper.RentScheduleMapper;
 import top.aole.rent.modules.contract.service.ContractBoqService;
+import top.aole.rent.modules.contract.service.ContractPaymentService;
 import top.aole.rent.modules.contract.service.ContractService;
 import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
@@ -84,7 +85,7 @@ class ContractEditTest {
         changeMapper = mock(ContractChangeMapper.class);
         assetService = mock(AssetService.class);
         customerMapper = mock(CustomerMapper.class);
-        service = new ContractService(contractMapper, contractAssetMapper, mock(ContractBoqService.class),
+        service = new ContractService(contractMapper, contractAssetMapper, mock(ContractBoqService.class), mock(ContractPaymentService.class), mock(top.aole.rent.modules.purchase.mapper.PayableMapper.class),
                 scheduleMapper, depositMapper, changeMapper,
                 mock(AssetMapper.class), assetService, customerMapper, mock(RuleConfigService.class), mock(AuditLogService.class));
         UserContext.set(new CurrentUser(1005L, "财务", "财务", null));

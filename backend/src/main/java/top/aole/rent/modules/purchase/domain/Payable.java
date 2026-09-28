@@ -38,6 +38,9 @@ public class Payable {
 
     private LocalDate dueDate;
 
+    /** 到期日是否为预估(按采购单的预计入库日推算;实际入库后改写真实日期并置 0) */
+    private Integer dueProvisional;
+
     /** 应付金额(元·退款红字为负) */
     private BigDecimal amount;
 

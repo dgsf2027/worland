@@ -42,6 +42,9 @@ public class PurchaseIn {
 
     private LocalDate orderDate;
 
+    /** 预计入库日(未入库时按此推算「入库」阶段应付的到期日) */
+    private LocalDate expectReceiveDate;
+
     private LocalDate receiveDate;
 
     private Long projectId;
