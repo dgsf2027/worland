@@ -10,12 +10,15 @@ import top.aole.rent.common.auth.UserContext;
 import top.aole.rent.common.exception.BizException;
 import top.aole.rent.common.result.PageResult;
 import top.aole.rent.modules.asset.domain.Asset;
+import top.aole.rent.modules.asset.mapper.AssetMapper;
 import top.aole.rent.modules.asset.service.AssetService;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.domain.ContractAsset;
 import top.aole.rent.modules.contract.mapper.ContractAssetMapper;
 import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.service.ContractService;
+import top.aole.rent.modules.customer.domain.Customer;
+import top.aole.rent.modules.customer.mapper.CustomerMapper;
 import top.aole.rent.modules.finance.service.VoucherService;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 import top.aole.rent.modules.transfer.domain.TransferOrder;
@@ -59,6 +62,9 @@ public class TransferService {
     private final VoucherService voucherService;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    /** 只读查台账(与 AssetService.requireAsset 不同:设备已删返回 null,不抛异常) */
+    private final AssetMapper assetMapper;
+    private final CustomerMapper customerMapper;
 
     // ============ M4-01/02 到期转让 ============
 
@@ -383,14 +389,20 @@ public class TransferService {
                 .eq(TransferOrderLine::getTransferOrderId, id).orderByAsc(TransferOrderLine::getId));
         List<TransferDtos.TransferLineItem> lis = new ArrayList<>();
         for (TransferOrderLine l : lines) {
-            Asset a = assetService.requireAsset(l.getAssetId());
+            // 宽松查:设备可能已被删除(如 V116 清理演示数据),此时详情仍要能打开
+            Asset a = l.getAssetId() == null ? null : assetMapper.selectById(l.getAssetId());
             TransferDtos.TransferLineItem li = new TransferDtos.TransferLineItem();
             li.setId(l.getId());
             li.setAssetId(l.getAssetId());
-            li.setSerialNo(a.getSerialNo());
-            li.setCategory(a.getCategory());
+            li.setAssetLabel(assetLabel(l.getAssetId(), a));
+            if (a != null) {
+                li.setSerialNo(a.getSerialNo());
+                li.setCategory(a.getCategory());
+                li.setModel(a.getModel());
+                li.setAssetStatus(a.getStatus());
+                li.setMarketPrice(a.getMarketPrice());
+            }
             li.setBookValue(l.getBookValue());
-            li.setMarketPrice(a.getMarketPrice());
             li.setTransferPrice(l.getTransferPrice());
             li.setGain(l.getGain());
             li.setNominalFlag(Integer.valueOf(1).equals(l.getNominalFlag()));
@@ -410,6 +422,7 @@ public class TransferService {
         it.setNo(o.getNo());
         it.setContractId(o.getContractId());
         it.setContractNo(contractNo(o.getContractId()));
+        it.setCustomerName(customerNameOfContract(o.getContractId()));
         it.setType(o.getType());
         it.setAssetCount(o.getAssetCount());
         it.setTotalPrice(o.getTotalPrice());
@@ -422,6 +435,33 @@ public class TransferService {
         it.setBizTime(o.getBizTime());
         it.setRemark(o.getRemark());
         return it;
+    }
+
+    /** 设备显示名:品类 · 型号(型号为空退回序列号);设备已删返回「#id」。 */
+    private static String assetLabel(Long assetId, Asset a) {
+        if (a == null) {
+            return assetId == null ? null : "#" + assetId;
+        }
+        String head = a.getCategory() == null ? "" : a.getCategory();
+        String tail = a.getModel() != null && !a.getModel().trim().isEmpty()
+                ? a.getModel().trim() : a.getSerialNo();
+        if (head.isEmpty()) {
+            return tail;
+        }
+        return tail == null || tail.isEmpty() ? head : head + " · " + tail;
+    }
+
+    /** 合同客户名;合同为空或查不到返回 null。 */
+    private String customerNameOfContract(Long contractId) {
+        if (contractId == null) {
+            return null;
+        }
+        Contract c = contractMapper.selectById(contractId);
+        if (c == null || c.getCustomerId() == null) {
+            return null;
+        }
+        Customer cust = customerMapper.selectById(c.getCustomerId());
+        return cust != null ? cust.getName() : ("客户#" + c.getCustomerId());
     }
 
     /** 名义价守卫判定:转让价 &lt; 账面价 或 转让价 &lt; 市场价×下限。 */

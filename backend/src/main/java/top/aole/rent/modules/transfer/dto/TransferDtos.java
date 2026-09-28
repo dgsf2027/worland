@@ -56,6 +56,8 @@ public class TransferDtos {
         private String no;
         private Long contractId;
         private String contractNo;
+        /** 合同客户(到期转让必有;二手/报废按台处置时为空) */
+        private String customerName;
         private String type;
         private Integer assetCount;
         private BigDecimal totalPrice;
@@ -73,8 +75,14 @@ public class TransferDtos {
     public static class TransferLineItem {
         private Long id;
         private Long assetId;
+        /** 设备显示名:品类 · 型号(型号为空退回序列号);设备已删则为「#id」 */
+        private String assetLabel;
         private String serialNo;
         private String category;
+        private String model;
+        /** 设备当前台账状态(设备已删为空) */
+        private String assetStatus;
+        /** 转让当时的账面价快照(存在行上,设备删了也还在) */
         private BigDecimal bookValue;
         private BigDecimal marketPrice;
         private BigDecimal transferPrice;
