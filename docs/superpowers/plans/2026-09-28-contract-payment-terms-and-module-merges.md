@@ -159,22 +159,18 @@ WHERE is_deleted = 0
   AND NOT EXISTS (SELECT 1 FROM yc_rent_asset a
                   WHERE a.id = yc_rent_asset_depreciation_line.asset_id AND a.is_deleted = 0);
 
--- 结账分配与月度报表:清空
-UPDATE yc_rent_rent_distribution SET is_deleted = 1 WHERE is_deleted = 0;
-UPDATE yc_rent_monthly_report SET is_deleted = 1 WHERE is_deleted = 0;
+-- 结账分配与月度报表:清空(物理删)
+DELETE FROM yc_rent_rent_distribution;
+DELETE FROM yc_rent_monthly_report;
 
 DROP TEMPORARY TABLE tmp_orphan_voucher;
 ```
 
 注意：`UPDATE yc_rent_asset_depreciation_line ... NOT EXISTS (... yc_rent_asset_depreciation_line.asset_id)` 在 MySQL 里合法（子查询引用被更新表的列，不是从被更新表 SELECT）。若报 1093，改成先灌临时表再按 id IN 删。
 
-- [ ] **Step 2: 确认 `yc_rent_monthly_report` 与 `yc_rent_rent_distribution` 都有 `is_deleted` 列**
+- [x] **Step 2（执行时已核实，结论与初稿相反）：这两张表必须物理删**
 
-Run:
-```bash
-cd "/c/Users/李伟/Documents/worland" && awk "/CREATE TABLE yc_rent_monthly_report /,/ENGINE=/" backend/src/main/resources/db/migration/V11__monthly_report_llm.sql | grep is_deleted; awk "/CREATE TABLE yc_rent_rent_distribution /,/ENGINE=/" backend/src/main/resources/db/migration/V10__distribution_investor.sql | grep is_deleted
-```
-Expected: 两行都打印出 `is_deleted tinyint(1) NOT NULL DEFAULT 0`。若某张表没有该列，改成 `DELETE FROM`。
+`yc_rent_monthly_report` 的唯一键是 `(period, is_deleted)` —— 同账期只容得下「一条有效 + 一条已删」，逻辑删会在该账期已有已删行时撞 `Duplicate entry`。`yc_rent_rent_distribution` 的 `uk_distribution_no` 唯一，逻辑删的行仍占着分配单号。两处都改成 `DELETE FROM`，理由写在迁移文件头。
 
 - [ ] **Step 3: 本机 MySQL 验证（造孤儿 + 对照组）**
 
