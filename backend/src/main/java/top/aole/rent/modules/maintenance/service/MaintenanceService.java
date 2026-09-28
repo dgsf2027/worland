@@ -13,6 +13,11 @@ import top.aole.rent.modules.asset.domain.Asset;
 import top.aole.rent.modules.asset.domain.AssetBom;
 import top.aole.rent.modules.asset.mapper.AssetBomMapper;
 import top.aole.rent.modules.asset.mapper.AssetMapper;
+import top.aole.rent.modules.inventory.domain.InvItem;
+import top.aole.rent.modules.inventory.dto.InvDtos;
+import top.aole.rent.modules.inventory.mapper.InvItemMapper;
+import top.aole.rent.modules.inventory.service.InvRules;
+import top.aole.rent.modules.inventory.service.InvService;
 import top.aole.rent.modules.maintenance.domain.Maintenance;
 import top.aole.rent.modules.maintenance.dto.MaintenanceDtos;
 import top.aole.rent.modules.maintenance.mapper.MaintenanceMapper;
@@ -33,6 +38,11 @@ import java.util.List;
  *
  * <p><b>单一真相源</b>:{@code asset_bom.fault_count} 由本服务处理回写(@owner=维保处理);
  * 我方成本口径:责任方=我方 且 非质保内 → ourCost=cost,否则 ourCost=0(供应商/质保承担)。
+ *
+ * <p><b>两类对象</b>(V119,并入资产管理模块后):{@code target_type=asset} 对设备台账开单,
+ * {@code inv_item} 对仓库物品开单。仓库物品的库存数量不由本服务写 —— 建单调
+ * {@link InvService#adjust} 的「送修」、完工调「修好」或「报废」,
+ * {@code stock_qty/repair_qty/scrapped_qty} 的唯一写手仍是资产管理的出入库流转。
  */
 @Slf4j
 @Service
@@ -44,32 +54,32 @@ public class MaintenanceService {
     private final AssetBomMapper bomMapper;
     private final SupplierMapper supplierMapper;
     private final RuleConfigService rules;
+    private final InvItemMapper invItemMapper;
+    private final InvService invService;
+
+    private static final String T_ASSET = "asset";
+    private static final String T_INV_ITEM = "inv_item";
 
     // ============ 报修/建单 ============
 
     @Transactional
     public Long create(MaintenanceDtos.CreateRequest req) {
-        if (req == null || req.getAssetId() == null) {
-            throw new BizException(400, "维保工单需指定 assetId");
+        if (req == null) {
+            throw new BizException(400, "维保工单需指定报修对象");
         }
-        Asset a = assetMapper.selectById(req.getAssetId());
-        if (a == null || Integer.valueOf(1).equals(a.getIsDeleted())) {
-            throw new BizException(404, "设备不存在: id=" + req.getAssetId());
+        String target = req.getTargetType() == null || req.getTargetType().trim().isEmpty()
+                ? T_ASSET : req.getTargetType().trim();
+        if (!T_ASSET.equals(target) && !T_INV_ITEM.equals(target)) {
+            throw new BizException(400, "非法对象类型: " + target + "(允许 asset/inv_item)");
         }
         String type = req.getType() == null ? "报修" : req.getType().trim();
         if (!"报修".equals(type) && !"预防".equals(type) && !"巡检".equals(type)) {
             throw new BizException(400, "非法工单类型: " + type + "(允许 报修/预防/巡检)");
         }
-        if (req.getBomId() != null) {
-            AssetBom b = bomMapper.selectById(req.getBomId());
-            if (b == null || !req.getAssetId().equals(b.getAssetId())) {
-                throw new BizException(400, "故障配件不存在或不属于本设备: bomId=" + req.getBomId());
-            }
-        }
+
         Maintenance m = new Maintenance();
         m.setNo(genNo());
-        m.setAssetId(req.getAssetId());
-        m.setBomId(req.getBomId());
+        m.setTargetType(target);
         m.setType(type);
         m.setStatus("待派工");
         m.setFaultDesc(req.getFaultDesc());
@@ -79,8 +89,68 @@ public class MaintenanceService {
         m.setReportedAt(LocalDateTime.now());
         m.setOperatorId(currentUserId());
         m.setRemark(req.getRemark());
+
+        if (T_ASSET.equals(target)) {
+            if (req.getAssetId() == null) {
+                throw new BizException(400, "设备工单需指定 assetId");
+            }
+            if (req.getInvItemId() != null) {
+                throw new BizException(400, "设备工单不能同时指定仓库物品(两者只能选一个)");
+            }
+            Asset a = assetMapper.selectById(req.getAssetId());
+            if (a == null || Integer.valueOf(1).equals(a.getIsDeleted())) {
+                throw new BizException(404, "设备不存在: id=" + req.getAssetId());
+            }
+            if (req.getBomId() != null) {
+                AssetBom b = bomMapper.selectById(req.getBomId());
+                if (b == null || !req.getAssetId().equals(b.getAssetId())) {
+                    throw new BizException(400, "故障配件不存在或不属于本设备: bomId=" + req.getBomId());
+                }
+            }
+            m.setAssetId(req.getAssetId());
+            m.setBomId(req.getBomId());
+            m.setQty(1);
+            maintenanceMapper.insert(m);
+            log.info("[维保] 建单 {} 设备{} 类型{}", m.getNo(), req.getAssetId(), type);
+            return m.getId();
+        }
+
+        // ---- 仓库物品:先校验,再调资产管理的「送修」流转,库存由那边写 ----
+        if (req.getInvItemId() == null) {
+            throw new BizException(400, "请选择仓库物品");
+        }
+        if (req.getAssetId() != null) {
+            throw new BizException(400, "仓库物品工单不能同时指定设备(两者只能选一个)");
+        }
+        if (req.getBomId() != null) {
+            throw new BizException(400, "故障配件只能用于设备工单");
+        }
+        InvItem item = invItemMapper.selectById(req.getInvItemId());
+        if (item == null || Integer.valueOf(1).equals(item.getIsDeleted())) {
+            throw new BizException(404, "仓库物品不存在: id=" + req.getInvItemId());
+        }
+        int qty = req.getQty() == null ? 1 : req.getQty();
+        if (qty <= 0) {
+            throw new BizException(400, "送修数量须大于 0");
+        }
+        int stock = item.getStockQty() == null ? 0 : item.getStockQty();
+        if (qty > stock) {
+            throw new BizException(400, "库存不足:「" + item.getName() + "」当前库存 " + stock
+                    + " " + (item.getUnit() == null ? "" : item.getUnit()) + ",送修 " + qty);
+        }
+        m.setInvItemId(req.getInvItemId());
+        m.setQty(qty);
+
+        InvDtos.AdjustRequest adj = new InvDtos.AdjustRequest();
+        adj.setType(InvRules.M_TO_REPAIR);
+        adj.setQty(qty);
+        adj.setRemark("维保工单 " + m.getNo() + " 报修送修");
+        adj.setConditionDesc(req.getFaultDesc());
+        m.setMovementOutId(invService.adjust(req.getInvItemId(), adj));
+
         maintenanceMapper.insert(m);
-        log.info("[维保] 建单 {} 设备{} 类型{}", m.getNo(), req.getAssetId(), type);
+        log.info("[维保] 建单 {} 仓库物品{} 数量{} 已送修(movement={})",
+                m.getNo(), req.getInvItemId(), qty, m.getMovementOutId());
         return m.getId();
     }
 
@@ -131,6 +201,22 @@ public class MaintenanceService {
         }
         m.setStatus("已完成");
         m.setFinishedAt(LocalDateTime.now());
+
+        // 仓库物品:完工把数量从「维修中」转出 —— 修好回库存,修不好直接报废。
+        // 数量仍由资产管理的出入库流转写,本服务只记下 movement id。
+        if (T_INV_ITEM.equals(m.getTargetType()) && m.getInvItemId() != null) {
+            boolean scrapped = req != null && Boolean.TRUE.equals(req.getScrapped());
+            InvDtos.AdjustRequest adj = new InvDtos.AdjustRequest();
+            adj.setQty(m.getQty() == null ? 1 : m.getQty());
+            adj.setRemark("维保工单 " + m.getNo() + (scrapped ? " 修不好转报废" : " 修好回库存"));
+            if (scrapped) {
+                adj.setType(InvRules.M_SCRAP);
+                adj.setFromStatus(InvRules.S_REPAIR);
+            } else {
+                adj.setType(InvRules.M_REPAIRED);
+            }
+            m.setMovementBackId(invService.adjust(m.getInvItemId(), adj));
+        }
         maintenanceMapper.updateById(m);
 
         // 故障回写:报修类默认回写 fault_count(除非显式 recordFault=false);预防/巡检默认不回写
@@ -152,11 +238,14 @@ public class MaintenanceService {
 
     // ============ 列表 / 详情 ============
 
-    public PageResult<MaintenanceDtos.MaintenanceItem> list(String status, String type, Long assetId, int page, int size) {
+    public PageResult<MaintenanceDtos.MaintenanceItem> list(String status, String type, Long assetId,
+                                                            String targetType, Long invItemId, int page, int size) {
         LambdaQueryWrapper<Maintenance> qw = new LambdaQueryWrapper<Maintenance>()
                 .eq(status != null && !status.isEmpty(), Maintenance::getStatus, status)
                 .eq(type != null && !type.isEmpty(), Maintenance::getType, type)
                 .eq(assetId != null, Maintenance::getAssetId, assetId)
+                .eq(targetType != null && !targetType.isEmpty(), Maintenance::getTargetType, targetType)
+                .eq(invItemId != null, Maintenance::getInvItemId, invItemId)
                 .orderByDesc(Maintenance::getId);
         List<Maintenance> all = maintenanceMapper.selectList(qw);
         List<MaintenanceDtos.MaintenanceItem> items = new ArrayList<>();
@@ -212,10 +301,21 @@ public class MaintenanceService {
         MaintenanceDtos.MaintenanceItem it = new MaintenanceDtos.MaintenanceItem();
         it.setId(m.getId());
         it.setNo(m.getNo());
+        it.setTargetType(m.getTargetType() == null ? T_ASSET : m.getTargetType());
+        it.setInvItemId(m.getInvItemId());
+        it.setQty(m.getQty());
         it.setAssetId(m.getAssetId());
-        Asset a = assetMapper.selectById(m.getAssetId());
-        it.setSerialNo(a != null ? a.getSerialNo() : null);
-        it.setAssetCategory(a != null ? a.getCategory() : null);
+        if (T_INV_ITEM.equals(it.getTargetType())) {
+            InvItem item = m.getInvItemId() == null ? null : invItemMapper.selectById(m.getInvItemId());
+            it.setTargetLabel(item != null ? (item.getName() + " · " + item.getCode())
+                    : ("物品#" + m.getInvItemId()));
+        } else {
+            Asset a = m.getAssetId() == null ? null : assetMapper.selectById(m.getAssetId());
+            it.setSerialNo(a != null ? a.getSerialNo() : null);
+            it.setAssetCategory(a != null ? a.getCategory() : null);
+            it.setTargetLabel(a != null ? (a.getCategory() + " · " + a.getSerialNo())
+                    : ("设备#" + m.getAssetId()));
+        }
         it.setBomId(m.getBomId());
         if (m.getBomId() != null) {
             AssetBom b = bomMapper.selectById(m.getBomId());

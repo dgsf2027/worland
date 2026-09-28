@@ -22,7 +22,17 @@ public class Maintenance {
 
     private String no;
 
+    /** 对象类型:asset 设备租赁台账 / inv_item 资产管理仓库物品 */
+    private String targetType;
+
+    /** 设备(target_type=asset 时必填) */
     private Long assetId;
+
+    /** 仓库物品(target_type=inv_item 时必填) */
+    private Long invItemId;
+
+    /** 送修数量(仅仓库物品用;设备工单恒为 1) */
+    private Integer qty;
 
     /** 故障配件(回写 fault_count) */
     private Long bomId;
@@ -44,6 +54,12 @@ public class Maintenance {
     private Long supplierId;
 
     private BigDecimal cost;
+
+    /** 建单时「送修」的出入库流转 id(仅仓库物品工单) */
+    private Long movementOutId;
+
+    /** 完工时「修好」或「报废」的出入库流转 id(仅仓库物品工单) */
+    private Long movementBackId;
 
     private Long assigneeId;
 

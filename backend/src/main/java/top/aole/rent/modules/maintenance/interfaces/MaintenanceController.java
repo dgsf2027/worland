@@ -26,15 +26,17 @@ public class MaintenanceController {
 
     private final MaintenanceService maintenanceService;
 
-    @ApiOperation("工单列表(按状态/类型/设备筛选)")
+    @ApiOperation("工单列表(按状态/类型/对象类型/设备/仓库物品筛选)")
     @GetMapping
     public R<PageResult<MaintenanceDtos.MaintenanceItem>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String type,
             @RequestParam(required = false) Long assetId,
+            @RequestParam(required = false) String targetType,
+            @RequestParam(required = false) Long invItemId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return R.ok(maintenanceService.list(status, type, assetId, page, size));
+        return R.ok(maintenanceService.list(status, type, assetId, targetType, invItemId, page, size));
     }
 
     @ApiOperation("工单详情")
