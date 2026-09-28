@@ -17,10 +17,13 @@ cp deploy/.env.example deploy/.env      # 填真值,chmod 600
 docker network create worland-edge      # 首次:供中央网关反代
 export GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_TIME=$(git log -1 --format=%cI) GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)   # 页面侧栏底部「版本 提交号 · 时间」的来源;忘了 export 页面显示 unknown,不报错
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
-# 健康:docker exec worland-server curl -s localhost:8082/api/v1/health  → code:200
+# 健康:curl -s http://127.0.0.1:8088/api/v1/health  → code:200，data:worland-rent backend alive
 ```
 - 后端镜像：多阶段（maven:3.9-eclipse-temurin-17 构建 → eclipse-temurin:8-jre 运行，字节码 target=8）。
 - 前端镜像：node:22-alpine 构建 → nginx:alpine 托管，`/api` 反代 worland-server:8082。
+- 前端 Nginx 使用 Docker DNS `127.0.0.11`，缓存有效期 5 秒；后端重建换 IP 后自动更新，不需要手工重启前端，完整路径和查询参数保留。
+- `worland-web` 的 healthcheck 通过 Nginx 请求 `/api/v1/health`，后端不可达会变成 unhealthy。发布后同时确认匿名 `/api/auth/me` 返回业务 code 401；首页 200 不能代表登录正常。
+- 在开发机运行 `python3 deploy/tests/nginx-dns-regression.py`，验证后端换 IP 自动恢复、路径/查询参数和请求体透传、API 断路健康检查；测试使用独立 Docker 网络与模拟后端，不连接生产数据库。
 - 前端页面侧栏底部显示「版本 提交号 · 提交时间」（点击跳 GitHub 对应提交，悬停看分支/构建时间）：值来自构建时的 `GIT_COMMIT/GIT_COMMIT_TIME/GIT_BRANCH` 三个 build args（镜像内没有 .git），所以**每次 `--build` 前先跑上面的 `export` 行**；线上要看到新提交号必须重新构建部署。
 - **Flyway 随 boot 自动 apply V1→V14**（out-of-order 已开）。
 
