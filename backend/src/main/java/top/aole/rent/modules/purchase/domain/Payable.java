@@ -44,6 +44,9 @@ public class Payable {
     /** 应付金额(元·退款红字为负) */
     private BigDecimal amount;
 
+    /** 金额是否手工调整过(1=人工改过:重算待付应付时跳过本行,保留人工值) */
+    private Integer amountManual;
+
     /** 状态:待付/已付/红冲 */
     private String status;
 

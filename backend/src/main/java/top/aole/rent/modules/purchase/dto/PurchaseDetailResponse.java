@@ -131,6 +131,8 @@ public class PurchaseDetailResponse {
         private LocalDate dueDate;
         /** 到期日是否为预估(按预计入库日推算,入库后改为真实日期) */
         private Boolean dueProvisional;
+        /** 金额是否手工调整过(重算待付应付时跳过本行) */
+        private Boolean amountManual;
         /** 金额(敏感·GP/LP 为 null) */
         private BigDecimal amount;
         private String status;

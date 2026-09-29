@@ -327,12 +327,22 @@ public class AssetPaymentService {
         Set<String> paidNames = paidStages(a.getId()).keySet();
         Long purchaseItemId = existing.stream().map(Payable::getPurchaseItemId)
                 .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        // 手工调整过金额的行不动 —— 人填的值不能被重算静默冲掉;
+        // 它们所属的阶段也跳过生成,否则同一阶段会出两条
+        Set<String> manualStages = new HashSet<>();
         for (Payable pay : payablesOf(a.getId())) {
-            if ("待付".equals(pay.getStatus())) {
-                payableMapper.deleteById(pay.getId());
+            if (!"待付".equals(pay.getStatus())) {
+                continue;
             }
+            if (Integer.valueOf(1).equals(pay.getAmountManual())) {
+                manualStages.add(pay.getStage());
+                continue;
+            }
+            payableMapper.deleteById(pay.getId());
         }
-        generate(p, a.getId(), purchaseItemId, a.getSerialNo(), a.getPurchasePrice(), terms, paidNames);
+        Set<String> skip = new HashSet<>(paidNames);
+        skip.addAll(manualStages);
+        generate(p, a.getId(), purchaseItemId, a.getSerialNo(), a.getPurchasePrice(), terms, skip);
     }
 
     /**
@@ -390,6 +400,11 @@ public class AssetPaymentService {
                     + (provisional ? "(到期日按预计入库日推算)" : ""));
             payableMapper.insert(pay);
         }
+    }
+
+    /** 某条应付对应合同段的账期天数(供采购模块改预计入库日后重算到期调用)。 */
+    public int dueDaysOfTerm(Long termId) {
+        return dueDaysOf(termId);
     }
 
     /** 某条应付对应合同段的账期天数;段已不存在返回 0。 */

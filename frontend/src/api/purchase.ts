@@ -68,6 +68,8 @@ export interface PurchaseItemLine {
 export interface PayableLine {
   /** 到期日是否为预估（按预计入库日推算，入库后改为真实日期） */
   dueProvisional?: boolean
+  /** 金额是否手工调整过（重算待付应付时跳过本行） */
+  amountManual?: boolean
   /** 逐台应付对应的设备(旧版整单应付为空) */
   assetId?: number
   /** 设备显示名:品类 · 型号 */
@@ -122,4 +124,22 @@ export function receivePurchase(id: number): Promise<void> {
 }
 export function returnPurchase(id: number, body: Record<string, any>): Promise<void> {
   return request.post(`/rent/purchase/${id}/return`, body)
+}
+
+// ---- 整单编辑（V120：试跑阶段要能把已录的单改对） ----
+
+export function editPurchaseHeader(id: number, body: Record<string, any>): Promise<PurchaseDetail> {
+  return request.put(`/rent/purchase/${id}`, body)
+}
+export function replacePurchaseItems(id: number, assetIds: number[]): Promise<PurchaseDetail> {
+  return request.put(`/rent/purchase/${id}/items`, { assetIds })
+}
+export function editPayable(payableId: number, body: Record<string, any>): Promise<void> {
+  return request.put(`/rent/purchase/payables/${payableId}`, body)
+}
+export function payPayable(payableId: number, body: Record<string, any>): Promise<void> {
+  return request.post(`/rent/purchase/payables/${payableId}/pay`, body)
+}
+export function unpayPayable(payableId: number): Promise<void> {
+  return request.post(`/rent/purchase/payables/${payableId}/unpay`)
 }

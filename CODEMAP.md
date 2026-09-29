@@ -77,7 +77,7 @@ modules/<module>/
 | `supplier` | Supplier / SupplierSupply / SupplierInspection | `/rent/suppliers`、`/rent/supplier-inspections` | — |
 | `customer` | Customer / Opportunity / CustomerFollowup | `/rent/customers` | — |
 | `contract` | Contract / ContractAsset / ContractBoq（合同清单） / ContractChange / RentSchedule / DepositLedger / ContractPaymentTerm（付款方式） | `/rent/contracts`（含 `/{id}/boq` 清单读写、导入导出、按清单生成设备、`/{id}/payment-terms` 付款方式读写） | — |
-| `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase`（详情含「收租对照」：按 contract_id 反查收租单/逾期案） | — |
+| `purchase` | PurchaseIn / PurchaseItem / Payable | `/rent/purchase`（详情含「收租对照」；整单可编辑：`PUT /{id}` 单头、`PUT /{id}/items` 明细增减、`PUT /payables/{id}` 应付、`POST /payables/{id}/pay|unpay` 登记/撤销付款） | — |
 | `billing` | RentBill / OverdueCase / RepossessOrder / AccountingPeriod（+ `RentCoverageService` 按合同聚合收租对照，供采购应付反查） | `/rent/bills`、`/rent/overdue` | 收租单生成 01:00；逾期扫描 02:00 |
 | `finance` | Voucher / VoucherLine / LedgerBook | `/rent/vouchers`、`/rent/depreciation/run`、`/rent/tax/threshold` | 折旧计提 每月 1 日 03:00 |
 | `distribution` | Distribution / Investor | `/rent/distribution`、`/rent/investors` | 结账分配 每月 5 日 04:00 |
@@ -198,6 +198,7 @@ modules/<module>/
 | `V117__purge_orphan_finance_data.sql` | 清理来源单据已不存在的凭证/分录/总账行/折旧行，清空结账分配与月度报表（两者物理删：月报唯一键含 `is_deleted`、分配单号唯一）；出资人名册与 LLM 调用日志保留 |
 | `V118__contract_payment_term.sql` | 付款条件从设备搬到合同（`yc_rent_contract_payment_term` 唯一真相源）；采购单加预计入库日、应付加「到期日为预估」标记、新增 `purchase_lead_days` 规则；从设备条件反推合同付款方式（不一致取覆盖最多的一套并在合同备注留痕）、`payable.term_id` 按阶段名重映射、补齐未触发阶段的应付（备注「合同付款方式补齐」） |
 | `V119__maintenance_target_type.sql` | 维保工单增加对象类型维度（asset 设备台账 / inv_item 仓库物品）、送修数量与两个流转 id；`asset_id` 放开可空 |
+| `V120__payable_manual_amount.sql` | 应付金额手工调整标记 `amount_manual`（整单开放编辑后，重算待付应付时跳过手工行，避免人工值被冲掉） |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

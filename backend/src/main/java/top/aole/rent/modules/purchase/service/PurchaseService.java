@@ -1,6 +1,7 @@
 package top.aole.rent.modules.purchase.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ import top.aole.rent.modules.purchase.domain.Payable;
 import top.aole.rent.modules.purchase.domain.PurchaseIn;
 import top.aole.rent.modules.purchase.domain.PurchaseItem;
 import top.aole.rent.modules.purchase.dto.PurchaseDetailResponse;
+import top.aole.rent.modules.purchase.dto.PurchaseEditDtos;
 import top.aole.rent.modules.purchase.dto.PurchaseListItem;
 import top.aole.rent.modules.purchase.dto.PurchaseOrderRequest;
 import top.aole.rent.modules.purchase.dto.ReturnRequest;
@@ -230,6 +232,327 @@ public class PurchaseService {
         return p.getId();
     }
 
+    // ============ 整单编辑(V120) ============
+
+    /**
+     * 编辑单头。已红冲的单只读;其余字段传什么改什么。
+     *
+     * <p>改预计入库日会联动重算本单「到期日为预估」的待付应付 ——
+     * 不重算的话现金流驾驶舱的到期分层就和单据对不上。
+     */
+    @Transactional
+    public void editHeader(Long id, PurchaseEditDtos.HeaderRequest req) {
+        PurchaseIn p = load(id);
+        requireEditable(p);
+        List<String> changes = new ArrayList<>();
+        String no = req.getNo() == null ? null : req.getNo().trim();
+        if (no != null && !no.isEmpty() && !no.equals(p.getNo())) {
+            PurchaseIn dup = purchaseInMapper.selectOne(new LambdaQueryWrapper<PurchaseIn>()
+                    .eq(PurchaseIn::getNo, no));
+            if (dup != null && !dup.getId().equals(id)) {
+                throw new BizException(400, "采购单号已存在: " + no);
+            }
+            changes.add("单号 " + p.getNo() + " → " + no);
+            p.setNo(no);
+        }
+        if (req.getSupplierId() != null && !req.getSupplierId().equals(p.getSupplierId())) {
+            changes.add("供应商 " + supplierName(p.getSupplierId()) + " → " + supplierName(req.getSupplierId()));
+            p.setSupplierId(req.getSupplierId());
+        }
+        if (req.getOrderDate() != null && !req.getOrderDate().equals(p.getOrderDate())) {
+            changes.add("下单日 " + p.getOrderDate() + " → " + req.getOrderDate());
+            p.setOrderDate(req.getOrderDate());
+        }
+        LocalDate oldExpect = p.getExpectReceiveDate();
+        if (req.getExpectReceiveDate() != null && !req.getExpectReceiveDate().equals(oldExpect)) {
+            changes.add("预计入库日 " + oldExpect + " → " + req.getExpectReceiveDate());
+            p.setExpectReceiveDate(req.getExpectReceiveDate());
+        }
+        if (req.getReceiveDate() != null && "已入库".equals(p.getStatus())
+                && !req.getReceiveDate().equals(p.getReceiveDate())) {
+            changes.add("入库日 " + p.getReceiveDate() + " → " + req.getReceiveDate());
+            p.setReceiveDate(req.getReceiveDate());
+        }
+        if (req.getRemark() != null) {
+            p.setRemark(req.getRemark());
+        }
+        purchaseInMapper.updateById(p);
+        int rescheduled = resyncProvisionalDueDates(p);
+        auditLogService.record("采购单编辑", "purchase_in", id, AuditLogService.EXECUTED,
+                (changes.isEmpty() ? "仅改备注" : String.join(" · ", changes))
+                        + (rescheduled > 0 ? " · 重算预估到期 " + rescheduled + " 笔" : ""));
+    }
+
+    /**
+     * 整体替换本单采购的设备。移除的设备会解除采购关系并删掉它的待付应付;
+     * 已付过款的设备不允许移除(先去应付行撤销付款)。
+     */
+    @Transactional
+    public void replaceItems(Long id, PurchaseEditDtos.ItemsRequest req) {
+        PurchaseIn p = load(id);
+        requireEditable(p);
+        Contract c = contractMapper.selectById(p.getContractId());
+        if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
+            throw new BizException(404, "本单所属合同不存在,不能改明细");
+        }
+        List<Long> want = new ArrayList<>(new java.util.LinkedHashSet<>(req.getAssetIds()));
+        want.removeIf(java.util.Objects::isNull);
+        if (want.isEmpty()) {
+            throw new BizException(400, "至少保留 1 台设备");
+        }
+        List<PurchaseItem> current = itemsOf(id);
+        List<Long> have = current.stream().map(PurchaseItem::getAssetId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+
+        // 移除
+        int removed = 0;
+        for (PurchaseItem pi : current) {
+            Long assetId = pi.getAssetId();
+            if (assetId != null && want.contains(assetId)) {
+                continue;
+            }
+            if (assetId != null && hasPaid(assetId)) {
+                Asset a = assetMapper.selectById(assetId);
+                throw new BizException(400, "设备「" + (a == null ? "#" + assetId : assetLabel(a))
+                        + "」已有付过款的应付,不能从本单移除;请先在应付行上撤销付款");
+            }
+            if (assetId != null) {
+                for (Payable pay : payableMapper.selectList(new LambdaQueryWrapper<Payable>()
+                        .eq(Payable::getAssetId, assetId).eq(Payable::getPurchaseInId, id))) {
+                    payableMapper.deleteById(pay.getId());
+                }
+                assetService.releaseOnPurchaseReturn(assetId, id);
+            }
+            purchaseItemMapper.deleteById(pi.getId());
+            removed++;
+        }
+
+        // 新增
+        int added = 0;
+        for (Long assetId : want) {
+            if (have.contains(assetId)) {
+                continue;
+            }
+            Asset a = assetMapper.selectById(assetId);
+            if (a == null || Integer.valueOf(1).equals(a.getIsDeleted())) {
+                throw new BizException(404, "设备不存在: id=" + assetId);
+            }
+            if (!p.getContractId().equals(a.getContractId())) {
+                throw new BizException(400, "设备「" + assetLabel(a) + "」不属于合同 " + c.getNo());
+            }
+            if (a.getPurchaseInId() != null && !a.getPurchaseInId().equals(id)) {
+                PurchaseIn other = purchaseInMapper.selectById(a.getPurchaseInId());
+                throw new BizException(400, "设备「" + assetLabel(a) + "」已在采购单 "
+                        + (other == null ? a.getPurchaseInId() : other.getNo()) + " 里");
+            }
+            if (a.getPurchasePrice() == null) {
+                throw new BizException(400, "设备「" + assetLabel(a) + "」没有合同价,请先在合同清单里填单价");
+            }
+            PurchaseItem pi = new PurchaseItem();
+            pi.setPurchaseInId(id);
+            pi.setAssetId(a.getId());
+            pi.setSerialNo(a.getSerialNo());
+            pi.setCategory(a.getCategory());
+            pi.setModel(a.getModel());
+            pi.setMarketPrice(a.getMarketPrice());
+            pi.setPurchasePrice(a.getPurchasePrice());
+            pi.setSupplierId(a.getSupplierId() != null ? a.getSupplierId() : p.getSupplierId());
+            pi.setMonthlyLaborValue(a.getMonthlyLaborValue());
+            pi.setReplaceHeadcount(a.getReplaceHeadcount());
+            purchaseItemMapper.insert(pi);
+            assetService.bindPurchase(a.getId(), id, p.getNo());
+            paymentService.onOrder(p, pi, a.getId(), p.getContractId());
+            if ("已入库".equals(p.getStatus())) {
+                // 已入库的单新增设备:直接走到入库态(入库留痕 + 到期日兑现)
+                assetService.markPurchaseReceived(a.getId(), id, p.getNo());
+                paymentService.onReceive(p, pi, a.getId());
+            }
+            added++;
+        }
+
+        syncTotalAmount(p);
+        auditLogService.record("采购明细编辑", "purchase_in", id, AuditLogService.EXECUTED,
+                "新增 " + added + " 台 · 移除 " + removed + " 台 · 现共 "
+                        + itemsOf(id).size() + " 台 · 总额 " + p.getTotalAmount());
+    }
+
+    /** 编辑单条应付(阶段名/金额/到期日/备注);改金额会标记为手工调整。 */
+    @Transactional
+    public void editPayable(Long payableId, PurchaseEditDtos.PayableRequest req) {
+        Payable pay = requirePayable(payableId);
+        PurchaseIn p = load(pay.getPurchaseInId());
+        requireEditable(p);
+        if ("红冲".equals(pay.getStatus())) {
+            throw new BizException(400, "已红冲的应付行不可编辑");
+        }
+        List<String> changes = new ArrayList<>();
+        if (req.getStage() != null && !req.getStage().trim().isEmpty()
+                && !req.getStage().trim().equals(pay.getStage())) {
+            if ("退款红字".equals(req.getStage().trim())) {
+                throw new BizException(400, "「退款红字」为系统保留阶段名");
+            }
+            changes.add("阶段 " + pay.getStage() + " → " + req.getStage().trim());
+            pay.setStage(req.getStage().trim());
+        }
+        if (req.getAmount() != null && req.getAmount().compareTo(nz(pay.getAmount())) != 0) {
+            if (req.getAmount().signum() < 0) {
+                throw new BizException(400, "应付金额不能为负(红字由退货红冲生成)");
+            }
+            changes.add("金额 " + pay.getAmount() + " → " + req.getAmount() + "(手工调整)");
+            pay.setAmount(req.getAmount().setScale(2, RoundingMode.HALF_UP));
+            pay.setAmountManual(1);
+        }
+        if (req.getDueDate() != null && !req.getDueDate().equals(pay.getDueDate())) {
+            changes.add("到期日 " + pay.getDueDate() + " → " + req.getDueDate());
+            pay.setDueDate(req.getDueDate());
+            // 手工指定了到期日,就不再是“按预计入库日推算”的预估值
+            pay.setDueProvisional(0);
+        }
+        if (req.getDueProvisional() != null) {
+            pay.setDueProvisional(Boolean.TRUE.equals(req.getDueProvisional()) ? 1 : 0);
+        }
+        if (req.getRemark() != null) {
+            pay.setRemark(req.getRemark());
+        }
+        payableMapper.updateById(pay);
+        if (!changes.isEmpty()) {
+            auditLogService.record("应付编辑", "payable", payableId, AuditLogService.EXECUTED,
+                    "采购单 " + p.getNo() + " · " + String.join(" · ", changes));
+        }
+    }
+
+    /**
+     * 登记付款。实付=应付 → 整行置已付;
+     * 实付&lt;应付 → 本行改为已付(实付额) 并新增一行待付(差额),差额继续算负债。
+     */
+    @Transactional
+    public void payPayable(Long payableId, PurchaseEditDtos.PayRequest req) {
+        Payable pay = requirePayable(payableId);
+        PurchaseIn p = load(pay.getPurchaseInId());
+        if ("已红冲".equals(p.getStatus())) {
+            throw new BizException(400, "采购单已红冲,不可登记付款");
+        }
+        if (!"待付".equals(pay.getStatus())) {
+            throw new BizException(400, "本笔应付状态为" + pay.getStatus() + ",仅待付可登记付款");
+        }
+        BigDecimal due = nz(pay.getAmount());
+        BigDecimal paid = req.getPaidAmount().setScale(2, RoundingMode.HALF_UP);
+        if (paid.signum() <= 0) {
+            throw new BizException(400, "实付金额须大于 0");
+        }
+        if (paid.compareTo(due) > 0) {
+            throw new BizException(400, "实付 " + paid + " 超过本笔应付 " + due
+                    + ";若确实要多付,请先把应付金额改大");
+        }
+        LocalDate paidDate = req.getPaidDate() != null ? req.getPaidDate() : LocalDate.now();
+        BigDecimal rest = due.subtract(paid);
+        if (rest.signum() > 0) {
+            // 部分付款:差额拆一行继续待付
+            Payable remain = new Payable();
+            remain.setPurchaseInId(pay.getPurchaseInId());
+            remain.setAssetId(pay.getAssetId());
+            remain.setPurchaseItemId(pay.getPurchaseItemId());
+            remain.setTermId(pay.getTermId());
+            remain.setStage(pay.getStage());
+            remain.setDueDate(pay.getDueDate());
+            remain.setDueProvisional(pay.getDueProvisional());
+            remain.setAmount(rest);
+            remain.setAmountManual(1);
+            remain.setStatus("待付");
+            remain.setRemark("部分付款差额(原应付 " + due + ",已付 " + paid + ")");
+            payableMapper.insert(remain);
+            pay.setAmount(paid);
+            pay.setAmountManual(1);
+        }
+        pay.setStatus("已付");
+        pay.setPaidDate(paidDate);
+        if (req.getRemark() != null && !req.getRemark().trim().isEmpty()) {
+            pay.setRemark(appendRemark(pay.getRemark(), req.getRemark().trim()));
+        }
+        payableMapper.updateById(pay);
+        auditLogService.record("应付登记付款", "payable", payableId, AuditLogService.EXECUTED,
+                "采购单 " + p.getNo() + " · " + pay.getStage() + " 实付 " + paid
+                        + "/" + due + " 于 " + paidDate
+                        + (rest.signum() > 0 ? " · 差额 " + rest + " 拆行继续待付" : ""));
+    }
+
+    /** 撤销付款(误登记用):退回待付并清实付日。 */
+    @Transactional
+    public void unpayPayable(Long payableId) {
+        Payable pay = requirePayable(payableId);
+        PurchaseIn p = load(pay.getPurchaseInId());
+        if (!"已付".equals(pay.getStatus())) {
+            throw new BizException(400, "本笔应付状态为" + pay.getStatus() + ",仅已付可撤销");
+        }
+        LocalDate old = pay.getPaidDate();
+        payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
+                .eq(Payable::getId, payableId)
+                .set(Payable::getStatus, "待付")
+                .set(Payable::getPaidDate, null));
+        auditLogService.record("应付撤销付款", "payable", payableId, AuditLogService.EXECUTED,
+                "采购单 " + p.getNo() + " · " + pay.getStage() + " " + pay.getAmount()
+                        + " 原实付日 " + old + " → 退回待付");
+    }
+
+    // ---- 编辑用到的内部方法 ----
+
+    private void requireEditable(PurchaseIn p) {
+        if ("已红冲".equals(p.getStatus())) {
+            throw new BizException(400, "采购单已退货红冲,不可再编辑");
+        }
+    }
+
+    private Payable requirePayable(Long payableId) {
+        Payable pay = payableMapper.selectById(payableId);
+        if (pay == null || Integer.valueOf(1).equals(pay.getIsDeleted())) {
+            throw new BizException(404, "应付不存在: id=" + payableId);
+        }
+        return pay;
+    }
+
+    /** 该设备是否已有付过款的应付。 */
+    private boolean hasPaid(Long assetId) {
+        return payableMapper.selectCount(new LambdaQueryWrapper<Payable>()
+                .eq(Payable::getAssetId, assetId).eq(Payable::getStatus, "已付")) > 0;
+    }
+
+    /** 重算本单「到期日为预估」的待付应付(改过预计入库日后调)。返回改了多少笔。 */
+    private int resyncProvisionalDueDates(PurchaseIn p) {
+        if (p.getExpectReceiveDate() == null || p.getReceiveDate() != null) {
+            return 0;
+        }
+        int n = 0;
+        for (Payable pay : payablesOf(p.getId())) {
+            if (!"待付".equals(pay.getStatus()) || !Integer.valueOf(1).equals(pay.getDueProvisional())) {
+                continue;
+            }
+            int days = paymentService.dueDaysOfTerm(pay.getTermId());
+            payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
+                    .eq(Payable::getId, pay.getId())
+                    .set(Payable::getDueDate, p.getExpectReceiveDate().plusDays(days)));
+            n++;
+        }
+        return n;
+    }
+
+    /** 总额 = С 明细集采价。 */
+    private void syncTotalAmount(PurchaseIn p) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (PurchaseItem pi : itemsOf(p.getId())) {
+            total = total.add(nz(pi.getPurchasePrice()));
+        }
+        p.setTotalAmount(total.setScale(2, RoundingMode.HALF_UP));
+        purchaseInMapper.updateById(p);
+    }
+
+    private static BigDecimal nz(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
+    }
+
+    private static String appendRemark(String base, String add) {
+        return (base == null || base.isEmpty()) ? add : base + " | " + add;
+    }
+
     // ============ 入库(逐件生成 asset + 验收/尾款应付) ============
 
     @Transactional
@@ -412,6 +735,7 @@ public class PurchaseService {
             pl.setStage(pay.getStage());
             pl.setDueDate(pay.getDueDate());
             pl.setDueProvisional(Integer.valueOf(1).equals(pay.getDueProvisional()));
+            pl.setAmountManual(Integer.valueOf(1).equals(pay.getAmountManual()));
             pl.setAmount(seeCost ? pay.getAmount() : null);
             pl.setStatus(pay.getStatus());
             pl.setPaidDate(pay.getPaidDate());

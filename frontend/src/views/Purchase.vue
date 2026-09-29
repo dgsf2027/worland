@@ -4,9 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchPurchases, fetchPurchaseDetail, createPurchaseOrder, receivePurchase, returnPurchase,
-  type PurchaseListItem, type PurchaseDetail,
+  editPurchaseHeader, replacePurchaseItems, editPayable, payPayable, unpayPayable,
+  type PurchaseListItem, type PurchaseDetail, type PayableLine,
 } from '@/api/purchase'
 import { toTermInputs, checkTermRows, fetchAssets, type TermRow, type AssetListItem } from '@/api/asset'
+import { fetchSupplierPool } from '@/api/supplier'
 import { fetchContracts, fetchContractPaymentTerms, type ContractListItem,
   type ContractPaymentTermView } from '@/api/contract'
 
@@ -128,6 +130,148 @@ function goRent(contractId?: number, contractNo?: string) {
   router.push({ path: '/rent', query: { contractId: String(contractId), contractNo: contractNo || '' } })
 }
 
+// ==================== 整单编辑（V120） ====================
+const canEdit = computed(() => !!detail.value && detail.value.status !== '已红冲')
+
+// ---- 单头 ----
+const hdrDlg = ref(false)
+const hdrSaving = ref(false)
+const hdrForm = reactive<Record<string, any>>({
+  no: '', supplierId: undefined, orderDate: '', expectReceiveDate: '', receiveDate: '', remark: '',
+})
+function openHdrEdit() {
+  const d = detail.value
+  if (!d) return
+  Object.assign(hdrForm, {
+    no: d.no, supplierId: d.supplierId, orderDate: d.orderDate || '',
+    expectReceiveDate: d.expectReceiveDate || '', receiveDate: d.receiveDate || '', remark: d.remark || '',
+  })
+  hdrDlg.value = true
+  if (!suppliers.value.length) loadSuppliers()
+}
+async function submitHdr() {
+  if (!detail.value) return
+  hdrSaving.value = true
+  try {
+    detail.value = await editPurchaseHeader(detail.value.id, {
+      no: hdrForm.no,
+      supplierId: hdrForm.supplierId,
+      orderDate: hdrForm.orderDate || undefined,
+      expectReceiveDate: hdrForm.expectReceiveDate || undefined,
+      receiveDate: hdrForm.receiveDate || undefined,
+      remark: hdrForm.remark,
+    })
+    hdrDlg.value = false
+    ElMessage.success('单头已保存（预估到期日已按新的预计入库日重算）')
+    loadList()
+  } finally {
+    hdrSaving.value = false
+  }
+}
+
+// ---- 供应商下拉 ----
+const suppliers = ref<{ id: number; name: string }[]>([])
+async function loadSuppliers() {
+  suppliers.value = (await fetchSupplierPool({ page: 1, size: 500 })).records.map((x) => ({ id: x.id, name: x.name }))
+}
+
+// ---- 明细（增减设备） ----
+const itemDlg = ref(false)
+const itemSaving = ref(false)
+const itemCandidates = ref<AssetListItem[]>([])
+const itemPicked = ref<number[]>([])
+async function openItemEdit() {
+  const d = detail.value
+  if (!d || !d.contractId) { ElMessage.warning('本单没有合同，不能改明细'); return }
+  itemCandidates.value = (await fetchAssets({ contractId: d.contractId, page: 1, size: 500 })).records
+  itemPicked.value = d.items.filter((i) => i.assetId).map((i) => i.assetId as number)
+  itemDlg.value = true
+}
+async function submitItems() {
+  if (!detail.value) return
+  if (!itemPicked.value.length) { ElMessage.warning('至少保留 1 台设备'); return }
+  itemSaving.value = true
+  try {
+    detail.value = await replacePurchaseItems(detail.value.id, itemPicked.value)
+    itemDlg.value = false
+    ElMessage.success('明细已保存（应付与总额已重算）')
+    loadList()
+  } finally {
+    itemSaving.value = false
+  }
+}
+/** 该设备是否已付过款（已付的不允许从单上移除） */
+const paidAssetIds = computed(() => new Set(
+  (detail.value?.payables || []).filter((p) => p.status === '已付' && p.assetId).map((p) => p.assetId as number)))
+
+// ---- 应付行编辑 ----
+const payDlg = ref(false)
+const paySaving = ref(false)
+const payForm = reactive<Record<string, any>>({ id: 0, stage: '', amount: undefined, dueDate: '', remark: '' })
+function openPayEdit(row: PayableLine) {
+  Object.assign(payForm, {
+    id: row.id, stage: row.stage, amount: row.amount, dueDate: row.dueDate || '', remark: row.remark || '',
+  })
+  payDlg.value = true
+}
+async function submitPayEdit() {
+  paySaving.value = true
+  try {
+    await editPayable(payForm.id, {
+      stage: payForm.stage,
+      amount: payForm.amount,
+      dueDate: payForm.dueDate || undefined,
+      remark: payForm.remark,
+    })
+    payDlg.value = false
+    ElMessage.success('应付已保存')
+    if (detail.value) detail.value = await fetchPurchaseDetail(detail.value.id)
+    loadList()
+  } finally {
+    paySaving.value = false
+  }
+}
+
+// ---- 登记 / 撤销付款 ----
+const payinDlg = ref(false)
+const payinSaving = ref(false)
+const payinForm = reactive<Record<string, any>>({ id: 0, stage: '', due: 0, paidAmount: 0, paidDate: '', remark: '' })
+const payinRest = computed(() => Math.max(0, Number(payinForm.due || 0) - Number(payinForm.paidAmount || 0)))
+function openPayin(row: PayableLine) {
+  Object.assign(payinForm, {
+    id: row.id, stage: row.stage, due: row.amount || 0, paidAmount: row.amount || 0,
+    paidDate: new Date().toISOString().slice(0, 10), remark: '',
+  })
+  payinDlg.value = true
+}
+async function submitPayin() {
+  if (!payinForm.paidAmount || Number(payinForm.paidAmount) <= 0) { ElMessage.warning('实付金额须大于 0'); return }
+  payinSaving.value = true
+  try {
+    await payPayable(payinForm.id, {
+      paidAmount: payinForm.paidAmount, paidDate: payinForm.paidDate || undefined, remark: payinForm.remark,
+    })
+    payinDlg.value = false
+    ElMessage.success(payinRest.value > 0
+      ? `已登记付款；差额 ${money(payinRest.value)} 已拆一行继续待付`
+      : '已登记付款')
+    if (detail.value) detail.value = await fetchPurchaseDetail(detail.value.id)
+    loadList()
+  } finally {
+    payinSaving.value = false
+  }
+}
+async function doUnpay(row: PayableLine) {
+  try {
+    await ElMessageBox.confirm(`撤销「${row.stage} ${money(row.amount)}」的付款登记？该笔会退回「待付」。`,
+      '撤销付款', { type: 'warning' })
+  } catch { return }
+  await unpayPayable(row.id)
+  ElMessage.success('已撤销付款，退回待付')
+  if (detail.value) detail.value = await fetchPurchaseDetail(detail.value.id)
+  loadList()
+}
+
 // ---- 收租对照：本单货款 vs 这份合同收回来的租金 ----
 const cov = computed(() => detail.value?.rentCoverage || null)
 /** 覆盖率百分比（后端只给经营角色，GP/LP 为空） */
@@ -191,9 +335,11 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="orderDate" label="下单日" width="110" />
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="250" fixed="right">
             <template #default="{ row }">
               <el-button link size="small" @click="openDetail(row.id)">详情</el-button>
+              <el-button v-if="row.status !== '已红冲'" link size="small" type="warning"
+                @click="openDetail(row.id).then(openHdrEdit)">编辑</el-button>
               <el-button v-if="row.status === '已下单'" link size="small" type="primary" @click="doReceive(row)">入库</el-button>
               <el-button v-if="row.status !== '已红冲'" link size="small" type="danger" @click="doReturn(row)">退货红冲</el-button>
             </template>
@@ -203,6 +349,10 @@ onMounted(() => {
 
       <el-tab-pane label="采购详情" name="detail" :disabled="!detail">
         <template v-if="detail">
+          <div class="dt-bar">
+            <span class="muted">试跑阶段数据可改：单头 / 明细 / 应付三块都能编辑，改动全部留痕。已红冲的单只读。</span>
+            <el-button v-if="canEdit" type="warning" size="small" @click="openHdrEdit">编辑单头</el-button>
+          </div>
           <el-descriptions :column="3" border>
             <el-descriptions-item label="采购单号">{{ detail.no }}</el-descriptions-item>
             <el-descriptions-item label="状态"><el-tag size="small" :type="statusTag[detail.status] || 'info'">{{ detail.status }}</el-tag></el-descriptions-item>
@@ -266,7 +416,10 @@ onMounted(() => {
             </el-card>
           </template>
 
-          <h4>明细（逐件·入库生成设备）</h4>
+          <h4 class="h4-row">
+            <span>明细（逐件·入库生成设备）</span>
+            <el-button v-if="canEdit" type="warning" link size="small" @click="openItemEdit">编辑明细（增减设备）</el-button>
+          </h4>
           <el-table :data="detail.items" size="small" border>
             <el-table-column label="设备（租赁台账）" min-width="180">
               <template #default="{ row }">
@@ -283,7 +436,10 @@ onMounted(() => {
             </el-table-column>
           </el-table>
 
-          <h4>应付计划（按设备付款条件逐台生成 = 负债）</h4>
+          <h4 class="h4-row">
+            <span>应付计划（按合同付款方式逐台生成 = 负债）</span>
+            <span class="muted">金额改过会标「手工」，之后改合同付款方式不会冲掉它</span>
+          </h4>
           <el-table :data="detail.payables" size="small" border>
             <el-table-column label="设备（租赁台账）" min-width="170">
               <template #default="{ row }">
@@ -299,15 +455,137 @@ onMounted(() => {
                 <el-tag v-if="row.dueProvisional" size="small" type="info" effect="plain">预计</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="预计付款金额" width="130"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }"><el-tag size="small" :type="payTag[row.status] || 'info'">{{ row.status }}</el-tag></template>
+            <el-table-column label="金额" width="150">
+              <template #default="{ row }">
+                {{ money(row.amount) }}
+                <el-tag v-if="row.amountManual" size="small" type="warning" effect="plain">手工</el-tag>
+              </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="160" />
+            <el-table-column label="状态" width="130">
+              <template #default="{ row }">
+                <el-tag size="small" :type="payTag[row.status] || 'info'">{{ row.status }}</el-tag>
+                <div v-if="row.paidDate" class="muted">实付 {{ row.paidDate }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="140" />
+            <el-table-column v-if="canEdit" label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <template v-if="row.status !== '红冲'">
+                  <el-button link size="small" type="warning" @click="openPayEdit(row)">编辑</el-button>
+                  <el-button v-if="row.status === '待付'" link size="small" type="success" @click="openPayin(row)">登记付款</el-button>
+                  <el-button v-if="row.status === '已付'" link size="small" type="danger" @click="doUnpay(row)">撤销付款</el-button>
+                </template>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
           </el-table>
         </template>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 编辑单头 -->
+    <el-dialog v-model="hdrDlg" title="编辑采购单头" width="560px">
+      <el-form label-width="110px">
+        <el-form-item label="采购单号"><el-input v-model="hdrForm.no" /></el-form-item>
+        <el-form-item label="供应商">
+          <el-select v-model="hdrForm.supplierId" filterable clearable style="width:100%">
+            <el-option v-for="s in suppliers" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="下单日">
+          <el-date-picker v-model="hdrForm.orderDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
+        </el-form-item>
+        <el-form-item label="预计入库日">
+          <el-date-picker v-model="hdrForm.expectReceiveDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
+          <span class="muted" style="margin-left:8px">改了会重算本单标「预计」的到期日</span>
+        </el-form-item>
+        <el-form-item v-if="detail?.status === '已入库'" label="入库日">
+          <el-date-picker v-model="hdrForm.receiveDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="hdrForm.remark" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="hdrDlg = false">取消</el-button>
+        <el-button type="primary" :loading="hdrSaving" @click="submitHdr">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑明细 -->
+    <el-dialog v-model="itemDlg" title="编辑明细（勾选本单采购的设备）" width="760px">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:10px"
+        title="取消勾选＝从本单移除（会解除采购关系并删掉它的待付应付）；已付过款的设备不允许移除。保存后总额与应付自动重算。" />
+      <el-table :data="itemCandidates" size="small" border max-height="360">
+        <el-table-column width="50">
+          <template #default="{ row }">
+            <el-checkbox
+              :model-value="itemPicked.includes(row.id)"
+              :disabled="row.purchasePrice == null || (paidAssetIds.has(row.id) && itemPicked.includes(row.id))"
+              @change="(v: any) => v ? itemPicked.push(row.id) : itemPicked.splice(itemPicked.indexOf(row.id), 1)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="设备" min-width="180">
+          <template #default="{ row }">
+            {{ row.category }}{{ row.model ? ' · ' + row.model : '' }}
+            <div class="muted">{{ row.serialNo }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="合同价" width="130"><template #default="{ row }">{{ money(row.purchasePrice) }}</template></el-table-column>
+        <el-table-column prop="status" label="台账状态" width="100" />
+        <el-table-column label="说明" min-width="160">
+          <template #default="{ row }">
+            <span v-if="row.purchasePrice == null" class="over">没有合同价，先去合同清单填单价</span>
+            <span v-else-if="paidAssetIds.has(row.id)" class="muted">已付过款，不能移除</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="muted">已勾 {{ itemPicked.length }} 台</div>
+      <template #footer>
+        <el-button @click="itemDlg = false">取消</el-button>
+        <el-button type="primary" :loading="itemSaving" @click="submitItems">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑应付行 -->
+    <el-dialog v-model="payDlg" title="编辑应付" width="480px">
+      <el-form label-width="100px">
+        <el-form-item label="付款阶段"><el-input v-model="payForm.stage" maxlength="16" /></el-form-item>
+        <el-form-item label="应付金额">
+          <el-input-number v-model="payForm.amount" :min="0" :precision="2" controls-position="right" style="width:180px" />
+          <div class="muted">改了会标「手工」，之后改合同付款方式不会冲掉它</div>
+        </el-form-item>
+        <el-form-item label="到期日">
+          <el-date-picker v-model="payForm.dueDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
+          <span class="muted" style="margin-left:8px">手工指定后不再算「预计」</span>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="payForm.remark" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="payDlg = false">取消</el-button>
+        <el-button type="primary" :loading="paySaving" @click="submitPayEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 登记付款 -->
+    <el-dialog v-model="payinDlg" :title="'登记付款 · ' + payinForm.stage" width="460px">
+      <el-form label-width="100px">
+        <el-form-item label="本笔应付">{{ money(payinForm.due) }}</el-form-item>
+        <el-form-item label="实付金额">
+          <el-input-number v-model="payinForm.paidAmount" :min="0" :max="payinForm.due" :precision="2"
+            controls-position="right" style="width:180px" />
+        </el-form-item>
+        <el-form-item label="实付日期">
+          <el-date-picker v-model="payinForm.paidDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="payinForm.remark" /></el-form-item>
+      </el-form>
+      <el-alert v-if="payinRest > 0" type="warning" :closable="false" show-icon
+        :title="`少付 ${money(payinRest)}：保存后差额会拆成一行继续「待付」，仍算负债`" />
+      <template #footer>
+        <el-button @click="payinDlg = false">取消</el-button>
+        <el-button type="primary" :loading="payinSaving" @click="submitPayin">确认登记</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 下单弹窗 -->
     <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="800px">
@@ -383,5 +661,7 @@ h4 { margin: 16px 0 8px; }
 .cov-v { font-size: 18px; font-weight: 600; margin: 2px 0; }
 .cov-v.ok { color: #67c23a; }
 .cov-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.dt-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.h4-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .inherit-box { background: #f6f9ff; border: 1px solid #e3ecff; border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 </style>
