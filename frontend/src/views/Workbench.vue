@@ -8,6 +8,11 @@ import BrandLockup from '@/components/BrandLockup.vue'
  * 要改只改这里一处，页面自动跟着变。
  */
 const SLOGAN = '淬炼于火 · 锋利如曜'
+/** 愿景 / 使命：品牌级表述，放在品牌头里 slogan 之下 */
+const MISSION = [
+  { k: '愿景', v: '科技赋能云仓' },
+  { k: '使命', v: '为云仓提效降本' },
+]
 const VALUES = [
   { k: '先签约后采购', v: '不压货、不赌行情，每一台设备都对着一份合同' },
   { k: '一台设备一条命', v: '逐件建档，从采购到转让处置全程可追溯' },
@@ -64,6 +69,14 @@ defineExpose({ load })
           <el-button class="bh-refresh" size="small" @click="load">刷新</el-button>
         </div>
       </div>
+      <!-- 愿景 / 使命 -->
+      <div class="bh-mission">
+        <div v-for="m in MISSION" :key="m.k" class="bh-m">
+          <span class="bh-m-k">{{ m.k }}</span>
+          <span class="bh-m-v">{{ m.v }}</span>
+        </div>
+      </div>
+
       <!-- 价值观条 -->
       <div class="bh-values">
         <div v-for="it in VALUES" :key="it.k" class="bh-value">
@@ -161,11 +174,37 @@ defineExpose({ load })
 }
 .bh-refresh:hover { background: var(--brand-graphite); border-color: var(--brand-gold); color: var(--brand-gold-bright); }
 
+/* 愿景 / 使命：比价值观条更重，亮金字 + 竖金线分隔 */
+.bh-mission {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.bh-m { display: flex; align-items: baseline; gap: 10px; }
+.bh-m + .bh-m { padding-left: 28px; border-left: 1px solid var(--brand-gold-line); }
+.bh-m-k {
+  color: var(--brand-gold);
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  white-space: nowrap;
+}
+.bh-m-v {
+  color: var(--brand-gold-bright);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  white-space: nowrap;
+}
+
 /* 价值观条：三栏，金线分隔 */
 .bh-values {
   display: flex;
   gap: 0;
-  margin: 22px -28px 0;
+  margin: 20px -28px 0;
   border-top: 1px solid var(--brand-gold-line);
   flex-wrap: wrap;
 }
