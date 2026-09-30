@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="brand-row"><span class="brand-mark">曜</span><div><h1>{{ mode === 'recovery' ? '激活恢复管理员' : '曜石科技 · 租赁板块' }}</h1><p>{{ mode === 'recovery' ? '输入一次性恢复码，设置正式登录密码' : '内部使用 · 凭邀请码注册后登录' }}</p></div></div>
+      <div class="brand-row"><span class="brand-mark">曜</span><div><h1>{{ mode === 'recovery' ? '激活恢复管理员' : '曜石智能 · 租赁板块' }}</h1><p>{{ mode === 'recovery' ? '输入一次性恢复码，设置正式登录密码' : '内部使用 · 凭邀请码注册后登录' }}</p></div></div>
       <el-alert v-if="mode === 'recovery'" class="recovery-tip" type="warning" :closable="false" title="临时密码没有业务访问权限。恢复码由建号命令显示，30 分钟内有效；激活后临时密码和恢复码同时失效。" />
       <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="submit">
         <el-form-item prop="username"><el-input v-model="form.username" :disabled="mode === 'recovery'" placeholder="账号（3-32 位字母数字）" autocomplete="username" /></el-form-item>

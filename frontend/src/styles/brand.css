@@ -1,0 +1,51 @@
+/**
+ * 曜石智能科技 · 品牌标准色（标志标准规范 V1.0）
+ *
+ * 四个标准色按规范原值，不要在页面里写死十六进制 —— 全部走这里的变量，
+ * 以后调色只改这一处。
+ */
+:root {
+  /* 标准色 */
+  --brand-obsidian: #0a0a0d;   /* 曜石黑 */
+  --brand-gold: #c9a063;       /* 曜金 */
+  --brand-gold-bright: #e8c88a;/* 亮金 */
+  --brand-graphite: #2a2a2e;   /* 石墨灰 */
+
+  /* 由标准色派生：金属金渐变（金底版标志与徽标用） */
+  --brand-gold-gradient: linear-gradient(135deg, #e8c88a 0%, #c9a063 55%, #a8834b 100%);
+  /* 深色底渐变（深色版标志底） */
+  --brand-dark-gradient: linear-gradient(135deg, #2a2a2e 0%, #0a0a0d 100%);
+  /* 金色描边/分隔线（低透明度，避免整块发亮） */
+  --brand-gold-line: rgba(201, 160, 99, 0.35);
+  --brand-gold-dim: rgba(201, 160, 99, 0.65);
+}
+
+/**
+ * 标志字标：粗黑宽排。
+ * 中文用系统黑体族里最接近「粗黑宽排」的一档，字重 800 + 字距拉开；
+ * 英文全大写、字距更大，与规范里的 OBSIDIAN INTELLIGENCE 一致。
+ */
+.brand-cn {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  /* 字距会在右侧多出一个空位，往左补回来让视觉居中 */
+  text-indent: 0.18em;
+}
+
+.brand-en {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+}
+
+/* 金色文字（深色底用）：用渐变裁切出金属感，不支持裁切时退回纯曜金 */
+.brand-gold-text {
+  color: var(--brand-gold);
+  background: var(--brand-gold-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

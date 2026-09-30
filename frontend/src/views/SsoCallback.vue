@@ -1,7 +1,7 @@
 <template>
   <div class="sso-page">
     <div class="sso-card">
-      <div class="brand-row"><span class="brand-mark">曜</span><div><h1>曜石科技 · 租赁板块</h1><p>平台门户单点登录</p></div></div>
+      <div class="brand-row"><span class="brand-mark">曜</span><div><h1>曜石智能 · 租赁板块</h1><p>平台门户单点登录</p></div></div>
       <template v-if="!error">
         <div class="spinner" aria-label="loading" />
         <p class="msg">正在从平台门户免登进入…</p>

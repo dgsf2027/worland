@@ -1,4 +1,19 @@
 <script setup lang="ts">
+import BrandLockup from '@/components/BrandLockup.vue'
+
+/**
+ * 企业文化文案（《标志标准规范 V1.0》里的 slogan + 价值观条）。
+ *
+ * slogan 取自规范的门头招牌用法；VALUES 三条目前是占位，
+ * 要改只改这里一处，页面自动跟着变。
+ */
+const SLOGAN = '淬炼于火 · 锋利如曜'
+const VALUES = [
+  { k: '先签约后采购', v: '不压货、不赌行情，每一台设备都对着一份合同' },
+  { k: '一台设备一条命', v: '逐件建档，从采购到转让处置全程可追溯' },
+  { k: '账实相符', v: '钱该动没动有稽核，单据与台账、凭证三方对得上' },
+]
+
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchWorkbench, type Workbench } from '@/api/workbench'
@@ -32,16 +47,29 @@ defineExpose({ load })
 
 <template>
   <div v-loading="loading" class="wb">
-    <div class="hero">
-      <div>
-        <h2>曜石科技 · 租赁板块工作台</h2>
-        <div class="scope">
-          <template v-if="wb">{{ wb.userName || '未登录' }}<template v-if="wb.role">（{{ wb.role }}）</template><template v-if="wb.scopeNote"> · {{ wb.scopeNote }}</template></template>
-          <template v-else-if="loading">加载中…</template>
-          <template v-else>—（无数据）</template>
+    <!-- 品牌头（曜石智能 · 标志标准规范 V1.0：深色版标志 + slogan） -->
+    <div class="brand-hero">
+      <div class="bh-main">
+        <div class="bh-left">
+          <BrandLockup variant="stack" :size="34" />
+          <div class="bh-slogan">{{ SLOGAN }}</div>
+        </div>
+        <div class="bh-right">
+          <div class="bh-sub">租赁板块工作台</div>
+          <div class="bh-scope">
+            <template v-if="wb">{{ wb.userName || '未登录' }}<template v-if="wb.role">（{{ wb.role }}）</template><template v-if="wb.scopeNote"> · {{ wb.scopeNote }}</template></template>
+            <template v-else-if="loading">加载中…</template>
+            <template v-else>—（无数据）</template>
+          </div>
+          <el-button class="bh-refresh" size="small" @click="load">刷新</el-button>
         </div>
       </div>
-      <el-button @click="load">刷新</el-button>
+      <!-- 价值观条 -->
+      <div class="bh-values">
+        <div v-for="it in VALUES" :key="it.k" class="bh-value">
+          <b>{{ it.k }}</b><span>{{ it.v }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 老板驾驶舱 KPI -->
@@ -104,12 +132,66 @@ defineExpose({ load })
 
 <style scoped>
 .wb { padding: 4px; }
-.hero { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.hero h2 { margin: 0 0 4px; font-size: 20px; }
-.scope { color: #909399; font-size: 13px; }
+
+/* ===== 品牌头：曜石黑底 + 金字，与标志标准规范的深色版一致 ===== */
+.brand-hero {
+  background: var(--brand-dark-gradient);
+  border: 1px solid var(--brand-gold-line);
+  border-radius: 10px;
+  padding: 26px 28px 0;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.bh-main { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.bh-left { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.bh-slogan {
+  color: var(--brand-gold-dim);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+}
+.bh-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.bh-sub { color: #e6e6ea; font-size: 15px; font-weight: 600; letter-spacing: 1px; }
+.bh-scope { color: #8a8a92; font-size: 12px; }
+/* 刷新按钮走金线描边，压在深色底上 */
+.bh-refresh {
+  background: transparent;
+  border-color: var(--brand-gold-line);
+  color: var(--brand-gold);
+}
+.bh-refresh:hover { background: var(--brand-graphite); border-color: var(--brand-gold); color: var(--brand-gold-bright); }
+
+/* 价值观条：三栏，金线分隔 */
+.bh-values {
+  display: flex;
+  gap: 0;
+  margin: 22px -28px 0;
+  border-top: 1px solid var(--brand-gold-line);
+  flex-wrap: wrap;
+}
+.bh-value {
+  flex: 1 1 200px;
+  padding: 14px 28px;
+  border-left: 1px solid rgba(201, 160, 99, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bh-value:first-child { border-left: none; }
+.bh-value b { color: var(--brand-gold-bright); font-size: 13px; letter-spacing: 1px; font-weight: 600; }
+.bh-value span { color: #8a8a92; font-size: 12px; line-height: 1.6; }
+
 .kpis { margin-bottom: 16px; }
-.kpi { background: #fff; border: 1px solid #ebeef5; border-radius: 8px; padding: 16px; text-align: center; }
-.kpi .v { font-size: 26px; font-weight: 700; color: #303133; }
+/* KPI 卡：白底 + 金色顶边，数值用曜石黑压住 */
+.kpi {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-top: 2px solid var(--brand-gold);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+.kpi .v { font-size: 26px; font-weight: 700; color: var(--brand-obsidian); }
 .kpi .v.up { color: #67c23a; }
 .kpi .l { color: #909399; font-size: 13px; margin-top: 6px; }
 .kpi .sub { color: #c0c4cc; font-size: 11px; }
@@ -120,5 +202,9 @@ defineExpose({ load })
 .rp-right b { color: #f56c6c; font-size: 18px; margin-right: 4px; }
 .arrow { color: #c0c4cc; }
 .modules { margin-top: 16px; }
-.mtag { margin-right: 10px; cursor: pointer; padding: 8px 12px; font-size: 13px; }
+.mtag {
+  margin-right: 10px; cursor: pointer; padding: 8px 12px; font-size: 13px;
+  border-color: var(--brand-gold-line); color: var(--brand-obsidian); background: #fdfaf4;
+}
+.mtag:hover { border-color: var(--brand-gold); color: var(--brand-gold); }
 </style>

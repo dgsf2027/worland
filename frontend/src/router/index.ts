@@ -44,7 +44,7 @@ router.beforeEach((to) => {
 })
 
 router.afterEach((to) => {
-  document.title = to.meta.title ? `${to.meta.title} · 曜石科技` : '曜石科技租赁板块'
+  document.title = to.meta.title ? `${to.meta.title} · 曜石智能` : '曜石智能 · 租赁板块'
 })
 
 export default router
