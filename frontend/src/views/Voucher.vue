@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchVouchers, fetchVoucherDetail, reverseVoucher, backfillRentIncome,
-  fetchTaxThreshold, runDepreciation,
+  fetchTaxThreshold, runDepreciation, exportVouchers,
   type VoucherItem, type VoucherDetail, type TaxThreshold,
 } from '@/api/voucher'
 
@@ -14,7 +14,7 @@ function money(v?: number | null) {
 const bookLabel: Record<string, string> = { tax: '税务账(分期收款销售)', ops: '经营账(三层回报)' }
 const bookTag: Record<string, string> = { tax: 'warning', ops: '' }
 const srcLabel: Record<string, string> = {
-  rent_bill: '收租', purchase_in: '采购应付', depreciation: '折旧', transfer: '转让残值', manual: '手工',
+  rent_bill: '收租', purchase_in: '采购应付', depreciation: '折旧', transfer_line: '转让残值', manual: '手工',
 }
 const entryTag: Record<string, string> = { revenue: 'success', cost: 'info', payable: 'warning', other: 'info' }
 const levelTag: Record<string, string> = { 正常: 'success', 预警: 'warning', 超限: 'danger' }
@@ -32,7 +32,7 @@ const barStatus = computed(() => {
 const filters = reactive<{ book: string; sourceDocType: string; period: string; isReversal?: boolean }>(
   { book: '', sourceDocType: '', period: '' })
 const books = ['tax', 'ops']
-const sources = ['rent_bill', 'purchase_in', 'depreciation', 'transfer', 'manual']
+const sources = ['rent_bill', 'purchase_in', 'depreciation', 'transfer_line', 'manual']
 const vouchers = ref<VoucherItem[]>([])
 const total = ref(0)
 const loading = ref(false)
@@ -49,6 +49,23 @@ async function loadVouchers() {
     total.value = res.total
   } finally {
     loading.value = false
+  }
+}
+
+// ---- 导出(只导出,不导入:凭证是业财一体生成的结果,见 api/voucher.ts 注释) ----
+const exporting = ref(false)
+async function onExport() {
+  exporting.value = true
+  try {
+    const params: Record<string, any> = {}
+    if (filters.book) params.book = filters.book
+    if (filters.sourceDocType) params.sourceDocType = filters.sourceDocType
+    if (filters.period) params.period = filters.period
+    if (filters.isReversal !== undefined && filters.isReversal !== null) params.isReversal = filters.isReversal
+    await exportVouchers(params)
+    ElMessage.success('已导出：凭证 / 凭证分录 / 折旧明细 / 营收红线 四张表')
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -124,6 +141,7 @@ onMounted(() => { loadThreshold(); loadVouchers() })
       <el-button size="small" @click="loadVouchers">查询</el-button>
       <el-button size="small" type="primary" @click="doBackfill">📥 回填收入凭证</el-button>
       <el-button size="small" type="warning" @click="doDepreciation">📉 月度折旧计提</el-button>
+      <el-button size="small" :loading="exporting" @click="onExport">⬇ 导出</el-button>
       <span class="total">共 {{ total }} 张</span>
     </div>
 
@@ -152,6 +170,8 @@ onMounted(() => { loadThreshold(); loadVouchers() })
     <p class="tip">
       一业务事件按账套拆两张凭证(税务/经营)·每张借贷平衡 Σ借=Σ贷。收租核销自动生成双账收入凭证;折旧只落经营账(ops≠tax)。
       通用红冲走 P0-F:单事务原子 + reverses_id 唯一幂等键 + 锁账守卫,ledger_book 同步写负额冲销,营收红线联动回退。
+      「导出」按当前筛选导出凭证、凭证分录、折旧明细、营收红线四张表;凭证只导出不导入 ——
+      凭证是收租核销/采购应付/折旧计提/转让处置在同一事务里生成的结果,从表格灌进来会和来源单据对不上、也绕开红冲留痕。
     </p>
 
     <!-- ============ 凭证详情(分录借贷 + 双账口径对照) ============ -->

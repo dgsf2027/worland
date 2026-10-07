@@ -3,17 +3,24 @@ package top.aole.rent.modules.analytics.interfaces;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.analytics.dto.CashflowDtos;
+import top.aole.rent.modules.analytics.service.CashflowExcelService;
 import top.aole.rent.modules.analytics.service.CashflowService;
 import top.aole.rent.modules.analytics.service.CoverageGapService;
 import top.aole.rent.modules.analytics.service.ReturnAttributionService;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 现金流驾驶舱 · 账期兑付缺口预警 · 回报四源(M3-05/06/09)。老板/财务驾驶舱数据源。
@@ -27,6 +34,7 @@ public class CashflowController {
     private final CashflowService cashflowService;
     private final CoverageGapService coverageGapService;
     private final ReturnAttributionService returnAttributionService;
+    private final CashflowExcelService cashflowExcelService;
 
     @ApiOperation("现金流驾驶舱:应收/应付按到期分层 + 未来 N 月净现金流预测曲线 + 三层杠杆资金占用")
     @GetMapping("/cashflow")
@@ -38,6 +46,22 @@ public class CashflowController {
     @GetMapping("/cashflow/coverage-gap")
     public R<CashflowDtos.CoverageGapReport> coverageGap(@RequestParam(required = false) Integer tMinusDays) {
         return R.ok(coverageGapService.coverageGap(tMinusDays));
+    }
+
+    @ApiOperation("导出驾驶舱 Excel(概览/现金流预测/兑付缺口/结账分配/出资人名册/回报四源六张表)")
+    @GetMapping("/cashflow/export")
+    public ResponseEntity<ByteArrayResource> export(
+            @RequestParam(required = false) Integer months,
+            @RequestParam(required = false) Integer tMinusDays,
+            @RequestParam(required = false) String customerType) {
+        byte[] data = cashflowExcelService.export(months, tMinusDays, customerType);
+        ContentDisposition cd = ContentDisposition.attachment()
+                .filename(cashflowExcelService.fileName(), StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 
     @ApiOperation("回报四源:总税后 IRR 拆 集采差价+资金时间价值+价值定价+残值回收(四者之和=总IRR·可勾稽)")

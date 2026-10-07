@@ -6,7 +6,9 @@ import org.springframework.stereotype.Service;
 import top.aole.rent.modules.analytics.dto.CashflowDtos;
 import top.aole.rent.modules.billing.domain.RentBill;
 import top.aole.rent.modules.billing.mapper.RentBillMapper;
+import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.contract.domain.RentSchedule;
+import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.mapper.RentScheduleMapper;
 import top.aole.rent.modules.distribution.domain.Investor;
 import top.aole.rent.modules.distribution.mapper.InvestorMapper;
@@ -20,8 +22,10 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 现金流驾驶舱服务(M3-05)。应收(rent_schedule 未收)按到期分层 + 应付(payable 待付)按到期分层
@@ -29,12 +33,15 @@ import java.util.Map;
  *
  * <p>§4.24 单一真相源:应收未收态取自 rent_bill(收款唯一真相源)—— 计划已生成收租单且 status='已核销' 视为已收,
  * 否则计入应收未收(含未到期/未生成单/待收/逾期)。应付负债取 payable status='待付'。
+ * <p><b>只认活合同</b>:租金计划必须挂在未删除的合同上才计入应收 —— 合同删了计划还留着的话,
+ * 驾驶舱上就会多出一笔查不到来源的「未关联」回款(V121 已清历史孤儿行)。
  */
 @Service
 @RequiredArgsConstructor
 public class CashflowService {
 
     private final RentScheduleMapper rentScheduleMapper;
+    private final ContractMapper contractMapper;
     private final RentBillMapper rentBillMapper;
     private final PayableMapper payableMapper;
     private final InvestorMapper investorMapper;
@@ -71,10 +78,14 @@ public class CashflowService {
         }
     }
 
-    /** 未收应收 = rent_schedule 未被 rent_bill 已核销的行(§4.24 收款态取 rent_bill)。 */
+    /**
+     * 未收应收 = rent_schedule 未被 rent_bill 已核销的行(§4.24 收款态取 rent_bill)。
+     * 合同已删除/查不到的计划行不计入 —— 那是孤儿数据,不是应收。
+     */
     public List<Uncollected> uncollectedReceivables() {
         List<RentSchedule> schedules = rentScheduleMapper.selectList(new LambdaQueryWrapper<RentSchedule>()
                 .eq(RentSchedule::getIsDeleted, 0));
+        Set<Long> liveContracts = liveContractIds(schedules);
         // 批量取已生成收租单的核销态
         List<Long> billIds = new ArrayList<>();
         for (RentSchedule s : schedules) {
@@ -90,6 +101,9 @@ public class CashflowService {
         }
         List<Uncollected> out = new ArrayList<>();
         for (RentSchedule s : schedules) {
+            if (!liveContracts.contains(s.getContractId())) {
+                continue;
+            }
             boolean collected = s.getRentBillId() != null
                     && "已核销".equals(billStatus.get(s.getRentBillId()));
             if (!collected && s.getAmount() != null && s.getAmount().signum() > 0) {
@@ -97,6 +111,26 @@ public class CashflowService {
             }
         }
         return out;
+    }
+
+    /** 这批计划行里哪些合同还活着(一次 in 查询,不逐行查)。 */
+    private Set<Long> liveContractIds(List<RentSchedule> schedules) {
+        Set<Long> ids = new HashSet<>();
+        for (RentSchedule s : schedules) {
+            if (s.getContractId() != null) {
+                ids.add(s.getContractId());
+            }
+        }
+        Set<Long> live = new HashSet<>();
+        if (ids.isEmpty()) {
+            return live;
+        }
+        for (Contract c : contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .select(Contract::getId)
+                .in(Contract::getId, ids))) {
+            live.add(c.getId());
+        }
+        return live;
     }
 
     // ---------- 分层 ----------

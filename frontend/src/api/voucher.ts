@@ -1,6 +1,24 @@
 import request from '@/utils/request'
 import type { PageResult } from '@/api/supplier'
 
+/** 共用的下载动作:后端已带 Content-Disposition，这里只负责落盘。 */
+async function download(url: string, params: Record<string, any>, fallbackName: string) {
+  const blob: Blob = await request.get(url, { params, responseType: 'blob', timeout: 0 })
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = fallbackName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 60000)
+}
+
+function ymd() {
+  const d = new Date()
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+}
+
 export interface VoucherItem {
   id: number
   voucherNo: string
@@ -80,6 +98,17 @@ export interface DepreciationRunResult {
 }
 
 // ---- 凭证 ----
+/**
+ * 导出凭证 Excel(凭证 / 凭证分录 / 折旧明细 / 营收红线 四张表)。
+ * 筛选口径与列表一致 —— 页面上筛成什么样，导出就是什么样。
+ *
+ * 凭证只导出不导入:凭证是收租核销/采购应付/折旧计提/转让处置在同一事务里生成的结果，
+ * 从表格灌凭证会让它和来源单据对不上，也绕开红冲留痕。
+ */
+export async function exportVouchers(params: Record<string, any>) {
+  await download('/rent/vouchers/export', params, `凭证双账折旧-${ymd()}.xlsx`)
+}
+
 export function fetchVouchers(params: Record<string, any>): Promise<PageResult<VoucherItem>> {
   return request.get('/rent/vouchers', { params })
 }

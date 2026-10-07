@@ -23,7 +23,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 凭证双账服务(M3-01/11)。业务单据自动生成凭证 + 借贷平衡校验 + ledger_book 双账过账 + P0-F 红冲内核。
@@ -396,13 +399,7 @@ public class VoucherService {
 
     public PageResult<VoucherDtos.VoucherItem> list(String book, String sourceDocType, String period,
                                                     Boolean isReversal, int page, int size) {
-        LambdaQueryWrapper<Voucher> qw = new LambdaQueryWrapper<Voucher>()
-                .eq(book != null && !book.isEmpty(), Voucher::getBook, book)
-                .eq(sourceDocType != null && !sourceDocType.isEmpty(), Voucher::getSourceDocType, sourceDocType)
-                .eq(period != null && !period.isEmpty(), Voucher::getPeriod, period)
-                .eq(isReversal != null, Voucher::getIsReversal, isReversal != null && isReversal ? 1 : 0)
-                .orderByDesc(Voucher::getId);
-        List<Voucher> all = voucherMapper.selectList(qw);
+        List<Voucher> all = voucherMapper.selectList(listQuery(book, sourceDocType, period, isReversal));
         List<VoucherDtos.VoucherItem> items = new ArrayList<>();
         for (Voucher v : all) {
             items.add(toItem(v));
@@ -412,6 +409,42 @@ public class VoucherService {
         int to = Math.min(items.size(), from + size);
         List<VoucherDtos.VoucherItem> records = from >= items.size() ? new ArrayList<>() : items.subList(from, to);
         return new PageResult<>(total, page, size, records);
+    }
+
+    /** 导出用:同筛选口径的全量凭证(不分页)。 */
+    public List<VoucherDtos.VoucherItem> listAll(String book, String sourceDocType, String period,
+                                                 Boolean isReversal) {
+        List<VoucherDtos.VoucherItem> items = new ArrayList<>();
+        for (Voucher v : voucherMapper.selectList(listQuery(book, sourceDocType, period, isReversal))) {
+            items.add(toItem(v));
+        }
+        return items;
+    }
+
+    /** 导出用:按凭证号批量取分录(一次 in 查询,不逐张查)。 */
+    public Map<Long, List<VoucherDtos.LineItem>> linesByVoucher(Collection<Long> voucherIds) {
+        Map<Long, List<VoucherDtos.LineItem>> out = new LinkedHashMap<>();
+        if (voucherIds == null || voucherIds.isEmpty()) {
+            return out;
+        }
+        for (VoucherLine l : voucherLineMapper.selectList(new LambdaQueryWrapper<VoucherLine>()
+                .in(VoucherLine::getVoucherId, voucherIds)
+                .orderByAsc(VoucherLine::getVoucherId)
+                .orderByAsc(VoucherLine::getId))) {
+            out.computeIfAbsent(l.getVoucherId(), k -> new ArrayList<>()).add(toLineItem(l));
+        }
+        return out;
+    }
+
+    /** 列表/导出共用的筛选条件:账套 + 来源单据 + 记账期 + 是否红冲,按 id 倒序。 */
+    private LambdaQueryWrapper<Voucher> listQuery(String book, String sourceDocType, String period,
+                                                  Boolean isReversal) {
+        return new LambdaQueryWrapper<Voucher>()
+                .eq(book != null && !book.isEmpty(), Voucher::getBook, book)
+                .eq(sourceDocType != null && !sourceDocType.isEmpty(), Voucher::getSourceDocType, sourceDocType)
+                .eq(period != null && !period.isEmpty(), Voucher::getPeriod, period)
+                .eq(isReversal != null, Voucher::getIsReversal, isReversal != null && isReversal ? 1 : 0)
+                .orderByDesc(Voucher::getId);
     }
 
     public VoucherDtos.VoucherDetail detail(Long id) {
@@ -424,14 +457,7 @@ public class VoucherService {
         List<VoucherDtos.LineItem> lineItems = new ArrayList<>();
         BigDecimal dr = BigDecimal.ZERO, cr = BigDecimal.ZERO;
         for (VoucherLine l : lines) {
-            VoucherDtos.LineItem li = new VoucherDtos.LineItem();
-            li.setId(l.getId());
-            li.setAccountCode(l.getAccountCode());
-            li.setAccountName(l.getAccountName());
-            li.setDirection(l.getDirection());
-            li.setAmount(l.getAmount());
-            li.setRemark(l.getRemark());
-            lineItems.add(li);
+            lineItems.add(toLineItem(l));
             if (DR.equals(l.getDirection())) dr = dr.add(l.getAmount());
             else cr = cr.add(l.getAmount());
         }
@@ -461,6 +487,17 @@ public class VoucherService {
     }
 
     // ================= 工具 =================
+
+    private VoucherDtos.LineItem toLineItem(VoucherLine l) {
+        VoucherDtos.LineItem li = new VoucherDtos.LineItem();
+        li.setId(l.getId());
+        li.setAccountCode(l.getAccountCode());
+        li.setAccountName(l.getAccountName());
+        li.setDirection(l.getDirection());
+        li.setAmount(l.getAmount());
+        li.setRemark(l.getRemark());
+        return li;
+    }
 
     private VoucherDtos.VoucherItem toItem(Voucher v) {
         VoucherDtos.VoucherItem it = new VoucherDtos.VoucherItem();

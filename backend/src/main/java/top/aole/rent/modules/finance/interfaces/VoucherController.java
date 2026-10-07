@@ -3,6 +3,11 @@ package top.aole.rent.modules.finance.interfaces;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +23,10 @@ import top.aole.rent.modules.finance.dto.VoucherDtos;
 import top.aole.rent.modules.finance.service.DepreciationScheduler;
 import top.aole.rent.modules.finance.service.DepreciationService;
 import top.aole.rent.modules.finance.service.TaxThresholdService;
+import top.aole.rent.modules.finance.service.VoucherExcelService;
 import top.aole.rent.modules.finance.service.VoucherService;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * 凭证中心 · 双账凭证查询/详情/红冲 + 折旧计提 + 500万营收红线(M3-01/02/08/11)。
@@ -34,6 +42,7 @@ public class VoucherController {
     private final DepreciationScheduler depreciationScheduler;
     private final TaxThresholdService taxThresholdService;
     private final RentBillService rentBillService;
+    private final VoucherExcelService voucherExcelService;
 
     // ============ M3-11 凭证查询/详情/红冲 ============
 
@@ -47,6 +56,17 @@ public class VoucherController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return R.ok(voucherService.list(book, sourceDocType, period, isReversal, page, size));
+    }
+
+    @ApiOperation("导出凭证 Excel(凭证/凭证分录/折旧明细/营收红线四张表;筛选口径同列表)")
+    @GetMapping("/vouchers/export")
+    public ResponseEntity<ByteArrayResource> export(
+            @RequestParam(required = false) String book,
+            @RequestParam(required = false) String sourceDocType,
+            @RequestParam(required = false) String period,
+            @RequestParam(required = false) Boolean isReversal) {
+        byte[] data = voucherExcelService.export(book, sourceDocType, period, isReversal);
+        return xlsx(data, voucherExcelService.fileName(book, period));
     }
 
     @ApiOperation("凭证详情:分录借贷 + 借贷平衡校验 + 双账对家凭证对照 + 红冲指向")
@@ -94,5 +114,14 @@ public class VoucherController {
             return R.ok(depreciationService.runMonthlyDepreciation(java.time.LocalDate.parse(bizDate)));
         }
         return R.ok(depreciationScheduler.runDepreciationCron());
+    }
+
+    private ResponseEntity<ByteArrayResource> xlsx(byte[] data, String fileName) {
+        ContentDisposition cd = ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 }

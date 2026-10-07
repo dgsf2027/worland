@@ -20,7 +20,11 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 折旧计提服务(M3-02 · ADR-004 P0-B)。月度按经营口径 ops 逐月生成折旧行 + 折旧凭证,
@@ -161,6 +165,46 @@ public class DepreciationService {
             it.setId(l.getId());
             it.setAssetId(l.getAssetId());
             it.setSerialNo(serial);
+            it.setPeriodNo(l.getPeriodNo());
+            it.setPeriod(l.getPeriod());
+            it.setDeprAmount(l.getDeprAmount());
+            it.setBookValueAfter(l.getBookValueAfter());
+            it.setVoucherId(l.getVoucherId());
+            it.setBizDate(l.getBizDate());
+            out.add(it);
+        }
+        return out;
+    }
+
+    /**
+     * 导出用:全量折旧行(经营口径),period 非空则只取该记账期。
+     * 序列号批量回填,不逐行查设备。
+     */
+    public List<VoucherDtos.DepreciationLineItem> linesForExport(String period) {
+        List<AssetDepreciationLine> lines = depreciationLineMapper.selectList(
+                new LambdaQueryWrapper<AssetDepreciationLine>()
+                        .eq(AssetDepreciationLine::getBook, BOOK)
+                        .eq(period != null && !period.isEmpty(), AssetDepreciationLine::getPeriod, period)
+                        .orderByAsc(AssetDepreciationLine::getAssetId)
+                        .orderByAsc(AssetDepreciationLine::getPeriodNo));
+        Set<Long> assetIds = new HashSet<>();
+        for (AssetDepreciationLine l : lines) {
+            if (l.getAssetId() != null) {
+                assetIds.add(l.getAssetId());
+            }
+        }
+        Map<Long, String> serials = new HashMap<>();
+        if (!assetIds.isEmpty()) {
+            for (Asset a : assetMapper.selectBatchIds(assetIds)) {
+                serials.put(a.getId(), a.getSerialNo());
+            }
+        }
+        List<VoucherDtos.DepreciationLineItem> out = new ArrayList<>();
+        for (AssetDepreciationLine l : lines) {
+            VoucherDtos.DepreciationLineItem it = new VoucherDtos.DepreciationLineItem();
+            it.setId(l.getId());
+            it.setAssetId(l.getAssetId());
+            it.setSerialNo(serials.get(l.getAssetId()));
             it.setPeriodNo(l.getPeriodNo());
             it.setPeriod(l.getPeriod());
             it.setDeprAmount(l.getDeprAmount());

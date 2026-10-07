@@ -147,3 +147,24 @@ export interface ReturnAttribution {
 export function fetchReturnAttribution(params: Record<string, any>): Promise<ReturnAttribution> {
   return request.get('/rent/analytics/return-attribution', { params })
 }
+
+/**
+ * 导出现金流/分配驾驶舱 Excel(概览 / 现金流预测 / 兑付缺口 / 结账分配 / 出资人名册 / 回报四源 六张表)。
+ * 参数与页面上的「未来 N 月」「T-N 天」「目标客户类型」同义。
+ *
+ * 驾驶舱只导出不导入:上面的数全是算出来的(应收取租金计划、应付取应付台账、
+ * 可动用留存取历史分配)，分配单只能由「运行结账分配」按规则生成，灌进来的数会和系统算的打架。
+ */
+export async function exportCashflow(params: Record<string, any>) {
+  const blob: Blob = await request.get('/rent/cashflow/export', { params, responseType: 'blob', timeout: 0 })
+  const d = new Date()
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = `现金流分配驾驶舱-${ymd}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 60000)
+}

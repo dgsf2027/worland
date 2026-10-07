@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCashflow, fetchCoverageGap, fetchReturnAttribution,
-  runDistribution, reverseDistribution, fetchDistributions, fetchDistributionDetail,
+  runDistribution, reverseDistribution, fetchDistributions, fetchDistributionDetail, exportCashflow,
   type Cashflow, type CoverageGapReport, type ReturnAttribution,
   type DistributionItem, type DistributionDetail,
 } from '@/api/distribution'
@@ -29,6 +29,18 @@ const maxFlow = computed(() => {
   for (const f of cf.value.forecast) m = Math.max(m, Math.abs(f.inflow), Math.abs(f.outflow))
   return m
 })
+
+// ============ 导出(只导出,不导入:驾驶舱的数全是算出来的,见 api/distribution.ts 注释) ============
+const exporting = ref(false)
+async function onExport() {
+  exporting.value = true
+  try {
+    await exportCashflow({ months: cfMonths.value, tMinusDays: tMinus.value, customerType: custType.value })
+    ElMessage.success('已导出：概览 / 现金流预测 / 兑付缺口 / 结账分配 / 出资人名册 / 回报四源 六张表')
+  } finally {
+    exporting.value = false
+  }
+}
 
 // ============ 账期兑付缺口预警(P0-H) ============
 const gap = ref<CoverageGapReport | null>(null)
@@ -76,6 +88,10 @@ onMounted(() => { loadCashflow(); loadGap(); loadAttr(); loadDists() })
 
 <template>
   <div class="cf-page">
+    <div class="page-bar">
+      <el-button size="small" :loading="exporting" @click="onExport">⬇ 导出</el-button>
+    </div>
+
     <!-- ============ 账期兑付缺口预警(P0-H·置顶红点) ============ -->
     <el-card shadow="never" class="gap-bar" v-if="gap"
       :class="{ red: gap.hasRedAlert }">
@@ -272,6 +288,7 @@ onMounted(() => { loadCashflow(); loadGap(); loadAttr(); loadDists() })
 
 <style scoped>
 .cf-page { padding: 4px; }
+.page-bar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .section-title { font-weight: 700; font-size: 15px; margin: 16px 0 10px; display: flex; align-items: center; gap: 10px; }
 .sub-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
 .muted { color: #bbb; font-size: 12px; }
