@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()
+const mobileMenuOpen = ref(false)
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 
 // 2026-08-19 邀请码注册上线:身份来自登录会话(token),不再前端切角色
 import { refreshSession } from '@/api/auth'
@@ -40,7 +42,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
 
 <template>
   <router-view v-if="route.meta.public" />
-  <el-container v-else class="app-root" :class="{ 'workbench-layout': route.name === 'workbench' }">
+  <el-container v-else class="app-root" :class="{ 'workbench-layout': route.name === 'workbench', 'workbench-menu-open': mobileMenuOpen }">
     <el-aside width="210px" class="app-aside">
       <div class="brand">
         <BrandLockup variant="stack" :size="20" en-tracking="tight" />
@@ -81,6 +83,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
     </el-aside>
     <el-container>
       <el-header class="app-header">
+        <button v-if="route.name === 'workbench'" class="mobile-menu-toggle" type="button" :aria-expanded="mobileMenuOpen" @click="mobileMenuOpen = !mobileMenuOpen">{{ mobileMenuOpen ? '关闭菜单' : '业务菜单' }}</button>
         <span class="title">{{ (route.meta.title as string) || '曜石智能 · 租赁板块' }}</span>
         <div class="right">
           <span class="env">{{ displayName }}（{{ current }}）</span>
@@ -146,9 +149,13 @@ html, body, #app { height: 100%; margin: 0; }
 .app-header .title { font-size: 16px; font-weight: 600; }
 .app-header .right { display: flex; align-items: center; gap: 8px; }
 .app-header .env { font-size: 12px; color: #999; }
-/* 工作台在窄屏通过全景面板提供完整业务导航，避免固定侧栏挤压内容。 */
+.mobile-menu-toggle { display: none; }
+/* 窄屏工作台保留可展开的菜单，数据图表使用完整宽度。 */
 @media (max-width: 760px) {
   .workbench-layout .app-aside { display: none; }
+  .workbench-layout.workbench-menu-open .app-aside { display: flex; position: fixed; z-index: 50; top: 68px; bottom: 0; left: 0; box-shadow: 8px 0 24px rgba(0,0,0,.2); }
+  .workbench-layout .mobile-menu-toggle { display: inline-block; padding: 7px 10px; border: 1px solid #cfc6b7; border-radius: 5px; background: #fff; color: #514b41; }
+  .workbench-layout .app-header { flex-shrink: 0; }
   .workbench-layout > .el-container { min-width: 0; }
   .workbench-layout .el-main { padding: 12px; }
   .workbench-layout .app-header { height: auto; min-height: 60px; padding: 12px 16px; gap: 10px; flex-wrap: wrap; }

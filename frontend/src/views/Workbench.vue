@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import BrandLockup from '@/components/BrandLockup.vue'
-import HandoverOverview from '@/components/HandoverOverview.vue'
+import OperationsDashboard from '@/components/OperationsDashboard.vue'
+import { useDashboardData } from '@/api/dashboard'
 
 /**
  * 企业文化文案（《标志标准规范 V1.0》里的 slogan + 价值观条）。
@@ -29,6 +30,9 @@ const wb = ref<Workbench | null>(null)
 const loading = ref(false)
 const failed = ref(false)
 const updatedAt = ref('')
+const months = ref(6)
+const dashboard = useDashboardData()
+const charts = dashboard.charts
 
 const levelTag: Record<string, string> = { 红灯: 'danger', 超限: 'danger', 预警: 'warning', 正常: 'success' }
 const prioTag: Record<string, string> = { 高: 'danger', 中: 'warning', 低: 'info' }
@@ -37,14 +41,22 @@ async function load() {
   if (loading.value) return
   loading.value = true
   failed.value = false
+  dashboard.reset()
   try {
     wb.value = await fetchWorkbench()
+    await dashboard.load(wb.value, months.value)
     updatedAt.value = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
   } catch {
+    wb.value = null
     failed.value = true
   } finally {
     loading.value = false
   }
+}
+function changeMonths(value: number) {
+  if (loading.value) return
+  months.value = value
+  load()
 }
 onMounted(load)
 defineExpose({ load })
@@ -53,7 +65,7 @@ defineExpose({ load })
 <template>
   <div class="wb">
     <!-- 品牌头（曜石智能 · 标志标准规范 V1.0：深色版标志 + slogan） -->
-    <div class="brand-hero">
+    <div class="brand-hero data-hero">
       <div class="bh-main">
         <div class="bh-left">
           <BrandLockup variant="stack" :size="34" />
@@ -85,8 +97,8 @@ defineExpose({ load })
       </div>
     </div>
 
-    <HandoverOverview :data="wb" :loading="loading" :failed="failed" :updated-at="updatedAt" />
-    <el-alert v-if="failed" class="load-error" type="warning" :closable="false" show-icon :title="wb ? '刷新失败，以下保留上次成功数据。请点击刷新数据重试。' : '经营数据暂时无法加载，请点击刷新数据重试。业务地图仍可浏览。'" />
+    <OperationsDashboard :workbench="wb" :charts="charts" :loading="loading" :failed="failed" :updated-at="updatedAt" :months="months" @change-months="changeMonths" @refresh="load" />
+    <el-alert v-if="failed" class="load-error" type="warning" :closable="false" show-icon :title="'工作台数据加载失败，请点击刷新数据重试。'" />
 
     <el-row :gutter="16">
       <!-- 亮灯红点 -->
@@ -226,4 +238,9 @@ defineExpose({ load })
   .bh-mission { gap: 14px; }
   .bh-m + .bh-m { border: 0; padding-left: 0; }
 }
+.data-hero { padding: 18px 24px; }
+.data-hero .bh-mission, .data-hero .bh-values { display: none; }
+.data-hero .bh-left { flex-direction: row; align-items: center; gap: 24px; }
+.data-hero .bh-slogan { font-size: 12px; }
+@media (max-width: 900px) { .data-hero .bh-slogan { display: none; } }
 </style>

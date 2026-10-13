@@ -5,9 +5,12 @@ import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.workbench.dto.WorkbenchDtos;
+import top.aole.rent.modules.workbench.dto.WorkbenchChartsDtos;
+import top.aole.rent.modules.workbench.service.WorkbenchChartsService;
 import top.aole.rent.modules.workbench.service.WorkbenchService;
 
 /**
@@ -20,10 +23,17 @@ import top.aole.rent.modules.workbench.service.WorkbenchService;
 public class WorkbenchController {
 
     private final WorkbenchService workbenchService;
+    private final WorkbenchChartsService workbenchChartsService;
 
     @ApiOperation("工作台:各角色待办 + 亮灯红点 + 驾驶舱 KPI(按角色可见)")
     @GetMapping
     public R<WorkbenchDtos.Workbench> workbench() {
         return R.ok(workbenchService.workbench());
+    }
+
+    @ApiOperation("工作台图表：按角色返回客户阶段、仓库出租、收租原单趋势及计划现金流聚合")
+    @GetMapping("/charts")
+    public R<WorkbenchChartsDtos.Charts> charts(@RequestParam(required = false) Integer months) {
+        return R.ok(workbenchChartsService.charts(months));
     }
 }
