@@ -84,6 +84,8 @@ export interface PayableLine {
   status: string
   paidDate?: string
   remark?: string
+  /** 已挂回单数;0 且已付 = 历史无回单 */
+  proofCount?: number
 }
 
 export interface PurchaseDetail {

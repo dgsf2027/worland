@@ -11,6 +11,8 @@ import { toTermInputs, checkTermRows, fetchAssets, type TermRow, type AssetListI
 import { fetchSupplierPool } from '@/api/supplier'
 import { fetchContracts, fetchContractPaymentTerms, type ContractListItem,
   type ContractPaymentTermView } from '@/api/contract'
+import ProofUploader from '@/components/payproof/ProofUploader.vue'
+import ProofViewer from '@/components/payproof/ProofViewer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -235,21 +237,23 @@ async function submitPayEdit() {
 // ---- 登记 / 撤销付款 ----
 const payinDlg = ref(false)
 const payinSaving = ref(false)
-const payinForm = reactive<Record<string, any>>({ id: 0, stage: '', due: 0, paidAmount: 0, paidDate: '', remark: '' })
+const payinForm = reactive<Record<string, any>>({ id: 0, stage: '', due: 0, paidAmount: 0, paidDate: '', remark: '', proofFileIds: [] as number[] })
 const payinRest = computed(() => Math.max(0, Number(payinForm.due || 0) - Number(payinForm.paidAmount || 0)))
 function openPayin(row: PayableLine) {
   Object.assign(payinForm, {
     id: row.id, stage: row.stage, due: row.amount || 0, paidAmount: row.amount || 0,
-    paidDate: new Date().toISOString().slice(0, 10), remark: '',
+    paidDate: new Date().toISOString().slice(0, 10), remark: '', proofFileIds: [],
   })
   payinDlg.value = true
 }
 async function submitPayin() {
   if (!payinForm.paidAmount || Number(payinForm.paidAmount) <= 0) { ElMessage.warning('实付金额须大于 0'); return }
+  if (!payinForm.proofFileIds.length) { ElMessage.warning('请先上传付款回单'); return }
   payinSaving.value = true
   try {
     await payPayable(payinForm.id, {
       paidAmount: payinForm.paidAmount, paidDate: payinForm.paidDate || undefined, remark: payinForm.remark,
+      proofFileIds: payinForm.proofFileIds,
     })
     payinDlg.value = false
     ElMessage.success(payinRest.value > 0
@@ -270,6 +274,16 @@ async function doUnpay(row: PayableLine) {
   ElMessage.success('已撤销付款，退回待付')
   if (detail.value) detail.value = await fetchPurchaseDetail(detail.value.id)
   loadList()
+}
+
+// ---- 付款回单(10-07 纪要:付款必须留回单) ----
+const proofView = reactive<{ show: boolean; id: number; title: string }>({ show: false, id: 0, title: '' })
+function openProofs(row: PayableLine) {
+  Object.assign(proofView, { show: true, id: row.id, title: `付款回单 · ${row.stage}` })
+}
+const canSupplementPay = ['财务', '老板'].includes(localStorage.getItem('rent_user_role') || '')
+async function onProofChanged() {
+  if (detail.value) detail.value = await fetchPurchaseDetail(detail.value.id)
 }
 
 // ---- 收租对照：本单货款 vs 这份合同收回来的租金 ----
@@ -468,6 +482,13 @@ onMounted(() => {
               </template>
             </el-table-column>
             <el-table-column prop="remark" label="备注" min-width="140" />
+            <el-table-column label="回单" width="100">
+              <template #default="{ row }">
+                <el-link v-if="row.proofCount" type="primary" @click="openProofs(row)">📎 {{ row.proofCount }} 张</el-link>
+                <el-tag v-else-if="row.status === '已付'" type="warning" size="small" effect="plain" style="cursor:pointer" @click="openProofs(row)">历史无回单</el-tag>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
             <el-table-column v-if="canEdit" label="操作" width="180" fixed="right">
               <template #default="{ row }">
                 <template v-if="row.status !== '红冲'">
@@ -578,14 +599,19 @@ onMounted(() => {
           <el-date-picker v-model="payinForm.paidDate" type="date" value-format="YYYY-MM-DD" style="width:180px" />
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="payinForm.remark" /></el-form-item>
+        <el-form-item label="付款回单" required><ProofUploader v-model="payinForm.proofFileIds" /></el-form-item>
       </el-form>
       <el-alert v-if="payinRest > 0" type="warning" :closable="false" show-icon
         :title="`少付 ${money(payinRest)}：保存后差额会拆成一行继续「待付」，仍算负债`" />
       <template #footer>
         <el-button @click="payinDlg = false">取消</el-button>
-        <el-button type="primary" :loading="payinSaving" @click="submitPayin">确认登记</el-button>
+        <el-button type="primary" :loading="payinSaving" :disabled="!payinForm.proofFileIds.length" @click="submitPayin">确认登记</el-button>
       </template>
     </el-dialog>
+
+    <!-- 付款回单 -->
+    <ProofViewer v-model="proofView.show" biz-type="payable" :biz-id="proofView.id" :title="proofView.title"
+      :can-supplement="canSupplementPay" @changed="onProofChanged" />
 
     <!-- 下单弹窗 -->
     <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="800px">
