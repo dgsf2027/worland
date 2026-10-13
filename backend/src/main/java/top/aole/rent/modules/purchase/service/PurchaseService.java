@@ -80,6 +80,7 @@ public class PurchaseService {
     private final AuditLogService auditLogService;
     private final RentCoverageService rentCoverageService;
     private final top.aole.rent.modules.contract.service.ContractPaymentService contractPaymentService;
+    private final top.aole.rent.modules.payproof.service.PayProofService payProofService;
 
     // ============ 列表 ============
 
@@ -446,6 +447,9 @@ public class PurchaseService {
         }
         LocalDate paidDate = req.getPaidDate() != null ? req.getPaidDate() : LocalDate.now();
         BigDecimal rest = due.subtract(paid);
+        // 10-07 纪要:付款必须先挂回单;缺回单在这里 400,下面的写库都不会发生
+        payProofService.bind(top.aole.rent.modules.payproof.service.PayProofService.PAYABLE,
+                java.util.Collections.singletonList(payableId), "付款", req.getProofFileIds());
         if (rest.signum() > 0) {
             // 部分付款:差额拆一行继续待付
             Payable remain = new Payable();
@@ -720,7 +724,11 @@ public class PurchaseService {
         java.util.Map<Long, String> serialByItem = new java.util.HashMap<>();
         itemsOf(id).forEach(pi -> serialByItem.put(pi.getId(), pi.getSerialNo()));
         List<PurchaseDetailResponse.PayableLine> payLines = new ArrayList<>();
-        for (Payable pay : payablesOf(id)) {
+        List<Payable> payRows = payablesOf(id);
+        java.util.Map<Long, Integer> proofCounts = payProofService.countMap(
+                top.aole.rent.modules.payproof.service.PayProofService.PAYABLE,
+                payRows.stream().map(Payable::getId).collect(java.util.stream.Collectors.toList()));
+        for (Payable pay : payRows) {
             PurchaseDetailResponse.PayableLine pl = new PurchaseDetailResponse.PayableLine();
             pl.setId(pay.getId());
             pl.setAssetId(pay.getAssetId());
@@ -740,6 +748,7 @@ public class PurchaseService {
             pl.setStatus(pay.getStatus());
             pl.setPaidDate(pay.getPaidDate());
             pl.setRemark(pay.getRemark());
+            pl.setProofCount(proofCounts.getOrDefault(pay.getId(), 0));
             payLines.add(pl);
         }
         r.setPayables(payLines);

@@ -78,5 +78,8 @@ public final class PurchaseEditDtos {
         private LocalDate paidDate;
 
         private String remark;
+
+        @ApiModelProperty("付款回单文件 id(先用 bizType=pay_proof 上传);必填")
+        private List<Long> proofFileIds;
     }
 }

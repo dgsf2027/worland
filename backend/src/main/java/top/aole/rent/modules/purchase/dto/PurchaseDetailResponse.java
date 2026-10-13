@@ -138,5 +138,7 @@ public class PurchaseDetailResponse {
         private String status;
         private LocalDate paidDate;
         private String remark;
+        /** 已挂回单数;0 且已付 = 历史无回单 */
+        private Integer proofCount;
     }
 }

@@ -19,6 +19,7 @@ import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.contract.service.ContractPaymentService;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
 import top.aole.rent.modules.finance.service.VoucherService;
+import top.aole.rent.modules.payproof.service.PayProofService;
 import top.aole.rent.modules.purchase.domain.Payable;
 import top.aole.rent.modules.purchase.domain.PurchaseIn;
 import top.aole.rent.modules.purchase.domain.PurchaseItem;
@@ -43,7 +44,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -63,6 +66,7 @@ class PurchaseEditTest {
     private AssetMapper assetMapper;
     private AssetService assetService;
     private AssetPaymentService paymentService;
+    private PayProofService payProofService;
     private PurchaseService service;
     private final List<Payable> payables = new ArrayList<>();
 
@@ -83,10 +87,12 @@ class PurchaseEditTest {
         assetMapper = mock(AssetMapper.class);
         assetService = mock(AssetService.class);
         paymentService = mock(AssetPaymentService.class);
+        payProofService = mock(PayProofService.class);
         service = new PurchaseService(purchaseInMapper, purchaseItemMapper, payableMapper, contractMapper,
                 mock(CustomerMapper.class), mock(SupplierMapper.class), assetMapper, assetService,
                 paymentService, mock(VoucherService.class), mock(RuleConfigService.class),
-                mock(AuditLogService.class), mock(RentCoverageService.class), mock(ContractPaymentService.class));
+                mock(AuditLogService.class), mock(RentCoverageService.class), mock(ContractPaymentService.class),
+                payProofService);
         payables.clear();
         when(payableMapper.selectList(any())).thenAnswer(inv -> new ArrayList<>(payables));
         when(payableMapper.selectCount(any())).thenReturn(0L);
@@ -283,6 +289,32 @@ class PurchaseEditTest {
         req.setPaidAmount(new BigDecimal("100"));
         BizException e = assertThrows(BizException.class, () -> service.payPayable(1L, req));
         assertTrue(e.getMessage().contains("仅待付可登记付款"), e.getMessage());
+    }
+
+    @Test
+    void 登记付款先绑回单() {
+        purchase("已下单", "2026-03-01", "2026-03-31", null);
+        payable(1L, "首付", "65710.80", "待付", "2026-03-01", 0);
+        PurchaseEditDtos.PayRequest req = new PurchaseEditDtos.PayRequest();
+        req.setPaidAmount(new BigDecimal("65710.80"));
+        req.setProofFileIds(Collections.singletonList(77L));
+        service.payPayable(1L, req);
+        verify(payProofService).bind(eq(PayProofService.PAYABLE), eq(Collections.singletonList(1L)),
+                eq("付款"), eq(Collections.singletonList(77L)));
+    }
+
+    @Test
+    void 回单校验失败不登记() {
+        purchase("已下单", "2026-03-01", "2026-03-31", null);
+        payable(1L, "首付", "65710.80", "待付", "2026-03-01", 0);
+        doThrow(new BizException(400, "请先上传回单(银行回单或支付截图)再登记"))
+                .when(payProofService).bind(any(), any(), any(), any());
+        PurchaseEditDtos.PayRequest req = new PurchaseEditDtos.PayRequest();
+        req.setPaidAmount(new BigDecimal("65710.80"));
+        BizException e = assertThrows(BizException.class, () -> service.payPayable(1L, req));
+        assertTrue(e.getMessage().contains("请先上传回单"), e.getMessage());
+        verify(payableMapper, never()).updateById(any(Payable.class));
+        verify(payableMapper, never()).insert(any(Payable.class));
     }
 
     @Test
