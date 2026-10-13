@@ -8,8 +8,9 @@ import {
   addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
   updateSingleUnitReturn, updateIntendedCustomer,
   uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile, importBom, exportBom,
-  BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB,
+  BOM_ATTACHMENT_EXTS, BOM_ATTACHMENT_MAX_MB, fetchTotalAssetValue, exportTotalAssetValue,
   type AssetListItem, type AssetDetail, type BomNode, type BomAttachment, type FaultItem, type BomImportResult,
+  type TotalAssetValue,
 } from '@/api/asset'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import { createSupplier, fetchSupplierPool, type SupplierPoolItem } from '@/api/supplier'
@@ -28,8 +29,17 @@ function switchIdentity(name: string) {
   localStorage.setItem('rent_user_role', id.role)
   curIdentity.value = name
   loadList()
+  loadTotalValue()
   if (detail.value) openDetail(detail.value.id)
   ElMessage.success(`已切换为 ${id.name}（${id.role}）· 观察集采价/账面价字段级隔离`)
+}
+
+// ---- 总资产(10-07 纪要;仅老板/财务) ----
+const totalValue = ref<TotalAssetValue | null>(null)
+const totalDrawer = ref(false)
+const canSeeTotal = () => ['老板', '财务'].includes(localStorage.getItem('rent_user_role') || '')
+async function loadTotalValue() {
+  totalValue.value = canSeeTotal() ? await fetchTotalAssetValue() : null
 }
 
 // ---- 台账列表 ----
@@ -742,6 +752,7 @@ onMounted(async () => {
     }
   }
   loadList()
+  loadTotalValue()
   loadSuppliers()
   const id = Number(route.query.id)
   if (id) openDetail(id)
@@ -758,6 +769,42 @@ onMounted(async () => {
       <el-button size="small" style="margin-left:auto" @click="openCreateSupplier">+ 录入供应商</el-button>
       <el-button type="primary" size="small" @click="openCreateAsset">+ 新建设备</el-button>
     </div>
+
+    <!-- 总资产(含/不含折旧) -->
+    <el-card v-if="totalValue" shadow="never" class="total-card">
+      <div class="tv-row">
+        <div><div class="tv-v">{{ money(totalValue.originalTotal) }}</div><div class="tv-l">总资产 · 不含折旧（集采价）</div></div>
+        <div><div class="tv-v dep">{{ money(totalValue.accumulatedDepreciation) }}</div><div class="tv-l">累计折旧</div></div>
+        <div><div class="tv-v net">{{ money(totalValue.netTotal) }}</div><div class="tv-l">总资产 · 含折旧（净值）</div></div>
+        <div class="tv-side">
+          <span class="upload-tip">在账 {{ totalValue.assetCount }} 台 · 折旧计提至 {{ totalValue.depreciatedThrough || '尚未计提' }}</span>
+          <span v-if="totalValue.missingPriceCount" class="upload-tip warn-text">⚠ {{ totalValue.missingPriceCount }} 台缺集采价，未计入</span>
+          <el-button size="small" @click="totalDrawer = true">明细</el-button>
+          <el-button size="small" @click="exportTotalAssetValue">导出</el-button>
+        </div>
+      </div>
+    </el-card>
+    <el-drawer v-model="totalDrawer" title="总资产明细" size="640px">
+      <template v-if="totalValue">
+        <h4>按品类</h4>
+        <el-table :data="totalValue.byCategory" size="small" border>
+          <el-table-column prop="name" label="品类" />
+          <el-table-column prop="count" label="台数" width="70" align="right" />
+          <el-table-column label="原值" align="right"><template #default="{ row }">{{ money(row.originalTotal) }}</template></el-table-column>
+          <el-table-column label="累计折旧" align="right"><template #default="{ row }">{{ money(row.accumulatedDepreciation) }}</template></el-table-column>
+          <el-table-column label="净值" align="right"><template #default="{ row }">{{ money(row.netTotal) }}</template></el-table-column>
+        </el-table>
+        <h4>按状态</h4>
+        <el-table :data="totalValue.byStatus" size="small" border>
+          <el-table-column prop="name" label="状态" />
+          <el-table-column prop="count" label="台数" width="70" align="right" />
+          <el-table-column label="原值" align="right"><template #default="{ row }">{{ money(row.originalTotal) }}</template></el-table-column>
+          <el-table-column label="累计折旧" align="right"><template #default="{ row }">{{ money(row.accumulatedDepreciation) }}</template></el-table-column>
+          <el-table-column label="净值" align="right"><template #default="{ row }">{{ money(row.netTotal) }}</template></el-table-column>
+        </el-table>
+        <p class="upload-tip">口径：设备台账中 采购/投放/在租/待转让/收回待处置 的设备；已转让、报废不计。仓库实物（资产管理）没有单价，不在此统计。</p>
+      </template>
+    </el-drawer>
 
     <el-card shadow="never" class="filter-card">
       <el-select v-model="filters.status" placeholder="状态" clearable size="small" style="width:130px" @change="loadList">
@@ -1424,4 +1471,11 @@ onMounted(async () => {
 .fault-tip { margin-left: 110px; }
 .gain-up { color: #2f9e44; }
 .gain-down { color: #d9534f; }
+.total-card { margin-bottom: 10px; }
+.tv-row { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+.tv-v { font-size: 22px; font-weight: 700; color: #303133; }
+.tv-v.dep { color: #e6a23c; }
+.tv-v.net { color: #2f9e44; }
+.tv-l { font-size: 12px; color: #909399; }
+.tv-side { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 </style>

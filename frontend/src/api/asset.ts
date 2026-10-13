@@ -323,6 +323,30 @@ export function fetchFileSignedUrl(fileId: number): Promise<SignedUrl> {
 }
 
 // 下载走统一请求实例，携带 Bearer 凭证；不直接打开缺少鉴权头的新窗口。
+// ---- 总资产(10-07 纪要):不含折旧 = 集采价合计;含折旧 = 扣经营口径累计折旧 ----
+export interface AssetValueGroup { name: string; count: number; originalTotal: number; accumulatedDepreciation: number; netTotal: number }
+export interface TotalAssetValue {
+  depreciatedThrough?: string
+  assetCount: number
+  originalTotal: number
+  accumulatedDepreciation: number
+  netTotal: number
+  missingPriceCount: number
+  byCategory: AssetValueGroup[]
+  byStatus: AssetValueGroup[]
+}
+export function fetchTotalAssetValue(): Promise<TotalAssetValue> {
+  return request.get('/rent/assets/total-value')
+}
+export async function exportTotalAssetValue(): Promise<void> {
+  const blob: Blob = await request.get('/rent/assets/total-value/export', { responseType: 'blob', timeout: 0 })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `总资产-${new Date().toISOString().slice(0, 10)}.xlsx`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 export async function downloadFileBlob(fileId: number): Promise<Blob> {
   const signed = await fetchFileSignedUrl(fileId)
   const token = new URL(signed.url, window.location.origin).searchParams.get('token')
