@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BrandLockup from '@/components/BrandLockup.vue'
+import HandoverOverview from '@/components/HandoverOverview.vue'
 
 /**
  * 企业文化文案（《标志标准规范 V1.0》里的 slogan + 价值观条）。
@@ -26,32 +27,31 @@ import { fetchWorkbench, type Workbench } from '@/api/workbench'
 const router = useRouter()
 const wb = ref<Workbench | null>(null)
 const loading = ref(false)
+const failed = ref(false)
+const updatedAt = ref('')
 
 const levelTag: Record<string, string> = { 红灯: 'danger', 超限: 'danger', 预警: 'warning', 正常: 'success' }
 const prioTag: Record<string, string> = { 高: 'danger', 中: 'warning', 低: 'info' }
 
 async function load() {
+  if (loading.value) return
   loading.value = true
+  failed.value = false
   try {
     wb.value = await fetchWorkbench()
+    updatedAt.value = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  } catch {
+    failed.value = true
   } finally {
     loading.value = false
   }
-}
-function pct(v?: number) {
-  if (v === null || v === undefined) return '0.0%'
-  return (v * 100).toFixed(1) + '%'
-}
-function money(v?: number) {
-  if (v === null || v === undefined) return '¥0'
-  return '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 onMounted(load)
 defineExpose({ load })
 </script>
 
 <template>
-  <div v-loading="loading" class="wb">
+  <div class="wb">
     <!-- 品牌头（曜石智能 · 标志标准规范 V1.0：深色版标志 + slogan） -->
     <div class="brand-hero">
       <div class="bh-main">
@@ -66,7 +66,7 @@ defineExpose({ load })
             <template v-else-if="loading">加载中…</template>
             <template v-else>—（无数据）</template>
           </div>
-          <el-button class="bh-refresh" size="small" @click="load">刷新</el-button>
+          <el-button class="bh-refresh" size="small" :loading="loading" @click="load">刷新数据</el-button>
         </div>
       </div>
       <!-- 愿景 / 使命 -->
@@ -85,39 +85,34 @@ defineExpose({ load })
       </div>
     </div>
 
-    <!-- 老板驾驶舱 KPI -->
-    <el-row :gutter="16" class="kpis">
-      <el-col :span="6"><div class="kpi"><div class="v">{{ pct(wb?.kpi?.rentedRate) }}</div><div class="l">在租率<span v-if="wb?.kpi?.rentedCount != null" class="sub">（{{ wb?.kpi?.rentedCount }}/{{ wb?.kpi?.activeAssetCount }}）</span></div></div></el-col>
-      <el-col :span="6"><div class="kpi"><div class="v">{{ money(wb?.kpi?.receivableTotal) }}</div><div class="l">应收合计</div></div></el-col>
-      <el-col :span="6"><div class="kpi"><div class="v">{{ money(wb?.kpi?.monthDistribution) }}</div><div class="l">本月分配<span v-if="wb?.kpi?.period" class="sub">（{{ wb.kpi.period }}）</span></div></div></el-col>
-      <el-col :span="6"><div class="kpi"><div class="v up">{{ pct(wb?.kpi?.weightedReturn) }}</div><div class="l">加权回报（税后IRR）</div></div></el-col>
-    </el-row>
+    <HandoverOverview :data="wb" :loading="loading" :failed="failed" :updated-at="updatedAt" />
+    <el-alert v-if="failed" class="load-error" type="warning" :closable="false" show-icon :title="wb ? '刷新失败，以下保留上次成功数据。请点击刷新数据重试。' : '经营数据暂时无法加载，请点击刷新数据重试。业务地图仍可浏览。'" />
 
     <el-row :gutter="16">
       <!-- 亮灯红点 -->
-      <el-col :span="10">
+      <el-col :xs="24" :lg="10" id="workbench-alerts" class="detail-column">
         <el-card shadow="never">
           <template #header><b>⚠️ 该处理的事（亮灯红点）</b></template>
-          <div v-if="!wb?.redPoints?.length" class="empty">当前无红点 · 一切正常 ✅</div>
-          <div v-for="r in wb?.redPoints" :key="r.key" class="redpoint" @click="router.push(r.link)">
+          <div v-if="!wb?.redPoints?.length" class="empty">{{ loading ? '正在加载提醒…' : !wb ? '暂无可见数据' : '当前账号暂无提醒，请继续核对业务单据' }}</div>
+          <RouterLink v-for="r in wb?.redPoints" :key="r.key" class="redpoint" :to="r.link">
             <div class="rp-left">
               <el-tag :type="levelTag[r.level] || 'warning'" effect="dark" size="small">{{ r.level }}</el-tag>
               <span class="rp-label">{{ r.label }}</span>
             </div>
             <div class="rp-right"><b>{{ r.count }}</b><el-icon class="arrow">›</el-icon></div>
-          </div>
+          </RouterLink>
         </el-card>
       </el-col>
 
       <!-- 我的待办 -->
-      <el-col :span="14">
+      <el-col :xs="24" :lg="14" id="workbench-tasks" class="detail-column">
         <el-card shadow="never">
           <template #header>
             <b>✅ 我的待办</b>
-            <el-tag size="small" type="info" style="margin-left:8px">{{ wb?.myTaskCount || 0 }} 项</el-tag>
+            <el-tag size="small" type="info" style="margin-left:8px">{{ wb ? wb.myTaskCount : '—' }} 项</el-tag>
             <el-button size="small" text style="float:right" @click="router.push('/task')">进任务中心 ›</el-button>
           </template>
-          <el-table :data="wb?.myTasks || []" size="small" empty-text="暂无待办任务">
+          <el-table :data="wb?.myTasks || []" size="small" :empty-text="loading ? '正在加载待办…' : !wb ? '暂无可见数据' : '暂无待办任务'">
             <el-table-column prop="title" label="任务" min-width="180" />
             <el-table-column prop="type" label="类型" width="110" />
             <el-table-column label="来源" width="80">
@@ -132,14 +127,7 @@ defineExpose({ load })
       </el-col>
     </el-row>
 
-    <div class="modules">
-      <el-tag class="mtag" @click="router.push('/purchase')">🛒 采购投放</el-tag>
-      <el-tag class="mtag" @click="router.push('/rent')">💰 收租</el-tag>
-      <el-tag class="mtag" @click="router.push('/task')">✅ 任务·审批</el-tag>
-      <el-tag class="mtag" @click="router.push('/roster')">🧑‍💼 花名册·提成</el-tag>
-      <el-tag class="mtag" @click="router.push('/cashflow')">📊 现金流/分配</el-tag>
-      <el-tag class="mtag" @click="router.push('/monthly')">📑 月度报表</el-tag>
-    </div>
+
   </div>
 </template>
 
@@ -220,30 +208,22 @@ defineExpose({ load })
 .bh-value b { color: var(--brand-gold-bright); font-size: 13px; letter-spacing: 1px; font-weight: 600; }
 .bh-value span { color: #8a8a92; font-size: 12px; line-height: 1.6; }
 
-.kpis { margin-bottom: 16px; }
-/* KPI 卡：白底 + 金色顶边，数值用曜石黑压住 */
-.kpi {
-  background: #fff;
-  border: 1px solid #ebeef5;
-  border-top: 2px solid var(--brand-gold);
-  border-radius: 8px;
-  padding: 16px;
-  text-align: center;
-}
-.kpi .v { font-size: 26px; font-weight: 700; color: var(--brand-obsidian); }
-.kpi .v.up { color: #67c23a; }
-.kpi .l { color: #909399; font-size: 13px; margin-top: 6px; }
-.kpi .sub { color: #c0c4cc; font-size: 11px; }
 .empty { color: #c0c4cc; padding: 12px 0; text-align: center; }
 .redpoint { display: flex; justify-content: space-between; align-items: center; padding: 10px 6px; border-bottom: 1px dashed #f0f0f0; cursor: pointer; }
 .redpoint:hover { background: #fafafa; }
 .rp-label { margin-left: 8px; }
 .rp-right b { color: #f56c6c; font-size: 18px; margin-right: 4px; }
 .arrow { color: #c0c4cc; }
-.modules { margin-top: 16px; }
-.mtag {
-  margin-right: 10px; cursor: pointer; padding: 8px 12px; font-size: 13px;
-  border-color: var(--brand-gold-line); color: var(--brand-obsidian); background: #fdfaf4;
+.load-error { margin-bottom: 16px; }
+.detail-column { margin-bottom: 16px; scroll-margin-top: 20px; }
+.redpoint { color: inherit; text-decoration: none; }
+.redpoint:focus-visible { outline: 2px solid #85602e; outline-offset: 2px; }
+@media (max-width: 640px) {
+  .brand-hero { padding: 20px 16px 0; }
+  .bh-right { align-items: flex-start; text-align: left; }
+  .bh-values { margin-left: -16px; margin-right: -16px; }
+  .bh-value { padding: 12px 16px; }
+  .bh-mission { gap: 14px; }
+  .bh-m + .bh-m { border: 0; padding-left: 0; }
 }
-.mtag:hover { border-color: var(--brand-gold); color: var(--brand-gold); }
 </style>

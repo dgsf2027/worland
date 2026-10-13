@@ -40,7 +40,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
 
 <template>
   <router-view v-if="route.meta.public" />
-  <el-container v-else class="app-root">
+  <el-container v-else class="app-root" :class="{ 'workbench-layout': route.name === 'workbench' }">
     <el-aside width="210px" class="app-aside">
       <div class="brand">
         <BrandLockup variant="stack" :size="20" en-tracking="tight" />
@@ -146,4 +146,13 @@ html, body, #app { height: 100%; margin: 0; }
 .app-header .title { font-size: 16px; font-weight: 600; }
 .app-header .right { display: flex; align-items: center; gap: 8px; }
 .app-header .env { font-size: 12px; color: #999; }
+/* 工作台在窄屏通过全景面板提供完整业务导航，避免固定侧栏挤压内容。 */
+@media (max-width: 760px) {
+  .workbench-layout .app-aside { display: none; }
+  .workbench-layout > .el-container { min-width: 0; }
+  .workbench-layout .el-main { padding: 12px; }
+  .workbench-layout .app-header { height: auto; min-height: 60px; padding: 12px 16px; gap: 10px; flex-wrap: wrap; }
+  .workbench-layout .app-header .title { font-size: 13px; }
+  .workbench-layout .app-header .env { color: #666; }
+}
 </style>
