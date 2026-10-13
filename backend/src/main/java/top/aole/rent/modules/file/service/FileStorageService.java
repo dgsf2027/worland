@@ -19,6 +19,7 @@ import top.aole.rent.modules.contract.mapper.ContractMapper;
 import top.aole.rent.modules.file.mapper.FileObjectMapper;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 import top.aole.rent.modules.inventory.service.InvService;
+import top.aole.rent.modules.payproof.service.PayProofService;
 import top.aole.rent.modules.supplier.service.SupplierInspectionService;
 
 import javax.crypto.Mac;
@@ -94,6 +95,9 @@ public class FileStorageService {
             MAX_BYTES.put(inv, 20 * MB);
             ALLOWED_EXT.put(inv, new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "webp", "gif", "heic", "heif")));
         }
+        // 资金回单:银行回单截图或 PDF(10-07 纪要,登记付款/核销前必传)
+        MAX_BYTES.put(PayProofService.FILE_BIZ_TYPE, 10 * MB);
+        ALLOWED_EXT.put(PayProofService.FILE_BIZ_TYPE, new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "pdf")));
     }
 
 
@@ -145,7 +149,7 @@ public class FileStorageService {
             throw new BizException(400, "请上传文件");
         }
         if (bizType == null || bizType.isEmpty()) {
-            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom/supplier_inspection)");
+            throw new BizException(400, "bizType 必填(contract/site_photo/import/asset_bom/supplier_inspection/pay_proof)");
         }
         if ("asset_bom".equals(bizType)) {
             if (!DataScope.canSeeCost(u.getRole())) {
@@ -170,6 +174,10 @@ public class FileStorageService {
             if (ct == null || Integer.valueOf(1).equals(ct.getIsDeleted())) {
                 throw new BizException(404, "请先保存合同再上传附件");
             }
+        }
+        if (PayProofService.FILE_BIZ_TYPE.equals(bizType)
+                && !PayProofService.UPLOAD_ROLES.contains(u.getRole())) {
+            throw new BizException(403, "当前角色无权上传回单(需 老板/财务/供应链)");
         }
         checkFormatAndSize(file, bizType);
         String key = UUID.randomUUID().toString().replace("-", "");
@@ -370,6 +378,10 @@ public class FileStorageService {
         if (("contract".equals(fo.getBizType()) || "asset_bom".equals(fo.getBizType()))
                 && !DataScope.canSeeCost(u.getRole())) {
             throw new BizException(403, "越权:文件含成本/价条款,当前角色(不可见成本)无权");
+        }
+        // 资金回单含银行账户信息:仅经营角色可见
+        if (PayProofService.FILE_BIZ_TYPE.equals(fo.getBizType()) && !DataScope.canSeeCost(u.getRole())) {
+            throw new BizException(403, "越权:回单仅经营角色可见");
         }
     }
 
