@@ -53,6 +53,7 @@ public class AssetController {
 
     private final AssetService assetService;
     private final AssetBomExcelService bomExcelService;
+    private final top.aole.rent.modules.asset.service.AssetValueService assetValueService;
 
     @ApiOperation("设备台账:按状态/品类/关键词筛选 + 分页")
     @GetMapping
@@ -64,6 +65,27 @@ public class AssetController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return R.ok(assetService.list(status, category, keyword, contractId, page, size));
+    }
+
+    @ApiOperation("总资产:不含折旧(集采价合计)/含折旧(扣经营口径累计折旧),按品类/状态分组")
+    @RequireRole(value = {"老板", "财务"}, action = "查看总资产", targetType = "asset")
+    @GetMapping("/total-value")
+    public R<top.aole.rent.modules.asset.dto.AssetValueDtos.TotalValue> totalValue() {
+        return R.ok(assetValueService.totalValue());
+    }
+
+    @ApiOperation("总资产导出 Excel(按品类/按状态两张表)")
+    @RequireRole(value = {"老板", "财务"}, action = "导出总资产", targetType = "asset")
+    @GetMapping("/total-value/export")
+    public ResponseEntity<ByteArrayResource> exportTotalValue() {
+        byte[] data = assetValueService.exportExcel();
+        String fileName = "总资产-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + ".xlsx";
+        ContentDisposition cd = ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 
     @ApiOperation("设备详情:配件树BOM/成本拆解/残值构成/故障档案/单台收益/状态机事件流")
