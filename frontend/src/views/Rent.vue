@@ -7,6 +7,8 @@ import {
   fetchOverdue, overdueExtend, overduePenalty, overdueLock, overdueRepossess, overdueRepay, runScan,
   type BillItem, type CashCheck, type OverdueItem,
 } from '@/api/rent'
+import ProofUploader from '@/components/payproof/ProofUploader.vue'
+import ProofViewer from '@/components/payproof/ProofViewer.vue'
 
 const tab = ref<'bills' | 'overdue'>('bills')
 
@@ -71,20 +73,54 @@ async function doGen() {
   loadBills(); loadCashCheck()
 }
 
-// ---- 核销 ----
-async function doMatch(row: BillItem) {
-  await ElMessageBox.confirm(`确认到账核销 ${row.billNo} · 应收 ${money(row.amount)}?`, '到账核销', { type: 'success' })
-  await matchBill(row.id)
-  ElMessage.success('已核销 · 写简化收入流水(凭证 M3 接入)')
-  loadBills(); loadCashCheck()
+// ---- 收付款登记:核销/批量核销/退款/还款统一先传回单(10-07 纪要) ----
+const canFinance = ['财务', '老板'].includes(localStorage.getItem('rent_user_role') || '')
+type CashMode = 'match' | 'batch' | 'refund' | 'repay'
+const cash = reactive<{
+  show: boolean; mode: CashMode; title: string; summary: string; bill?: BillItem; ids: number[]
+  caseId?: number; amount: number; proofFileIds: number[]; saving: boolean
+}>({ show: false, mode: 'match', title: '', summary: '', ids: [], amount: 0, proofFileIds: [], saving: false })
+function openCash(mode: CashMode, opts: { bill?: BillItem; ids?: number[]; caseId?: number; title: string; summary: string; amount?: number }) {
+  Object.assign(cash, {
+    show: true, mode, bill: opts.bill, ids: opts.ids || [], caseId: opts.caseId, title: opts.title,
+    summary: opts.summary, amount: opts.amount || 0, proofFileIds: [], saving: false,
+  })
 }
-async function doBatchMatch() {
+async function submitCash() {
+  if (!cash.proofFileIds.length) { ElMessage.warning('请先上传回单'); return }
+  cash.saving = true
+  try {
+    if (cash.mode === 'match') {
+      await matchBill(cash.bill!.id, { proofFileIds: cash.proofFileIds })
+      ElMessage.success('已核销')
+    } else if (cash.mode === 'batch') {
+      await batchMatch(cash.ids, cash.proofFileIds)
+      ElMessage.success(`已批量核销 ${cash.ids.length} 张`)
+    } else if (cash.mode === 'refund') {
+      await refundBill(cash.bill!.id, { amount: cash.amount, reason: '退款', proofFileIds: cash.proofFileIds })
+      ElMessage.success('已生成退款单')
+    } else {
+      const r = await overdueRepay(cash.caseId!, { proofFileIds: cash.proofFileIds })
+      ElMessage.success(`已关案(${r.caseStatus})· 承租关系${r.assetsRestored ? '存续' : '已收回'}`)
+      loadOverdue()
+    }
+    cash.show = false
+    loadBills(); loadCashCheck()
+  } finally {
+    cash.saving = false
+  }
+}
+const billProof = reactive<{ show: boolean; id: number; title: string }>({ show: false, id: 0, title: '' })
+function openBillProof(row: BillItem) { Object.assign(billProof, { show: true, id: row.id, title: '回单 · ' + row.billNo }) }
+
+// ---- 核销 ----
+function doMatch(row: BillItem) {
+  openCash('match', { bill: row, title: '到账核销', summary: `${row.billNo} · 应收 ${money(row.amount)}` })
+}
+function doBatchMatch() {
   const targets = selected.value.filter((b) => b.status === '待收' || b.status === '逾期')
   if (!targets.length) { ElMessage.warning('请勾选待收/逾期收租单'); return }
-  await ElMessageBox.confirm(`批量核销 ${targets.length} 张 · 合计 ${money(selectedSum.value)}(按各单应收全额)?`, '批量核销', { type: 'success' })
-  await batchMatch(targets.map((b) => b.id))
-  ElMessage.success(`已批量核销 ${targets.length} 张`)
-  loadBills(); loadCashCheck()
+  openCash('batch', { ids: targets.map((b) => b.id), title: '批量核销', summary: `${targets.length} 张 · 合计 ${money(selectedSum.value)}（按各单应收全额）` })
 }
 
 // ---- 红冲 / 退款 ----
@@ -94,11 +130,8 @@ async function doReverse(row: BillItem) {
   ElMessageBox.alert(impact.items.map((i) => '· ' + i).join('<br/>'), `红冲影响清单(记账期 ${impact.accountPeriod})`, { dangerouslyUseHTMLString: true })
   loadBills(); loadCashCheck()
 }
-async function doRefund(row: BillItem) {
-  const { value } = await ElMessageBox.prompt(`退款 ${row.billNo} · 退款金额(缺省=已收 ${money(row.receivedAmount)})`, '退款', { inputValue: String(row.receivedAmount || row.amount) })
-  await refundBill(row.id, { amount: Number(value), reason: '退款' })
-  ElMessage.success('已生成退款单')
-  loadBills(); loadCashCheck()
+function doRefund(row: BillItem) {
+  openCash('refund', { bill: row, title: '退款', summary: `${row.billNo} · 已收 ${money(row.receivedAmount)}`, amount: Number(row.receivedAmount || row.amount) })
 }
 
 // ---- 钱该动没动稽核 ----
@@ -151,11 +184,8 @@ async function stepRepossess(c: OverdueItem) {
   await overdueRepossess(c.id, { owner, reason: '长期逾期收回' })
   ElMessage.success('已收回 · 设备转收回待处置'); loadOverdue(); loadBills()
 }
-async function stepRepay(c: OverdueItem) {
-  await ElMessageBox.confirm(`还款恢复:核销逾期单 ${c.billNo} 并关闭本案?`, '还款恢复', { type: 'success' })
-  const r = await overdueRepay(c.id)
-  ElMessage.success(`已关案(${r.caseStatus})· 承租关系${r.assetsRestored ? '存续' : '已收回'}`)
-  loadOverdue(); loadBills(); loadCashCheck()
+function stepRepay(c: OverdueItem) {
+  openCash('repay', { caseId: c.id, title: '还款恢复', summary: `核销逾期单 ${c.billNo} 并关闭本案` })
 }
 
 onMounted(() => {
@@ -181,6 +211,7 @@ onMounted(() => {
       <el-tag :type="cashCheck.billNotGenerated ? 'danger' : 'success'" size="small">到期未生成单 {{ cashCheck.billNotGenerated }}</el-tag>
       <el-tag :type="cashCheck.receivedNotMatched ? 'danger' : 'success'" size="small">已到账未核销 {{ cashCheck.receivedNotMatched }}</el-tag>
       <el-tag :type="cashCheck.matchedNoVoucher ? 'warning' : 'success'" size="small">已核销缺凭证 {{ cashCheck.matchedNoVoucher }}</el-tag>
+      <el-tag :type="cashCheck.matchedNoProof ? 'warning' : 'success'" size="small">已核销无回单 {{ cashCheck.matchedNoProof }}</el-tag>
       <el-tag :type="cashCheck.allClear ? 'success' : 'info'" size="small">{{ cashCheck.allClear ? '✓ 全清' : '有待办' }}</el-tag>
       <el-popover v-if="!cashCheck.allClear" trigger="hover" width="420" placement="bottom">
         <template #reference><el-button link type="primary" size="small">明细</el-button></template>
@@ -188,6 +219,7 @@ onMounted(() => {
           <div v-if="cashCheck.billNotGeneratedDetail.length"><b>到期未生成单</b><div v-for="(d,i) in cashCheck.billNotGeneratedDetail" :key="'a'+i">· {{ d }}</div></div>
           <div v-if="cashCheck.receivedNotMatchedDetail.length"><b>已到账未核销</b><div v-for="(d,i) in cashCheck.receivedNotMatchedDetail" :key="'b'+i">· {{ d }}</div></div>
           <div v-if="cashCheck.matchedNoVoucherDetail.length"><b>已核销缺凭证(待 M3)</b><div v-for="(d,i) in cashCheck.matchedNoVoucherDetail.slice(0,8)" :key="'c'+i">· {{ d }}</div></div>
+          <div v-if="cashCheck.matchedNoProofDetail?.length"><b>已核销无回单(可补传)</b><div v-for="(d,i) in cashCheck.matchedNoProofDetail.slice(0,8)" :key="'d'+i">· {{ d }}</div></div>
         </div>
       </el-popover>
     </el-card>
@@ -206,7 +238,7 @@ onMounted(() => {
           <el-tag v-if="filters.customerId" size="small" closable @close="clearCustomer">只看客户：{{ customerName }}</el-tag>
           <el-tag v-if="filters.contractId" size="small" type="warning" closable @close="clearContract">只看合同：{{ contractNo }}</el-tag>
           <el-button size="small" type="primary" @click="doGen">⏱ 生成到期收租单(T-3)</el-button>
-          <el-button size="small" type="success" :disabled="!selectableCount" @click="doBatchMatch">
+          <el-button v-if="canFinance" size="small" type="success" :disabled="!selectableCount" @click="doBatchMatch">
             ✓ 批量核销{{ selectableCount ? `(${selectableCount}张 · ${money(selectedSum)})` : '' }}
           </el-button>
           <span class="total">共 {{ total }} 张</span>
@@ -230,10 +262,15 @@ onMounted(() => {
             <el-tag v-if="row.status === '已核销' && !row.voucherId" type="warning" size="small" effect="plain">缺</el-tag>
             <span v-else>—</span>
           </template></el-table-column>
+          <el-table-column label="回单" width="80"><template #default="{ row }">
+            <el-link v-if="row.proofCount" type="primary" @click="openBillProof(row)">📎 {{ row.proofCount }}</el-link>
+            <el-tag v-else-if="row.status === '已核销' && (row.billKind === '正常' || row.billKind === '罚息')" type="warning" size="small" effect="plain" style="cursor:pointer" @click="openBillProof(row)">无回单</el-tag>
+            <span v-else>—</span>
+          </template></el-table-column>
           <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }">
-            <el-button v-if="row.status === '待收' || row.status === '逾期'" link type="success" size="small" @click="doMatch(row)">核销</el-button>
+            <el-button v-if="canFinance && (row.status === '待收' || row.status === '逾期')" link type="success" size="small" @click="doMatch(row)">核销</el-button>
             <el-button v-if="row.status !== '红冲' && row.billKind !== '红冲' && row.billKind !== '退款'" link type="warning" size="small" @click="doReverse(row)">红冲</el-button>
-            <el-button v-if="row.status === '已核销' && row.billKind === '正常'" link type="info" size="small" @click="doRefund(row)">退款</el-button>
+            <el-button v-if="canFinance && row.status === '已核销' && row.billKind === '正常'" link type="info" size="small" @click="doRefund(row)">退款</el-button>
           </template></el-table-column>
         </el-table>
         <p class="tip">勾选待收/逾期单 → 批量核销;红冲走 P0-F(原子事务 + reverses_id 唯一幂等键 + 锁账守卫),返回影响清单。收入为简化流水,凭证待 M3。</p>
@@ -264,7 +301,7 @@ onMounted(() => {
               <el-button link type="warning" size="small" @click="stepPenalty(row)">罚息</el-button>
               <el-button link type="danger" size="small" @click="stepLock(row)">锁机</el-button>
               <el-button link type="danger" size="small" @click="stepRepossess(row)">收回</el-button>
-              <el-button link type="success" size="small" @click="stepRepay(row)">还款恢复</el-button>
+              <el-button v-if="canFinance" link type="success" size="small" @click="stepRepay(row)">还款恢复</el-button>
             </template>
             <span v-else class="muted">已结案</span>
           </template></el-table-column>
@@ -272,6 +309,25 @@ onMounted(() => {
         <p class="tip">内外一视同仁,物权在我方。延期→罚息(按 rule 罚息率计罚息单)→锁机(物权主张)→收回(生成收回单+设备转收回待处置)。还款到账即关案恢复;每案必裁决人 + 期限。</p>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 收付款登记:先传回单 -->
+    <el-dialog v-model="cash.show" :title="cash.title" width="480px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="单据">{{ cash.summary }}</el-form-item>
+        <el-form-item v-if="cash.mode === 'refund'" label="退款金额">
+          <el-input-number v-model="cash.amount" :min="0.01" :precision="2" controls-position="right" style="width:180px" />
+        </el-form-item>
+        <el-form-item :label="cash.mode === 'refund' ? '退款回单' : '收款回单'" required>
+          <ProofUploader v-model="cash.proofFileIds" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="cash.show = false">取消</el-button>
+        <el-button type="primary" :disabled="!cash.proofFileIds.length" :loading="cash.saving" @click="submitCash">确认</el-button>
+      </template>
+    </el-dialog>
+    <ProofViewer v-model="billProof.show" biz-type="rent_bill" :biz-id="billProof.id" :title="billProof.title"
+      :can-supplement="canFinance" @changed="loadBills(); loadCashCheck()" />
   </div>
 </template>
 

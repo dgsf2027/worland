@@ -20,6 +20,8 @@ export interface BillItem {
   overdue?: boolean
   overdueDays?: number
   remark?: string
+  /** 已挂回单数 */
+  proofCount?: number
 }
 
 export interface BillDetail {
@@ -51,6 +53,9 @@ export interface CashCheck {
   billNotGeneratedDetail: string[]
   receivedNotMatchedDetail: string[]
   matchedNoVoucherDetail: string[]
+  /** 已核销无回单(10-07 纪要) */
+  matchedNoProof: number
+  matchedNoProofDetail: string[]
   allClear: boolean
 }
 
@@ -85,8 +90,8 @@ export function fetchBillDetail(id: number): Promise<BillDetail> {
 export function matchBill(id: number, body: Record<string, any> = {}): Promise<BillItem> {
   return request.post(`/rent/bills/${id}/match`, body)
 }
-export function batchMatch(ids: number[]): Promise<BillItem[]> {
-  return request.post('/rent/bills/batch-match', { ids })
+export function batchMatch(ids: number[], proofFileIds: number[]): Promise<BillItem[]> {
+  return request.post('/rent/bills/batch-match', { ids, proofFileIds })
 }
 export function reverseBill(id: number, body: Record<string, any>): Promise<ReverseImpact> {
   return request.post(`/rent/bills/${id}/reverse`, body)
