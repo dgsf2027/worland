@@ -21,9 +21,10 @@ const router = createRouter({
     { path: '/contract', name: 'contract', meta: { title: '合同 · 签约与租金计划' }, component: () => import('@/views/Contract.vue') },
     { path: '/rent', name: 'rent', meta: { title: '收租 · 收租单与逾期' }, component: () => import('@/views/Rent.vue') },
     { path: '/transfer', name: 'transfer', meta: { title: '转让·处置 · 到期转让/复投飞轮' }, component: () => import('@/views/Transfer.vue') },
-    // 维保工单已并入「资产管理」模块(V119);保留旧路径重定向,避免旧书签 404
-    { path: '/maintenance', redirect: { path: '/inventory', query: { tab: 'maintenance' } } },
-    { path: '/inventory', name: 'inventory', meta: { title: '资产管理 · 出租/出入库/损坏赔偿/提醒' }, component: () => import('@/views/Inventory.vue') },
+    // 维保工单已移到「服务」模块(10-07 纪要);保留旧路径重定向,避免旧书签 404
+    { path: '/maintenance', redirect: { path: '/service', query: { tab: 'maintenance' } } },
+    { path: '/inventory', name: 'inventory', meta: { title: '资产管理 · 台账/出租/出入库/提醒' }, component: () => import('@/views/Inventory.vue') },
+    { path: '/service', name: 'service', meta: { title: '服务 · 维保/损坏赔偿/设置' }, component: () => import('@/views/Service.vue') },
     // 资产二维码扫码页(手机):public 放行,未登录只见企业信息与名称规格,登录后可出库/归还
     { path: '/scan/:token', name: 'inventory-scan', meta: { title: '资产扫码', public: true }, component: () => import('@/views/InventoryScan.vue') },
     // 原「盘点」入口已替换为资产管理,旧书签跳转过去

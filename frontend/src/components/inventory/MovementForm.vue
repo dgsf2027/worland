@@ -192,7 +192,7 @@ async function submit() {
           <el-button size="small" link type="primary" @click="addDamageRow">＋ 其它检查项</el-button>
           <span class="mf-total">赔偿合计 <b>{{ money(damageTotal) }}</b></span>
         </div>
-        <div v-if="unpriced.length" class="bad">「{{ unpriced.join('、') }}」未设置赔偿单价，金额按 0 计（资产管理 › 设置 里维护价目）</div>
+        <div v-if="unpriced.length" class="bad">「{{ unpriced.join('、') }}」未设置赔偿单价，金额按 0 计（服务 › 设置 里维护价目）</div>
       </div>
     </el-form-item>
 

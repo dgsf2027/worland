@@ -86,6 +86,8 @@ export interface InvDamage {
   settleStatus: string
   remark?: string
   createTime?: string
+  /** 已挂回单数 */
+  proofCount?: number
 }
 
 export interface InvMovement {
@@ -248,7 +250,7 @@ export function fetchInvMovements(params: Record<string, any>): Promise<PageResu
 export function fetchInvDamages(params: Record<string, any>): Promise<PageResult<InvDamage>> {
   return request.get('/rent/inventory/damages', { params })
 }
-export function settleInvDamage(id: number, body: { settleStatus: string; remark?: string }): Promise<void> {
+export function settleInvDamage(id: number, body: { settleStatus: string; remark?: string; proofFileIds?: number[] }): Promise<void> {
   return request.put(`/rent/inventory/damages/${id}/settle`, body)
 }
 export function fetchCompPrices(): Promise<PriceRow[]> {
