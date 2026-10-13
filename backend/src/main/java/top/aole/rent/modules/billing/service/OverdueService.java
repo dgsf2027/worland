@@ -282,7 +282,7 @@ public class OverdueService {
             throw new BizException(400, "逾期案已关闭");
         }
         // 核销原逾期单(match 内部会关闭本案 + 记账)
-        rentBillService.match(oc.getRentBillId(), req);
+        rentBillService.match(oc.getRentBillId(), req, "还款");
         OverdueCase after = load(id);
         BillDtos.RepaymentResult rr = new BillDtos.RepaymentResult();
         rr.setCaseId(id);

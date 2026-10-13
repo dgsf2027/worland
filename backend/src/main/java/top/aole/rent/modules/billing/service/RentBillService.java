@@ -25,6 +25,7 @@ import top.aole.rent.modules.customer.domain.Customer;
 import top.aole.rent.modules.customer.mapper.CustomerMapper;
 import top.aole.rent.modules.finance.dto.VoucherDtos;
 import top.aole.rent.modules.finance.service.VoucherService;
+import top.aole.rent.modules.payproof.service.PayProofService;
 import top.aole.rent.modules.rule.service.RuleConfigService;
 
 import java.math.BigDecimal;
@@ -59,6 +60,7 @@ public class RentBillService {
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
     private final VoucherService voucherService;
+    private final PayProofService payProofService;
 
     private static final DateTimeFormatter YM = DateTimeFormatter.ofPattern("yyyy-MM");
     /** 收入记账账套(分期收款销售);锁账守卫按此账套判期。 */
@@ -143,6 +145,11 @@ public class RentBillService {
         for (RentBill b : all) {
             items.add(toItem(b));
         }
+        java.util.Map<Long, Integer> proofCounts = payProofService.countMap(PayProofService.RENT_BILL,
+                all.stream().map(RentBill::getId).collect(java.util.stream.Collectors.toList()));
+        for (BillDtos.BillItem it : items) {
+            it.setProofCount(proofCounts.getOrDefault(it.getId(), 0));
+        }
         long total = items.size();
         int from = Math.max(0, (page - 1) * size);
         int to = Math.min(items.size(), from + size);
@@ -177,6 +184,18 @@ public class RentBillService {
      */
     @Transactional
     public BillDtos.BillItem match(Long id, BillDtos.MatchRequest req) {
+        return match(id, req, "核销");
+    }
+
+    /** 核销前先挂收款回单(10-07 纪要);action 区分 核销/还款。 */
+    @Transactional
+    public BillDtos.BillItem match(Long id, BillDtos.MatchRequest req, String action) {
+        payProofService.bind(PayProofService.RENT_BILL, java.util.Collections.singletonList(id), action,
+                req == null ? null : req.getProofFileIds());
+        return matchCore(id, req);
+    }
+
+    private BillDtos.BillItem matchCore(Long id, BillDtos.MatchRequest req) {
         RentBill b = load(id);
         if ("红冲".equals(b.getStatus())) {
             throw new BizException(400, "收租单已红冲,不可核销");
@@ -226,13 +245,15 @@ public class RentBillService {
     }
 
     @Transactional
-    public List<BillDtos.BillItem> batchMatch(List<Long> ids) {
+    public List<BillDtos.BillItem> batchMatch(List<Long> ids, List<Long> proofFileIds) {
         if (ids == null || ids.isEmpty()) {
             throw new BizException(400, "批量核销 ids 不能为空");
         }
+        // 一张银行回单对应这一批收租单
+        payProofService.bind(PayProofService.RENT_BILL, ids, "批量核销", proofFileIds);
         List<BillDtos.BillItem> out = new ArrayList<>();
         for (Long id : ids) {
-            out.add(match(id, null));   // 各单按应收全额核销
+            out.add(matchCore(id, null));   // 各单按应收全额核销
         }
         return out;
     }
@@ -371,6 +392,9 @@ public class RentBillService {
         rf.setOperatorId(currentUserId());
         rf.setRemark("退款: " + reason);
         rentBillMapper.insert(rf);
+        // 退款回单挂在新生成的退款单上;缺回单整笔回滚
+        payProofService.bind(PayProofService.RENT_BILL, java.util.Collections.singletonList(rf.getId()), "退款",
+                req == null ? null : req.getProofFileIds());
 
         auditLogService.record("收租退款", "rent_bill", id, AuditLogService.EXECUTED,
                 "退款 " + amt + " 追溯 " + b.getBillNo() + " · " + reason);
@@ -447,13 +471,28 @@ public class RentBillService {
             noVoucher.add(b.getBillNo() + " 已核销 " + b.getAccountPeriod() + " 缺收入凭证(M3 接入)");
         }
 
+        // ④ 已核销无回单(10-07 纪要):正常/罚息单核销了却没挂收款回单(多为上线前历史单,可补传)
+        List<String> noProof = new ArrayList<>();
+        List<RentBill> matchedAll = rentBillMapper.selectList(new LambdaQueryWrapper<RentBill>()
+                .eq(RentBill::getStatus, "已核销")
+                .in(RentBill::getBillKind, "正常", "罚息"));
+        java.util.Map<Long, Integer> proofCounts = payProofService.countMap(PayProofService.RENT_BILL,
+                matchedAll.stream().map(RentBill::getId).collect(java.util.stream.Collectors.toList()));
+        for (RentBill b : matchedAll) {
+            if (proofCounts.getOrDefault(b.getId(), 0) == 0) {
+                noProof.add(b.getBillNo() + " 已核销 " + (b.getAccountPeriod() == null ? "" : b.getAccountPeriod()) + " 无收款回单");
+            }
+        }
+
         cc.setBillNotGenerated(notGen.size());
         cc.setReceivedNotMatched(notMatched.size());
         cc.setMatchedNoVoucher(noVoucher.size());
+        cc.setMatchedNoProof(noProof.size());
         cc.setBillNotGeneratedDetail(notGen);
         cc.setReceivedNotMatchedDetail(notMatched);
         cc.setMatchedNoVoucherDetail(noVoucher);
-        cc.setAllClear(notGen.isEmpty() && notMatched.isEmpty() && noVoucher.isEmpty());
+        cc.setMatchedNoProofDetail(noProof);
+        cc.setAllClear(notGen.isEmpty() && notMatched.isEmpty() && noVoucher.isEmpty() && noProof.isEmpty());
         return cc;
     }
 

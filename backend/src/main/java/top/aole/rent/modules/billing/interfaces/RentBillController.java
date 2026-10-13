@@ -49,17 +49,19 @@ public class RentBillController {
         return R.ok(rentBillService.detail(id));
     }
 
-    @ApiOperation("到账核销:金额一致自动核销(不一致人工处理)")
+    @ApiOperation("到账核销:金额一致自动核销(不一致人工处理);须带收款回单")
+    @RequireRole(value = {"财务", "老板"}, action = "收租核销", targetType = "rent_bill")
     @PostMapping("/bills/{id}/match")
     public R<BillDtos.BillItem> match(@PathVariable Long id,
                                       @RequestBody(required = false) BillDtos.MatchRequest req) {
         return R.ok(rentBillService.match(id, req));
     }
 
-    @ApiOperation("批量核销:按各单应收全额核销")
+    @ApiOperation("批量核销:按各单应收全额核销;一张收款回单挂全部勾选单")
+    @RequireRole(value = {"财务", "老板"}, action = "收租批量核销", targetType = "rent_bill")
     @PostMapping("/bills/batch-match")
     public R<List<BillDtos.BillItem>> batchMatch(@RequestBody BillDtos.BatchMatchRequest req) {
-        return R.ok(rentBillService.batchMatch(req.getIds()));
+        return R.ok(rentBillService.batchMatch(req.getIds(), req.getProofFileIds()));
     }
 
     @ApiOperation("红冲(敏感·财务+老板·P0-F 原子+幂等+锁账守卫·返回影响清单)")

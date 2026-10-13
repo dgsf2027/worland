@@ -79,7 +79,8 @@ public class OverdueController {
         return R.ok(overdueService.repossess(id, req));
     }
 
-    @ApiOperation("还款恢复(核销逾期单·案关闭)")
+    @ApiOperation("还款恢复(核销逾期单·案关闭);须带收款回单")
+    @RequireRole(value = {"财务", "老板"}, action = "逾期还款恢复", targetType = "overdue_case")
     @PostMapping("/{id}/repay")
     public R<BillDtos.RepaymentResult> repay(@PathVariable Long id,
                                              @RequestBody(required = false) BillDtos.MatchRequest req) {

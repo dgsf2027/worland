@@ -34,6 +34,7 @@ public class BillDtos {
         private Boolean overdue;      // 计算:待收且已过到期日
         private Integer overdueDays;  // 逾期天数
         private String remark;
+        private Integer proofCount;   // 已挂回单数
     }
 
     @Data
@@ -50,11 +51,13 @@ public class BillDtos {
     public static class MatchRequest {
         private BigDecimal receivedAmount;
         private String remark;
+        private List<Long> proofFileIds;   // 收款回单(必填)
     }
 
     @Data
     public static class BatchMatchRequest {
         private List<Long> ids;
+        private List<Long> proofFileIds;   // 一张回单挂全部勾选单
     }
 
     @Data
@@ -66,6 +69,7 @@ public class BillDtos {
     public static class RefundRequest {
         private BigDecimal amount;   // 缺省=原核销单已收额
         private String reason;
+        private List<Long> proofFileIds;   // 退款回单(必填)
     }
 
     // ---------- 红冲影响清单(P0-F) ----------
@@ -97,9 +101,11 @@ public class BillDtos {
         private int billNotGenerated;    // 到期未生成收租单
         private int receivedNotMatched;  // 已到账未核销
         private int matchedNoVoucher;    // 已核销缺凭证
+        private int matchedNoProof;      // 已核销无回单(10-07 纪要)
         private List<String> billNotGeneratedDetail;
         private List<String> receivedNotMatchedDetail;
         private List<String> matchedNoVoucherDetail;
+        private List<String> matchedNoProofDetail;
         private boolean allClear;
     }
 
