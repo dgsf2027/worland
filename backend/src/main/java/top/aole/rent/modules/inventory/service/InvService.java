@@ -78,6 +78,7 @@ public class InvService {
     private final ContractMapper contractMapper;
     private final FileObjectMapper fileObjectMapper;
     private final AuditLogService auditLogService;
+    private final top.aole.rent.modules.payproof.service.PayProofService payProofService;
 
     // ============================== 资产 ==============================
 
@@ -464,6 +465,14 @@ public class InvService {
         if (st == null || !SETTLE_STATUSES.contains(st)) {
             throw new BizException(400, "处理状态须为 待收取/已收取/已减免");
         }
+        if ("已收取".equals(st) && !st.equals(d.getSettleStatus())) {
+            // 10-07 纪要:收钱要有回单
+            payProofService.bind(top.aole.rent.modules.payproof.service.PayProofService.INV_DAMAGE,
+                    Collections.singletonList(id), "赔偿收取", req.getProofFileIds());
+        }
+        if ("已减免".equals(st) && trimToNull(req.getRemark()) == null) {
+            throw new BizException(400, "减免赔偿必须写明原因");
+        }
         damageMapper.update(null, new LambdaUpdateWrapper<InvDamage>()
                 .eq(InvDamage::getId, id)
                 .set(InvDamage::getSettleStatus, st)
@@ -637,11 +646,8 @@ public class InvService {
         List<InvDamage> pending = damageMapper.selectList(new LambdaQueryWrapper<InvDamage>()
                 .eq(InvDamage::getSettleStatus, SETTLE_PENDING));
         BigDecimal pendingTotal = sumAmount(pending);
+        // 待收合计仍返回,供「服务 › 损坏与赔偿」显示;提醒不再进资产管理(10-07 纪要:赔偿属服务模块)
         o.setPendingCompensation(pendingTotal);
-        if (!pending.isEmpty()) {
-            o.getReminders().add(reminder("赔偿待收", "info", "损坏缺件赔偿待收取 ¥" + pendingTotal.toPlainString(),
-                    "共 " + pending.size() + " 项待处理", null, null, null));
-        }
         Map<String, Integer> levelRank = new HashMap<>();
         levelRank.put("danger", 0);
         levelRank.put("warning", 1);
@@ -981,6 +987,9 @@ public class InvService {
         Set<Long> rentalIds = rows.stream().map(InvDamage::getRentalId).filter(x -> x != null).collect(Collectors.toSet());
         Map<Long, InvRental> rentals = rentalIds.isEmpty() ? Collections.emptyMap()
                 : rentalMapper.selectBatchIds(rentalIds).stream().collect(Collectors.toMap(InvRental::getId, Function.identity()));
+        Map<Long, Integer> proofCounts = payProofService.countMap(
+                top.aole.rent.modules.payproof.service.PayProofService.INV_DAMAGE,
+                rows.stream().map(InvDamage::getId).collect(Collectors.toList()));
         List<InvDtos.DamageView> out = new ArrayList<>();
         for (InvDamage d : rows) {
             InvDtos.DamageView v = new InvDtos.DamageView();
@@ -1007,6 +1016,7 @@ public class InvService {
             v.setSettleStatus(d.getSettleStatus());
             v.setRemark(d.getRemark());
             v.setCreateTime(d.getCreateTime());
+            v.setProofCount(proofCounts.getOrDefault(d.getId(), 0));
             out.add(v);
         }
         return out;

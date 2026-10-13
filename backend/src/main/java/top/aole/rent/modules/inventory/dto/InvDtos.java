@@ -222,6 +222,8 @@ public final class InvDtos {
         private String settleStatus;
         private String remark;
         private LocalDateTime createTime;
+        /** 已挂回单数 */
+        private Integer proofCount;
     }
 
     @Data
@@ -229,6 +231,8 @@ public final class InvDtos {
         /** 待收取/已收取/已减免 */
         private String settleStatus;
         private String remark;
+        /** 已收取时必填:收款回单文件 id */
+        private java.util.List<Long> proofFileIds;
     }
 
     @Data

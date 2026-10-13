@@ -34,6 +34,7 @@ import top.aole.rent.modules.inventory.mapper.InvMovementMapper;
 import top.aole.rent.modules.inventory.mapper.InvRentalMapper;
 import top.aole.rent.modules.inventory.service.InvRules;
 import top.aole.rent.modules.inventory.service.InvService;
+import top.aole.rent.modules.payproof.service.PayProofService;
 
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
@@ -48,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -68,6 +70,7 @@ class InvServiceTest {
     private InvCompPriceMapper priceMapper;
     private CustomerMapper customerMapper;
     private ContractMapper contractMapper;
+    private PayProofService payProofService;
     private InvService service;
 
     @BeforeAll
@@ -90,8 +93,10 @@ class InvServiceTest {
         contractMapper = mock(ContractMapper.class);
         FileObjectMapper fileObjectMapper = mock(FileObjectMapper.class);
         when(fileObjectMapper.selectList(any())).thenReturn(Collections.emptyList());
+        payProofService = mock(PayProofService.class);
         service = new InvService(itemMapper, rentalMapper, movementMapper, damageMapper, priceMapper,
-                mock(InvCompanyMapper.class), customerMapper, contractMapper, fileObjectMapper, mock(AuditLogService.class));
+                mock(InvCompanyMapper.class), customerMapper, contractMapper, fileObjectMapper, mock(AuditLogService.class),
+                payProofService);
         UserContext.set(new CurrentUser(1006L, "供应链", "供应链", null));
     }
 
@@ -323,9 +328,50 @@ class InvServiceTest {
         assertEquals(1, o.getOverdueRentalCount());
         assertEquals(new BigDecimal("110.00"), o.getPendingCompensation());
         List<String> types = o.getReminders().stream().map(InvDtos.Reminder::getType).collect(Collectors.toList());
-        // danger 在前:设备逾期;再 warning:需要维修/即将归还/合同到期(2026-10-01 在 30 天内);info:赔偿待收
+        // danger 在前:设备逾期;再 warning:需要维修/即将归还/合同到期。赔偿待收已移到「服务」模块,不再进资产提醒
         assertEquals("设备逾期", types.get(0));
-        assertTrue(types.containsAll(Arrays.asList("需要维修", "即将归还", "合同到期", "赔偿待收")), types.toString());
-        assertEquals("赔偿待收", types.get(types.size() - 1));
+        assertTrue(types.containsAll(Arrays.asList("需要维修", "即将归还", "合同到期")), types.toString());
+        assertTrue(!types.contains("赔偿待收"), types.toString());
+    }
+
+    private InvDamage damage(String status) {
+        InvDamage d = new InvDamage();
+        d.setId(9L);
+        d.setItemId(1L);
+        d.setPartName("格口");
+        d.setAmount(new BigDecimal("50"));
+        d.setSettleStatus(status);
+        when(damageMapper.selectById(9L)).thenReturn(d);
+        return d;
+    }
+
+    @Test
+    void 赔偿已收取要先挂回单() {
+        damage("待收取");
+        InvDtos.SettleRequest req = new InvDtos.SettleRequest();
+        req.setSettleStatus("已收取");
+        req.setProofFileIds(Collections.singletonList(90L));
+        service.settleDamage(9L, req);
+        verify(payProofService).bind(eq(PayProofService.INV_DAMAGE), eq(Collections.singletonList(9L)),
+                eq("赔偿收取"), eq(Collections.singletonList(90L)));
+    }
+
+    @Test
+    void 赔偿减免必须写原因() {
+        damage("待收取");
+        InvDtos.SettleRequest req = new InvDtos.SettleRequest();
+        req.setSettleStatus("已减免");
+        BizException e = assertThrows(BizException.class, () -> service.settleDamage(9L, req));
+        assertTrue(e.getMessage().contains("原因"), e.getMessage());
+        verify(damageMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 改回待收取不要回单() {
+        damage("已减免");
+        InvDtos.SettleRequest req = new InvDtos.SettleRequest();
+        req.setSettleStatus("待收取");
+        service.settleDamage(9L, req);
+        verify(payProofService, never()).bind(any(), any(), any(), any());
     }
 }
