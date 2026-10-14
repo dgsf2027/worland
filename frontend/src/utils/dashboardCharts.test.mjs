@@ -1,7 +1,7 @@
 // Run with Node 24+: node --test frontend/src/utils/dashboardCharts.test.mjs
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { alignTrends, buildDonutSegments, isNumber, money, niceScale } from './dashboardCharts.ts'
+import { alignTrends, compactMoney, compactYuan, isNumber, money, niceScale, splitPeriod, yuan } from './dashboardCharts.ts'
 
 test('number and money helpers distinguish a genuine zero from missing or invalid data', () => {
   assert.equal(isNumber(0), true)
@@ -67,24 +67,24 @@ test('trends join by month across unordered and mismatched ranges without fillin
   assert.deepEqual(alignTrends([], []), [])
 })
 
-test('donuts omit invalid and negative amounts but retain valid zeros', () => {
-  const result = buildDonutSegments([
-    { label: '已收', value: 30, color: 'green' },
-    { label: '未收', value: 70, color: 'orange' },
-    { label: '合法零', value: 0, color: 'blue' },
-    { label: '缺失', value: null, color: 'gray' },
-    { label: '负数', value: -8, color: 'red' },
-    { label: '错误', value: Infinity, color: 'red' },
-  ])
-  assert.equal(result.total, 100)
-  assert.deepEqual(result.segments.map(({ label, value, share, offset }) => ({ label, value, share, offset })), [
-    { label: '已收', value: 30, share: 0.3, offset: 0 },
-    { label: '未收', value: 70, share: 0.7, offset: 0.3 },
-    { label: '合法零', value: 0, share: 0, offset: 1 },
-  ])
-  assert.deepEqual(buildDonutSegments([]), { total: 0, segments: [] })
-  const zero = buildDonutSegments([{ label: '空', value: 0, color: 'gray' }])
-  assert.equal(zero.total, 0)
-  assert.equal(zero.segments[0].share, 0)
-  assert.equal(zero.segments[0].offset, 0)
+test('short amounts switch to 万 and 亿 and keep the sign in front of the currency symbol', () => {
+  assert.equal(compactMoney(0), '0')
+  assert.equal(compactMoney(8648), '8,648')
+  assert.equal(compactMoney(10000), '1万')
+  assert.equal(compactMoney(1531975), '153.2万')
+  assert.equal(compactMoney(-250000), '−25万')
+  assert.equal(compactMoney(320000000), '3.2亿')
+  assert.equal(compactYuan(-1294148), '−¥129.41万')
+  assert.equal(yuan(-1240), '−¥1,240')
+  assert.equal(yuan(912474.5, 2), '¥912,474.50')
+  for (const value of [null, undefined, NaN, '12']) {
+    assert.equal(compactMoney(value), '—')
+    assert.equal(yuan(value), '—')
+  }
+})
+
+test('periods split into a month label and a year', () => {
+  assert.deepEqual(splitPeriod('2026-10'), { month: '10月', year: '2026' })
+  assert.deepEqual(splitPeriod('2027-01'), { month: '1月', year: '2027' })
+  assert.deepEqual(splitPeriod('本月'), { month: '本月', year: '' })
 })

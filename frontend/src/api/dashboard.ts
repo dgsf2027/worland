@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import request from '@/utils/request'
-import type { Workbench } from './workbench'
 
 export type ResourceStatus = 'idle' | 'loading' | 'ready' | 'error' | 'restricted'
 export interface Resource<T> { data: T | null; status: ResourceStatus; source: string }
@@ -25,11 +24,11 @@ const empty = <T>(status: ResourceStatus = 'idle'): Resource<T> => ({ data: null
 function initial(status: ResourceStatus = 'idle'): DashboardData {
   return { months: 6, customerStages: empty(status), inventory: empty(status), rentTrend: empty(status), cashflow: empty(status) }
 }
+/** 刷新时保留上一次的图表，新数据到了再整体替换，避免闪成空白。 */
 export function useDashboardData() {
   const charts = ref<DashboardData>(initial())
   let generation = 0
-  function reset() { generation++; charts.value = initial('loading') }
-  async function load(_wb: Workbench, months: number) {
+  async function load(months: number) {
     const current = ++generation
     try {
       const data = await request.get<any, DashboardData>('/rent/workbench/charts', { params: { months } })
@@ -38,5 +37,5 @@ export function useDashboardData() {
       if (current === generation) charts.value = initial('error')
     }
   }
-  return { charts, reset, load }
+  return { charts, load }
 }

@@ -11,6 +11,38 @@ export function money(value: unknown, digits = 0): string {
   })
 }
 
+const MINUS = '−'
+
+/** 金额短写：1 万以下千分位，1 万起「万」，1 亿起「亿」，最多两位小数并去掉尾零；负数用真正的减号。 */
+export function compactMoney(value: unknown): string {
+  if (!isNumber(value)) return '—'
+  const abs = Math.abs(value)
+  const sign = value < 0 ? MINUS : ''
+  const trim = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+  if (abs >= 1e8) return `${sign}${trim(abs / 1e8)}亿`
+  if (abs >= 1e4) return `${sign}${trim(abs / 1e4)}万`
+  return `${sign}${trim(abs)}`
+}
+
+/** 带货币符号的金额，符号放在 ¥ 前面：−¥1,240。digits 为小数位。 */
+export function yuan(value: unknown, digits = 0): string {
+  if (!isNumber(value)) return '—'
+  return `${value < 0 ? MINUS : ''}¥${money(Math.abs(value), digits)}`
+}
+
+/** 带货币符号的短写金额：−¥129.41万。 */
+export function compactYuan(value: unknown): string {
+  if (!isNumber(value)) return '—'
+  return `${value < 0 ? MINUS : ''}¥${compactMoney(Math.abs(value))}`
+}
+
+/** 'YYYY-MM' → { month: '10月', year: '2026' }；格式不对时原样作为 month 返回。 */
+export function splitPeriod(period: string): { month: string; year: string } {
+  const match = /^(\d{4})-(\d{2})$/.exec(period)
+  if (!match) return { month: period, year: '' }
+  return { month: `${Number(match[2])}月`, year: match[1] }
+}
+
 export interface ChartScale {
   min: number
   max: number
@@ -79,33 +111,4 @@ export function alignTrends(first: readonly TrendPoint[], second: readonly Trend
       first: firstByMonth.get(period) ?? null,
       second: secondByMonth.get(period) ?? null,
     }))
-}
-
-export interface DonutItem {
-  label: string
-  value: unknown
-  color: string
-}
-
-export interface DonutSegment {
-  label: string
-  value: number
-  color: string
-  /** Fraction of the total, in [0, 1]. */
-  share: number
-  /** Starting fraction around the circumference, in [0, 1]. */
-  offset: number
-}
-
-export function buildDonutSegments(items: readonly DonutItem[]): { total: number; segments: DonutSegment[] } {
-  const valid = items.filter((item): item is DonutItem & { value: number } => isNumber(item.value) && item.value >= 0)
-  const total = valid.reduce((sum, item) => sum + item.value, 0)
-  let offset = 0
-  const segments = valid.map(item => {
-    const share = total > 0 ? item.value / total : 0
-    const segment = { ...item, share, offset }
-    offset += share
-    return segment
-  })
-  return { total, segments }
 }
