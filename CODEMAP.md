@@ -199,6 +199,9 @@ modules/<module>/
 | `V118__contract_payment_term.sql` | 付款条件从设备搬到合同（`yc_rent_contract_payment_term` 唯一真相源）；采购单加预计入库日、应付加「到期日为预估」标记、新增 `purchase_lead_days` 规则；从设备条件反推合同付款方式（不一致取覆盖最多的一套并在合同备注留痕）、`payable.term_id` 按阶段名重映射、补齐未触发阶段的应付（备注「合同付款方式补齐」） |
 | `V119__maintenance_target_type.sql` | 维保工单增加对象类型维度（asset 设备台账 / inv_item 仓库物品）、送修数量与两个流转 id；`asset_id` 放开可空 |
 | `V120__payable_manual_amount.sql` | 应付金额手工调整标记 `amount_manual`（整单开放编辑后，重算待付应付时跳过手工行，避免人工值被冲掉） |
+| `V121__purge_contract_no1_and_orphan_schedule.sql` | 清理合同号 1 与来源已不存在的孤儿租金计划 |
+| `V122__pay_proof.sql` | 资金进出回单关联表 `yc_rent_pay_proof`（采购付款/收租核销/退款/还款/赔偿收取登记前必须先挂回单，一个文件可挂多张单，回单只增不删） |
+| `V123__quote_params.sql` | 报价测算器通用口径参数 `quote_*`（征收率、附加税、所得税、资金成本、管理费、人工月成本、进项税率、预付比例、目标 IRR）；只放通用口径，基准价/框架折扣/采购价/货位数不入库 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

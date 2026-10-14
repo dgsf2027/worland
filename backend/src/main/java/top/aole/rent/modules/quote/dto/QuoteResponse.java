@@ -3,72 +3,120 @@ package top.aole.rent.modules.quote.dto;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 报价测算结果。所有数字由规则引擎从 rule_config 算出,禁写死。
+ * 报价测算结果(10-14 起按「曜石 货架/播种墙测算表(简版)」口径)。
+ * 三个视角:租赁公司(税后 IRR 与利润)/ 客户(租 vs 买)/ 实际成本(全成本与保本)。
+ * 金额 2 位小数,比率 6 位小数;所有口径常量来自 rule_config(quote_*),不写死。
  */
 @Data
 public class QuoteResponse {
 
     // ---- 回显输入 ----
-    private BigDecimal marketPrice;
-    private BigDecimal purchasePrice;
     private String category;
     private String customerType;
+    private BigDecimal marketPrice;
+    /** 采购成本(含税) */
+    private BigDecimal purchasePrice;
     private Integer termMonths;
     private BigDecimal targetIrr;
+    /** 起租预付款 = 市场价 × 预付比例 */
+    private BigDecimal prepayment;
 
-    // ---- 核心报价(对平设立方案书§10 定价表) ----
-    /** 精确月租(IRR 求解,层级一税后口径),元 */
+    // ---- 核心报价 ----
+    /** 月租(元);rentSolved=true 表示由目标税后 IRR 反解后向上取整到整元 */
     private BigDecimal monthlyRent;
-    /** 速算月租(市场价×速算系数,方案书§10.3 起价建议),元 */
-    private BigDecimal monthlyRentQuick;
-    /** 速算系数 */
-    private BigDecimal speedCoeff;
-    /** 期末转让价 = 市场价×转让率,元 */
+    private Boolean rentSolved;
+    /** 期末转让价 = 市场价 × 转让率 */
     private BigDecimal transferPrice;
     private BigDecimal transferRate;
-    /** 客户总付 = 期数×月租 + 转让价(不含押金),元 */
-    private BigDecimal customerTotalPay;
-    /** 全生命周期税后净利,元 */
-    private BigDecimal afterTaxNetProfit;
-    /** 实测税后年化 IRR(应≈目标) */
-    private BigDecimal afterTaxIrr;
 
-    // ---- 三层回报(方案书§四,校准自杠杆临界点表) ----
-    /** 层级一 本金投资回报率(=base) */
-    private BigDecimal layer1Return;
-    /** 层级二 供应商杠杆回报率(=base×供应商倍数) */
-    private BigDecimal layer2Return;
-    /** 层级三 融资杠杆回报率(=a×base+b) */
-    private BigDecimal layer3Return;
+    private Lessor lessor = new Lessor();
+    private Customer customer = new Customer();
+    private Cost cost = new Cost();
 
-    // ---- 价值定价两校验(P0-G) ----
-    /** 承租方自购回本期(月)= 市场价/月节省 */
-    private BigDecimal paybackMonths;
-    /** 校验①品类准入:回本期≤18 月 */
-    private Boolean paybackPass;
-    /** 承租方月净收益 = 月节省 − 月租 */
-    private BigDecimal monthlyNetBenefit;
-    /** 校验②:月净收益>0 */
-    private Boolean benefitPass;
-    /** 两校验是否全过(达标 → 可解锁生成合同) */
-    private Boolean valuePricingPass;
+    private List<String> notes = new ArrayList<>();
 
-    // ---- 税负拆解(透明) ----
-    private BigDecimal taxVat;
-    private BigDecimal taxSurtax;
-    private BigDecimal taxIncome;
+    /** 租赁公司视角 */
+    @Data
+    public static class Lessor {
+        /** 收款总额(含税) = 预付 + 月租×期数 + 转让价 */
+        private BigDecimal totalCollected;
+        /** 开票征收率 */
+        private BigDecimal collectRate;
+        private BigDecimal vat;
+        private BigDecimal surtax;
+        private BigDecimal incomeTax;
+        /** 税后净利(尚未扣保外维保、资金成本、管理费) */
+        private BigDecimal netProfit;
+        private BigDecimal preTaxIrr;
+        private BigDecimal afterTaxIrr;
+        /** 税后 IRR ≥ 目标 − 0.5 个百分点 */
+        private Boolean meetsTarget;
+        /** 回本月数(近似) = (采购成本−预付) ÷ 每月税后租金,不含转让价 */
+        private Integer paybackMonths;
+        /** 税费系数 k = 征收率/(1+征收率)×(1+附加税率) */
+        private BigDecimal taxFactor;
+    }
 
-    // ---- 单台首付杠杆(仅当传 firstPayRatio) ----
-    private BigDecimal firstPayRatio;
-    private BigDecimal firstPay;
-    private BigDecimal deposit;
-    /** 实际资金占用 = 首付 − 押金(方案书§4.3,对平 76560/58560/40560) */
-    private BigDecimal occupiedCapital;
-    /** 杠杆说明:单台杠杆 IRR 依赖供应商账期偿付计划(M1-12/M3-05 明确),占用资金已精确对平 */
-    private String leverageNote;
+    /** 客户视角(租 vs 买) */
+    @Data
+    public static class Customer {
+        /** 租赁总付(含税) */
+        private BigDecimal totalPay;
+        private BigDecimal extraPay;
+        private BigDecimal extraRatio;
+        /** 自购可抵进项(客户一般纳税人) */
+        private BigDecimal buyInputTax;
+        /** 租赁可抵进项 */
+        private BigDecimal leaseInputTax;
+        private BigDecimal afterTaxExtra;
+        private BigDecimal afterTaxExtraRatio;
+        /** 隐含年化融资成本(税前) */
+        private BigDecimal impliedFinanceCost;
 
-    // ---- 元信息 ----
-    private String note;
+        // ---- 播种墙:替代人工 ----
+        private BigDecimal replaceHeadcount;
+        private BigDecimal monthlySaving;
+        /** 客户月净收益 = 月节省人工 − 月租 */
+        private BigDecimal monthlyNetBenefit;
+        /** 自购回本月数 = 自购价 ÷ 月节省人工 */
+        private BigDecimal buyPaybackMonths;
+        /** 校验①:自购回本期 ≤ 准入上限(18 月) */
+        private Boolean paybackPass;
+        /** 校验②:客户月净收益 > 0 */
+        private Boolean benefitPass;
+        /** 两校验全过(可解锁生成合同) */
+        private Boolean valuePricingPass;
+
+        // ---- 货架:单位月租 ----
+        /** 单位月租(元/货位·月),未填货位数为空 */
+        private BigDecimal unitRent;
+        /** 自购价折合每月 = 自购价 ÷ 租期 */
+        private BigDecimal buyPricePerMonth;
+
+        private String verdict;
+    }
+
+    /** 实际成本视角 */
+    @Data
+    public static class Cost {
+        /** 收入(扣销项税) */
+        private BigDecimal revenueExVat;
+        /** 附加税 + 所得税 */
+        private BigDecimal taxCost;
+        private BigDecimal maintenance;
+        /** 资金占用成本 = Σ(累计税后现金流为负的月份占用额) × 资金成本 ÷ 12 */
+        private BigDecimal capitalCost;
+        private BigDecimal mgmtFee;
+        private BigDecimal totalCost;
+        private BigDecimal actualProfit;
+        private BigDecimal profitMargin;
+        private BigDecimal avgMonthlyCost;
+        private BigDecimal breakEvenRent;
+        private BigDecimal safetyMargin;
+        private BigDecimal peakCapital;
+    }
 }

@@ -24,7 +24,7 @@ public class QuoteController {
 
     private final RentQuoteService quoteService;
 
-    @ApiOperation("报价测算:市场价+品类+客户类型 → 月租/三层回报/税后IRR/价值定价校验")
+    @ApiOperation("报价测算(曜石测算表简版口径):市场价+采购成本+品类+客户类型 → 月租(可反解)/租赁公司·客户·实际成本三视角")
     @PostMapping("/calc")
     public R<QuoteResponse> calc(@Validated @RequestBody QuoteRequest req) {
         return R.ok(quoteService.calc(req));
