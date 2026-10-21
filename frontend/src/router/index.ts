@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/sso/callback', name: 'sso-callback', meta: { title: '平台门户登录', public: true }, component: () => import('@/views/SsoCallback.vue') },
     { path: '/workbench', name: 'workbench', meta: { title: '工作台 · 各角色驾驶舱首页' }, component: () => import('@/views/Workbench.vue') },
     { path: '/purchase', name: 'purchase', meta: { title: '采购入库 · 应付' }, component: () => import('@/views/Purchase.vue') },
+    { path: '/purchase-contract', name: 'purchase-contract', meta: { title: '采购合同 · 付款 · 进项发票' }, component: () => import('@/views/PurchaseContract.vue') },
     { path: '/task', name: 'task', meta: { title: '任务 · 审批' }, component: () => import('@/views/Task.vue') },
     { path: '/roster', name: 'roster', meta: { title: '花名册 · 权限 · 提成' }, component: () => import('@/views/Roster.vue') },
     { path: '/dashboard', name: 'dashboard', meta: { title: '地基自检' }, component: () => import('@/views/Dashboard.vue') },

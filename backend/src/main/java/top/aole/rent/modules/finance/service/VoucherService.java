@@ -222,6 +222,25 @@ public class VoucherService {
                 summary == null ? "采购入库应付 " + amount + "元" : summary, lines);
     }
 
+    // ================= 供应商付款 → 付款凭证(税务账) =================
+
+    /** 供应商付款 → 付款凭证(dr 应付账款 / cr 银行存款,tax 账套)。幂等:同付款已过账则返既有凭证。 */
+    @Transactional
+    public Long postSupplierPayment(Long paymentId, BigDecimal amount, LocalDate bizDate, String summary) {
+        if (amount == null || amount.signum() <= 0) {
+            return null;
+        }
+        Long exist = existingTaxVoucher("supplier_payment", paymentId);
+        if (exist != null) {
+            return exist;
+        }
+        List<Entry> lines = new ArrayList<>();
+        lines.add(dr(ACC_AP, ACC_AP_N, amount));
+        lines.add(cr(ACC_BANK, ACC_BANK_N, amount));
+        return post("supplier_payment", paymentId, BOOK_TAX, bizDate, "other", amount,
+                summary == null ? "供应商付款 " + amount + "元" : summary, lines);
+    }
+
     // ================= 转让/处置 → 残值凭证(双账 · M4-01/02) =================
 
     /**

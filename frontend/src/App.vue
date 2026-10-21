@@ -59,6 +59,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
         </el-menu-item-group>
         <el-menu-item-group title="收支单据">
           <el-menu-item index="/purchase">🛒 采购入库 · 应付</el-menu-item>
+          <el-menu-item index="/purchase-contract">📑 采购合同 · 付款/发票</el-menu-item>
           <el-menu-item index="/rent">🧾 收租 · 收租单/逾期</el-menu-item>
           <el-menu-item index="/transfer">🔁 转让·处置 · 到期/复投</el-menu-item>
           <el-menu-item index="/inventory">🏷️ 资产管理 · 台账/出租/出入库</el-menu-item>
