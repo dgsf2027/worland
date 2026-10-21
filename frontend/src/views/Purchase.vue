@@ -493,8 +493,15 @@ onMounted(() => {
               <template #default="{ row }">
                 <template v-if="row.status !== '红冲'">
                   <el-button link size="small" type="warning" @click="openPayEdit(row)">编辑</el-button>
-                  <el-button v-if="row.status === '待付'" link size="small" type="success" @click="openPayin(row)">登记付款</el-button>
-                  <el-button v-if="row.status === '已付'" link size="small" type="danger" @click="doUnpay(row)">撤销付款</el-button>
+                  <template v-if="detail?.pcId">
+                    <el-tooltip content="本单已关联采购合同，付款/撤销请到「采购合同」页操作" placement="top">
+                      <el-tag size="small" type="info" effect="plain">经采购合同付款</el-tag>
+                    </el-tooltip>
+                  </template>
+                  <template v-else>
+                    <el-button v-if="row.status === '待付'" link size="small" type="success" @click="openPayin(row)">登记付款</el-button>
+                    <el-button v-if="row.status === '已付'" link size="small" type="danger" @click="doUnpay(row)">撤销付款</el-button>
+                  </template>
                 </template>
                 <span v-else class="muted">—</span>
               </template>

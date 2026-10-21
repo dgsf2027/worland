@@ -58,6 +58,7 @@ class PurchaseContractFlowTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
                     classes = {PurchaseContractService.class, top.aole.rent.modules.finance.service.VoucherService.class}))
     @MapperScan({"top.aole.rent.modules.pcontract.mapper", "top.aole.rent.modules.finance.mapper",
+            "top.aole.rent.modules.purchase.mapper",
             "top.aole.rent.modules.billing.mapper", "top.aole.rent.common.audit"})
     static class Config {
         @Bean
@@ -219,5 +220,66 @@ class PurchaseContractFlowTest {
         service.pay(pc, pay("100000", "BANK-ALL"));
         assertEquals("已结清", service.detail(pc).getContract().getStatus());
         assertThrows(BizException.class, () -> service.pay(pc, pay("1", "BANK-MORE")));
+    }
+
+    private long insertPurchase(String no, long supplierId) {
+        jdbc.update("insert into yc_rent_purchase_in(no, supplier_id, status, total_amount) values (?,?,?,?)",
+                no, supplierId, "已入库", new BigDecimal("100000"));
+        return jdbc.queryForObject("select id from yc_rent_purchase_in where no=?", Long.class, no);
+    }
+
+    private void insertPayable(long purchaseId, String stage, String due, String amount) {
+        jdbc.update("insert into yc_rent_payable(purchase_in_id, stage, due_date, amount, status) values (?,?,?,?,?)",
+                purchaseId, stage, LocalDate.parse(due), new BigDecimal(amount), "待付");
+    }
+
+    private BigDecimal sumPayable(long purchaseId, String status) {
+        BigDecimal v = jdbc.queryForObject(
+                "select coalesce(sum(amount),0) from yc_rent_payable where purchase_in_id=? and status=?",
+                BigDecimal.class, purchaseId, status);
+        return v;
+    }
+
+    @Test
+    void 关联采购单_付款自动冲销应付_撤销精确还原() {
+        Long pc = newContract("IT-LINK-1");
+        long pi = insertPurchase("PI-LINK-1", 7L);
+        insertPayable(pi, "首付", "2026-02-01", "40000");
+        insertPayable(pi, "验收", "2026-03-01", "30000");
+        insertPayable(pi, "尾款", "2026-05-01", "30000");
+        PcDtos.LinkRequest lr = new PcDtos.LinkRequest();
+        lr.setPurchaseInIds(Collections.singletonList(pi));
+        service.linkPurchases(pc, lr);
+        assertEquals(1, service.detail(pc).getPurchases().size());
+        assertEquals(0, new BigDecimal("100000").compareTo(service.detail(pc).getPurchases().get(0).getPendingPayable()));
+
+        Long pid = service.pay(pc, pay("55000", "BANK-LINK-1"));
+        // 首付整行已付;验收拆成 已付15000 + 待付15000;尾款不动
+        assertEquals(0, new BigDecimal("55000").compareTo(sumPayable(pi, "已付")));
+        assertEquals(0, new BigDecimal("45000").compareTo(sumPayable(pi, "待付")));
+        assertEquals(4, jdbc.queryForObject("select count(*) from yc_rent_payable where purchase_in_id=?", Long.class, pi).intValue());
+        assertEquals(0, new BigDecimal("45000").compareTo(service.detail(pc).getPurchases().get(0).getPendingPayable()));
+
+        // 已冲销的单不能解除关联
+        assertThrows(BizException.class, () -> service.unlinkPurchase(pc, pi));
+
+        service.voidPayment(pid, null);
+        // 还原:3 行全部待付,金额 40000/30000/30000,拆出的差额行被删除
+        assertEquals(3, jdbc.queryForObject("select count(*) from yc_rent_payable where purchase_in_id=?", Long.class, pi).intValue());
+        assertEquals(0, new BigDecimal("100000").compareTo(sumPayable(pi, "待付")));
+        assertEquals(0, BigDecimal.ZERO.compareTo(sumPayable(pi, "已付")));
+        // 撤销后可以解除关联
+        service.unlinkPurchase(pc, pi);
+        assertEquals(0, service.detail(pc).getPurchases().size());
+    }
+
+    @Test
+    void 关联采购单_供应商必须一致() {
+        Long pc = newContract("IT-LINK-2");
+        long other = insertPurchase("PI-LINK-2", 8L);
+        PcDtos.LinkRequest lr = new PcDtos.LinkRequest();
+        lr.setPurchaseInIds(Collections.singletonList(other));
+        BizException e = assertThrows(BizException.class, () -> service.linkPurchases(pc, lr));
+        assertTrue(e.getMessage().contains("供应商"));
     }
 }

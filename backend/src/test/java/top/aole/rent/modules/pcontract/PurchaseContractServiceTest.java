@@ -99,7 +99,10 @@ class PurchaseContractServiceTest {
         voucherService = mock(VoucherService.class);
         auditLogService = mock(AuditLogService.class);
         service = new PurchaseContractService(contractMapper, termMapper, paymentMapper, allocMapper,
-                invoiceMapper, supplierMapper, proofService, voucherService, auditLogService);
+                invoiceMapper, supplierMapper, proofService, voucherService, auditLogService,
+                mock(top.aole.rent.modules.purchase.mapper.PurchaseInMapper.class),
+                mock(top.aole.rent.modules.purchase.mapper.PayableMapper.class),
+                mock(top.aole.rent.modules.pcontract.mapper.SupplierPaymentPayableMapper.class));
         UserContext.set(new CurrentUser(1005L, "财务", "财务", null));
         Supplier s = new Supplier();
         s.setId(7L);

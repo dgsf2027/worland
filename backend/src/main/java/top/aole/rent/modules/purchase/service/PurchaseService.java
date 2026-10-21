@@ -104,6 +104,7 @@ public class PurchaseService {
             it.setNo(p.getNo());
             it.setStatus(p.getStatus());
             it.setContractId(p.getContractId());
+            it.setPcId(p.getPcId());
             it.setContractNo(contractNo(p.getContractId()));
             it.setCustomerName(customerNameOfContract(p.getContractId()));
             it.setSupplierId(p.getSupplierId());
@@ -433,6 +434,9 @@ public class PurchaseService {
         if ("已红冲".equals(p.getStatus())) {
             throw new BizException(400, "采购单已红冲,不可登记付款");
         }
+        if (p.getPcId() != null) {
+            throw new BizException(400, "该采购单已关联采购合同,请在「采购合同」页登记付款(会自动冲销本单应付)");
+        }
         if (!"待付".equals(pay.getStatus())) {
             throw new BizException(400, "本笔应付状态为" + pay.getStatus() + ",仅待付可登记付款");
         }
@@ -485,6 +489,9 @@ public class PurchaseService {
     public void unpayPayable(Long payableId) {
         Payable pay = requirePayable(payableId);
         PurchaseIn p = load(pay.getPurchaseInId());
+        if (p.getPcId() != null) {
+            throw new BizException(400, "该采购单已关联采购合同,请在「采购合同」页撤销对应付款");
+        }
         if (!"已付".equals(pay.getStatus())) {
             throw new BizException(400, "本笔应付状态为" + pay.getStatus() + ",仅已付可撤销");
         }
@@ -661,6 +668,7 @@ public class PurchaseService {
         r.setNo(p.getNo());
         r.setStatus(p.getStatus());
         r.setContractId(p.getContractId());
+        r.setPcId(p.getPcId());
         r.setContractNo(contractNo(p.getContractId()));
         r.setCustomerName(customerNameOfContract(p.getContractId()));
         r.setSupplierId(p.getSupplierId());

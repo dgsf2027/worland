@@ -79,3 +79,27 @@ CREATE TABLE yc_rent_ledger_book (
   KEY idx_ledger_book_type (book, entry_type),
   KEY idx_ledger_voucher (voucher_id)
 );
+
+DROP TABLE IF EXISTS yc_rent_supplier_payment_payable;
+DROP TABLE IF EXISTS yc_rent_payable;
+DROP TABLE IF EXISTS yc_rent_purchase_in;
+CREATE TABLE yc_rent_purchase_in (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, no VARCHAR(64), contract_id BIGINT, supplier_id BIGINT,
+  status VARCHAR(16), total_amount DECIMAL(14,2), first_pay_ratio DECIMAL(6,4), account_days INT,
+  pc_id BIGINT,
+  order_date DATE, expect_receive_date DATE, receive_date DATE, project_id BIGINT, remark VARCHAR(500),
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_deleted TINYINT NOT NULL DEFAULT 0
+);
+-- 与 V125 一致(H2 不支持 ALTER ... ADD COLUMN ... COMMENT,故不直接加载 V125 文件)
+CREATE TABLE yc_rent_supplier_payment_payable (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, payment_id BIGINT NOT NULL, payable_id BIGINT NOT NULL,
+  paid_amount DECIMAL(14,2) NOT NULL, orig_amount DECIMAL(14,2) NOT NULL, remainder_id BIGINT
+);
+CREATE TABLE yc_rent_payable (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, purchase_in_id BIGINT, asset_id BIGINT, purchase_item_id BIGINT,
+  term_id BIGINT, stage VARCHAR(16), due_date DATE, due_provisional INT, amount DECIMAL(14,2),
+  amount_manual INT DEFAULT 0, status VARCHAR(8), paid_date DATE, remark VARCHAR(500),
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_deleted TINYINT NOT NULL DEFAULT 0
+);

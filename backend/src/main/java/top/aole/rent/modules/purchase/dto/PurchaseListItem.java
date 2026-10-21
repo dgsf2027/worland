@@ -19,6 +19,9 @@ public class PurchaseListItem {
 
     private Long contractId;
 
+    /** 关联的采购合同(V125) */
+    private Long pcId;
+
     private String contractNo;
 
     private String customerName;

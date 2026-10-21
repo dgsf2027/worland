@@ -21,6 +21,13 @@ import top.aole.rent.modules.pcontract.mapper.PurchaseContractTermMapper;
 import top.aole.rent.modules.pcontract.mapper.PurchaseInvoiceMapper;
 import top.aole.rent.modules.pcontract.mapper.SupplierPaymentAllocMapper;
 import top.aole.rent.modules.pcontract.mapper.SupplierPaymentMapper;
+import top.aole.rent.modules.pcontract.mapper.SupplierPaymentPayableMapper;
+import top.aole.rent.modules.pcontract.domain.SupplierPaymentPayable;
+import top.aole.rent.modules.purchase.domain.Payable;
+import top.aole.rent.modules.purchase.domain.PurchaseIn;
+import top.aole.rent.modules.purchase.mapper.PayableMapper;
+import top.aole.rent.modules.purchase.mapper.PurchaseInMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import top.aole.rent.modules.supplier.domain.Supplier;
 import top.aole.rent.modules.supplier.mapper.SupplierMapper;
 
@@ -57,6 +64,9 @@ public class PurchaseContractService {
     private final PayProofService payProofService;
     private final VoucherService voucherService;
     private final AuditLogService auditLogService;
+    private final PurchaseInMapper purchaseInMapper;
+    private final PayableMapper payableMapper;
+    private final SupplierPaymentPayableMapper settleMapper;
 
     // ---------------- 合同 ----------------
 
@@ -189,6 +199,7 @@ public class PurchaseContractService {
             pvs.add(v);
         }
         d.setPayments(pvs);
+        d.setPurchases(linkedPurchases(id));
         d.setInvoices(invoiceMapper.selectList(new LambdaQueryWrapper<PurchaseInvoice>()
                 .eq(PurchaseInvoice::getPcId, id)
                 .orderByAsc(PurchaseInvoice::getIssueDate).orderByAsc(PurchaseInvoice::getId)));
@@ -268,9 +279,11 @@ public class PurchaseContractService {
         p.setVoucherId(voucherService.postSupplierPayment(p.getId(), amount, paidDate,
                 "付款 " + c.getContractNo() + " " + amount + "元"));
         paymentMapper.updateById(p);
+        BigDecimal settled = settlePayables(c, p.getId(), amount, paidDate);
         refreshStatus(c);
         auditLogService.record("采购合同付款", "purchase_contract", pcId, AuditLogService.EXECUTED,
-                c.getContractNo() + " 付 " + amount + " 于 " + paidDate + (serial == null ? "" : " 流水 " + serial));
+                c.getContractNo() + " 付 " + amount + " 于 " + paidDate + (serial == null ? "" : " 流水 " + serial)
+                        + (settled.signum() > 0 ? " · 冲销关联采购单应付 " + settled : ""));
         return p.getId();
     }
 
@@ -284,6 +297,7 @@ public class PurchaseContractService {
             throw new BizException(400, "该付款已撤销");
         }
         String reason = req == null || blank(req.getReason()) ? "撤销付款" : req.getReason().trim();
+        revertPayables(paymentId);
         voucherService.reverseBySource("supplier_payment", paymentId, reason);
         p.setStatus("撤销");
         paymentMapper.updateById(p);
@@ -356,6 +370,163 @@ public class PurchaseContractService {
         invoiceMapper.updateById(inv);
         auditLogService.record("采购合同发票作废", "purchase_contract", inv.getPcId(), AuditLogService.EXECUTED,
                 "发票 " + inv.getInvoiceNo() + (req == null || blank(req.getReason()) ? "" : " · " + req.getReason()));
+    }
+
+    // ---------------- 关联采购入库单 ----------------
+
+    @Transactional(rollbackFor = Exception.class)
+    public void linkPurchases(Long pcId, PcDtos.LinkRequest req) {
+        PurchaseContract c = requireActive(pcId);
+        if (req == null || req.getPurchaseInIds() == null || req.getPurchaseInIds().isEmpty()) {
+            throw new BizException(400, "请选择要关联的采购单");
+        }
+        for (Long id : req.getPurchaseInIds()) {
+            PurchaseIn p = purchaseInMapper.selectById(id);
+            if (p == null) {
+                throw new BizException(404, "采购单不存在: id=" + id);
+            }
+            if ("已红冲".equals(p.getStatus())) {
+                throw new BizException(400, "采购单 " + p.getNo() + " 已红冲,不能关联");
+            }
+            if (p.getPcId() != null && !p.getPcId().equals(pcId)) {
+                throw new BizException(400, "采购单 " + p.getNo() + " 已关联其他采购合同");
+            }
+            if (p.getSupplierId() == null || !p.getSupplierId().equals(c.getSupplierId())) {
+                throw new BizException(400, "采购单 " + p.getNo() + " 的供应商与合同 " + c.getContractNo() + " 不一致");
+            }
+            p.setPcId(pcId);
+            purchaseInMapper.updateById(p);
+            auditLogService.record("采购单关联采购合同", "purchase_in", id, AuditLogService.EXECUTED,
+                    "采购单 " + p.getNo() + " → 合同 " + c.getContractNo());
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void unlinkPurchase(Long pcId, Long purchaseInId) {
+        PurchaseIn p = purchaseInMapper.selectById(purchaseInId);
+        if (p == null || !pcId.equals(p.getPcId())) {
+            throw new BizException(400, "该采购单未关联本合同");
+        }
+        List<Long> payableIds = payableMapper.selectList(new LambdaQueryWrapper<Payable>()
+                        .eq(Payable::getPurchaseInId, purchaseInId))
+                .stream().map(Payable::getId).collect(Collectors.toList());
+        if (!payableIds.isEmpty()) {
+            List<Long> linkedPayments = settleMapper.selectList(new LambdaQueryWrapper<SupplierPaymentPayable>()
+                            .in(SupplierPaymentPayable::getPayableId, payableIds))
+                    .stream().map(SupplierPaymentPayable::getPaymentId).distinct().collect(Collectors.toList());
+            for (Long payId : linkedPayments) {
+                SupplierPayment sp = paymentMapper.selectById(payId);
+                if (sp != null && "有效".equals(sp.getStatus())) {
+                    throw new BizException(400, "该采购单的应付已被付款#" + payId + " 冲销,请先撤销该付款再解除关联");
+                }
+            }
+        }
+        purchaseInMapper.update(null, new LambdaUpdateWrapper<PurchaseIn>()
+                .eq(PurchaseIn::getId, purchaseInId).set(PurchaseIn::getPcId, null));
+        auditLogService.record("采购单解除采购合同", "purchase_in", purchaseInId, AuditLogService.EXECUTED,
+                "采购单 " + p.getNo() + " 解除关联");
+    }
+
+    private List<PcDtos.LinkedPurchase> linkedPurchases(Long pcId) {
+        List<PcDtos.LinkedPurchase> out = new ArrayList<>();
+        for (PurchaseIn p : purchaseInMapper.selectList(new LambdaQueryWrapper<PurchaseIn>()
+                .eq(PurchaseIn::getPcId, pcId).orderByAsc(PurchaseIn::getId))) {
+            PcDtos.LinkedPurchase lp = new PcDtos.LinkedPurchase();
+            lp.setId(p.getId());
+            lp.setNo(p.getNo());
+            lp.setStatus(p.getStatus());
+            lp.setTotalAmount(p.getTotalAmount());
+            lp.setPendingPayable(pendingPayables(p.getId()).stream().map(Payable::getAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            out.add(lp);
+        }
+        return out;
+    }
+
+    private List<Payable> pendingPayables(Long purchaseInId) {
+        return payableMapper.selectList(new LambdaQueryWrapper<Payable>()
+                .eq(Payable::getPurchaseInId, purchaseInId).eq(Payable::getStatus, "待付")
+                .gt(Payable::getAmount, BigDecimal.ZERO)
+                .orderByAsc(Payable::getDueDate).orderByAsc(Payable::getId));
+    }
+
+    /** 付款按到期日先后冲销关联采购单的待付应付;不足一整行则拆行。返回实际冲销金额。 */
+    private BigDecimal settlePayables(PurchaseContract c, Long paymentId, BigDecimal amount, LocalDate paidDate) {
+        List<Payable> rows = new ArrayList<>();
+        for (PurchaseIn p : purchaseInMapper.selectList(new LambdaQueryWrapper<PurchaseIn>()
+                .eq(PurchaseIn::getPcId, c.getId()).ne(PurchaseIn::getStatus, "已红冲"))) {
+            rows.addAll(pendingPayables(p.getId()));
+        }
+        rows.sort(java.util.Comparator
+                .comparing(Payable::getDueDate, java.util.Comparator.nullsLast(java.util.Comparator.<LocalDate>naturalOrder()))
+                .thenComparing(Payable::getId));
+        BigDecimal left = amount;
+        BigDecimal settled = BigDecimal.ZERO;
+        for (Payable row : rows) {
+            if (left.signum() <= 0) {
+                break;
+            }
+            BigDecimal due = row.getAmount();
+            BigDecimal use = due.min(left);
+            SupplierPaymentPayable link = new SupplierPaymentPayable();
+            link.setPaymentId(paymentId);
+            link.setPayableId(row.getId());
+            link.setPaidAmount(use);
+            link.setOrigAmount(due);
+            if (use.compareTo(due) < 0) {
+                Payable remain = new Payable();
+                remain.setPurchaseInId(row.getPurchaseInId());
+                remain.setAssetId(row.getAssetId());
+                remain.setPurchaseItemId(row.getPurchaseItemId());
+                remain.setTermId(row.getTermId());
+                remain.setStage(row.getStage());
+                remain.setDueDate(row.getDueDate());
+                remain.setDueProvisional(row.getDueProvisional());
+                remain.setAmount(due.subtract(use));
+                remain.setAmountManual(1);
+                remain.setStatus("待付");
+                remain.setRemark("采购合同部分付款差额(原应付 " + due + ",已付 " + use + ")");
+                payableMapper.insert(remain);
+                link.setRemainderId(remain.getId());
+                row.setAmount(use);
+                row.setAmountManual(1);
+            }
+            row.setStatus("已付");
+            row.setPaidDate(paidDate);
+            payableMapper.updateById(row);
+            settleMapper.insert(link);
+            left = left.subtract(use);
+            settled = settled.add(use);
+        }
+        return settled;
+    }
+
+    /** 撤销付款:把被冲销的应付行精确还原为待付;拆出的差额行若已被后续付款动过则拒绝。 */
+    private void revertPayables(Long paymentId) {
+        List<SupplierPaymentPayable> links = settleMapper.selectList(new LambdaQueryWrapper<SupplierPaymentPayable>()
+                .eq(SupplierPaymentPayable::getPaymentId, paymentId));
+        for (SupplierPaymentPayable l : links) {
+            Payable row = payableMapper.selectById(l.getPayableId());
+            if (row == null) {
+                continue;
+            }
+            if (l.getRemainderId() != null) {
+                Payable rem = payableMapper.selectById(l.getRemainderId());
+                BigDecimal expect = l.getOrigAmount().subtract(l.getPaidAmount());
+                if (rem != null) {
+                    if (!"待付".equals(rem.getStatus()) || rem.getAmount().compareTo(expect) != 0) {
+                        throw new BizException(400, "本次付款拆出的差额应付已被后续付款使用,请先撤销后续付款");
+                    }
+                    payableMapper.deleteById(rem.getId());
+                }
+            }
+            payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
+                    .eq(Payable::getId, row.getId())
+                    .set(Payable::getAmount, l.getOrigAmount())
+                    .set(Payable::getStatus, "待付")
+                    .set(Payable::getPaidDate, null));
+            settleMapper.deleteById(l.getId());
+        }
     }
 
     // ---------------- 内部 ----------------

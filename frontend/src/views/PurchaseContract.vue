@@ -2,9 +2,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchSupplierPool } from '@/api/supplier'
+import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
 import {
   addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
-  payPurchaseContract, voidPcInvoice, voidPcPayment,
+  linkPcPurchases, payPurchaseContract, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
   type PcContract, type PcDetail,
 } from '@/api/purchaseContract'
 import ProofUploader from '@/components/payproof/ProofUploader.vue'
@@ -69,6 +70,34 @@ async function reloadDetail() {
   await load()
 }
 function termName(id: number) { return detail.value?.terms.find((t) => t.id === id)?.stageName ?? '' }
+
+// ---- 关联采购入库单 ----
+const linkDlg = ref(false)
+const linking = ref(false)
+const candidates = ref<PurchaseListItem[]>([])
+const picked = ref<number[]>([])
+async function openLink() {
+  const sid = detail.value!.contract.supplierId
+  const res = await fetchPurchases({ page: 1, size: 200 })
+  candidates.value = res.records.filter((p) => p.supplierId === sid && p.status !== '已红冲' && !p.pcId)
+  picked.value = []
+  linkDlg.value = true
+}
+async function submitLink() {
+  linking.value = true
+  try {
+    await linkPcPurchases(detail.value!.contract.id, picked.value)
+    ElMessage.success('已关联，之后合同付款会自动冲销这些采购单的应付')
+    linkDlg.value = false
+    await reloadDetail()
+  } finally { linking.value = false }
+}
+async function undoLink(id: number) {
+  await ElMessageBox.confirm('解除该采购单与本合同的关联？', '解除关联', { type: 'warning' })
+  await unlinkPcPurchase(detail.value!.contract.id, id)
+  ElMessage.success('已解除')
+  await reloadDetail()
+}
 
 // ---- 登记付款 ----
 const payDlg = ref(false)
@@ -163,6 +192,15 @@ async function undoInvoice(id: number) {
           <el-descriptions-item label="已付未收票">{{ money(detail.contract.summary.paidNotInvoiced) }}</el-descriptions-item>
         </el-descriptions>
 
+        <div class="sec"><h4>关联采购单</h4><el-button size="small" @click="openLink">关联采购单</el-button></div>
+        <el-table :data="detail.purchases" size="small" border empty-text="尚未关联采购入库单">
+          <el-table-column prop="no" label="采购单号" min-width="140" />
+          <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column label="采购金额" align="right" width="130"><template #default="{ row }">{{ money(row.totalAmount) }}</template></el-table-column>
+          <el-table-column label="待付应付" align="right" width="130"><template #default="{ row }">{{ money(row.pendingPayable) }}</template></el-table-column>
+          <el-table-column label="操作" width="90"><template #default="{ row }"><el-button link type="danger" size="small" @click="undoLink(row.id)">解除</el-button></template></el-table-column>
+        </el-table>
+
         <h4>付款节点</h4>
         <el-table :data="detail.terms" size="small" border>
           <el-table-column prop="stageName" label="节点" width="120" />
@@ -235,6 +273,19 @@ async function undoInvoice(id: number) {
       <template #footer>
         <el-button @click="createDlg = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="linkDlg" title="关联采购入库单" width="560px">
+      <el-alert type="info" :closable="false" show-icon class="tip"
+        title="只列出同一供应商、未关联其他合同的采购单。关联后，本合同的每笔付款会按到期日先后自动冲销这些采购单的待付应付；这些采购单不能再在「采购入库」页直接登记付款。" />
+      <el-checkbox-group v-model="picked">
+        <div v-for="p in candidates" :key="p.id"><el-checkbox :value="p.id">{{ p.no }} · {{ p.status }} · {{ money(p.totalAmount) }}</el-checkbox></div>
+      </el-checkbox-group>
+      <div v-if="!candidates.length" class="sum">没有可关联的采购单</div>
+      <template #footer>
+        <el-button @click="linkDlg = false">取消</el-button>
+        <el-button type="primary" :loading="linking" :disabled="!picked.length" @click="submitLink">确认关联</el-button>
       </template>
     </el-dialog>
 

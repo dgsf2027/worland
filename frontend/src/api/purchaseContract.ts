@@ -57,8 +57,17 @@ export interface PcInvoice {
   status: string
   remark?: string
 }
+export interface PcLinkedPurchase {
+  id: number
+  no: string
+  status: string
+  totalAmount?: number
+  /** 该采购单仍待付的应付合计 */
+  pendingPayable: number
+}
 export interface PcDetail {
   contract: PcContract
+  purchases: PcLinkedPurchase[]
   terms: PcTerm[]
   payments: PcPayment[]
   invoices: PcInvoice[]
@@ -78,6 +87,12 @@ export function payPurchaseContract(id: number, body: Record<string, any>): Prom
 }
 export function voidPcPayment(paymentId: number, reason?: string): Promise<void> {
   return request.post(`/rent/purchase-contracts/payments/${paymentId}/void`, { reason })
+}
+export function linkPcPurchases(id: number, purchaseInIds: number[]): Promise<void> {
+  return request.post(`/rent/purchase-contracts/${id}/purchases`, { purchaseInIds })
+}
+export function unlinkPcPurchase(id: number, purchaseInId: number): Promise<void> {
+  return request.post(`/rent/purchase-contracts/${id}/purchases/${purchaseInId}/unlink`)
 }
 export function addPcInvoice(id: number, body: Record<string, any>): Promise<number> {
   return request.post(`/rent/purchase-contracts/${id}/invoices`, body)

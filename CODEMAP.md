@@ -204,6 +204,7 @@ modules/<module>/
 | `V122__pay_proof.sql` | 资金进出回单关联表 `yc_rent_pay_proof`（采购付款/收租核销/退款/还款/赔偿收取登记前必须先挂回单，一个文件可挂多张单，回单只增不删） |
 | `V123__quote_params.sql` | 报价测算器通用口径参数 `quote_*`（征收率、附加税、所得税、资金成本、管理费、人工月成本、进项税率、预付比例、目标 IRR）；只放通用口径，基准价/框架折扣/采购价/货位数不入库 |
 | `V124__purchase_contract.sql` | 采购合同 `yc_rent_purchase_contract` + 付款节点 `_term` + 供应商付款 `yc_rent_supplier_payment`（银行流水号唯一）+ 付款↔节点核销 `_alloc` + 进项发票 `yc_rent_purchase_invoice`（发票号唯一）；付款过账 dr 应付/cr 银行；只增表，旧付款条款与应付计划保留 |
+| `V125__purchase_in_contract_link.sql` | 采购入库单关联采购合同：`yc_rent_purchase_in.pc_id` + 付款↔应付冲销记录 `yc_rent_supplier_payment_payable`；已关联的单只能经采购合同页付款，付款按到期日先后自动冲销其待付应付（不足拆行），撤销付款精确还原 |
 
 `V99+` 是与业务表并行的账号体系版本号段，刻意留出间隔避免并行开发撞号。
 

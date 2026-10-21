@@ -5,6 +5,8 @@ export interface PurchaseListItem {
   id: number
   no: string
   status: string
+  /** 关联的采购合同 */
+  pcId?: number
   contractId?: number
   contractNo?: string
   customerName?: string
@@ -92,6 +94,8 @@ export interface PurchaseDetail {
   id: number
   no: string
   status: string
+  /** 关联的采购合同(已关联时付款只能在「采购合同」页登记) */
+  pcId?: number
   contractId?: number
   contractNo?: string
   customerName?: string

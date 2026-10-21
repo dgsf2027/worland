@@ -21,6 +21,9 @@ public class PurchaseDetailResponse {
 
     private Long contractId;
 
+    /** 关联的采购合同(V125);已关联的单,付款只能在采购合同页登记 */
+    private Long pcId;
+
     private String contractNo;
 
     private String customerName;

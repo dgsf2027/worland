@@ -29,6 +29,9 @@ public class PurchaseIn {
 
     private Long supplierId;
 
+    /** 关联的采购合同(V125,可空):已关联的单,付款只能经采购合同页登记 */
+    private Long pcId;
+
     /** 状态:已下单/已入库/已红冲 */
     private String status;
 

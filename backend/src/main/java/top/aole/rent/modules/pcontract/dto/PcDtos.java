@@ -124,7 +124,23 @@ public final class PcDtos {
     }
 
     @Data
+    public static class LinkRequest {
+        private List<Long> purchaseInIds;
+    }
+
+    @Data
+    public static class LinkedPurchase {
+        private Long id;
+        private String no;
+        private String status;
+        private BigDecimal totalAmount;
+        /** 该采购单仍待付的应付合计 */
+        private BigDecimal pendingPayable;
+    }
+
+    @Data
     public static class Detail {
+        private List<LinkedPurchase> purchases;
         private ContractView contract;
         private List<TermView> terms;
         private List<PaymentView> payments;

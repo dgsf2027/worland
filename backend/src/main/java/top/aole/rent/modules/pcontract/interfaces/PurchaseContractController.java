@@ -60,6 +60,22 @@ public class PurchaseContractController {
         return R.ok();
     }
 
+    @ApiOperation("关联采购入库单(同供应商;关联后其应付随合同付款自动冲销)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购合同关联采购单", targetType = "purchase_contract")
+    @PostMapping("/{id}/purchases")
+    public R<Void> linkPurchases(@PathVariable Long id, @RequestBody PcDtos.LinkRequest req) {
+        service.linkPurchases(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("解除采购入库单关联")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购合同解除关联", targetType = "purchase_contract")
+    @PostMapping("/{id}/purchases/{purchaseInId}/unlink")
+    public R<Void> unlinkPurchase(@PathVariable Long id, @PathVariable Long purchaseInId) {
+        service.unlinkPurchase(id, purchaseInId);
+        return R.ok();
+    }
+
     @ApiOperation("登记进项发票")
     @RequireRole(value = {"财务", "老板"}, action = "采购合同收票", targetType = "purchase_contract")
     @PostMapping("/{id}/invoices")
