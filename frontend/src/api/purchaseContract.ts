@@ -118,12 +118,13 @@ export function fetchRecognizeStatus(): Promise<{ configured: boolean }> {
   return request.get('/rent/purchase-contracts/recognize/status')
 }
 /** images=要看图识别的图片；text=从 PDF/文本里提取的文字(可空，二者至少给一项) */
-export function recognizePcDoc(kind: RecognizeKind, images: File[], text?: string): Promise<any> {
+export function recognizePcDoc(kind: RecognizeKind, images: File[], text?: string, silent = false): Promise<any> {
   const fd = new FormData()
   fd.append('kind', kind)
   images.forEach((f) => fd.append('files', f))
   if (text) fd.append('text', text)
-  return request.post('/rent/purchase-contracts/recognize', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+  return request.post('/rent/purchase-contracts/recognize', fd,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000, silent } as any)
 }
 
 export function fetchPurchaseContracts(): Promise<PcContract[]> {

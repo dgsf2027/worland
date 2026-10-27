@@ -409,8 +409,8 @@ async function undoInvoice(id: number) {
     <ProofViewer v-model="proofView.show" :biz-type="proofView.type" :biz-id="proofView.id" :title="proofView.title" :can-supplement="false" />
 
     <el-dialog v-model="createDlg" title="新建采购合同" width="780px">
-      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
-        title="图片识别服务未配置：上传文件不会自动识别。请让管理员在部署环境配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL；现在可先手工录入。" />
+      <el-alert v-if="recognizeOk === false" type="info" :closable="false" show-icon class="tip"
+        title="当前使用本机识别（未配置大模型）：PDF 文字版最准，扫描件/照片可能有个别字读错。识别结果请逐项核对；读不出来的项会提示，手工补全即可。" />
       <el-alert type="info" :closable="false" show-icon class="tip"
         title="在下方「合同原件」上传合同（PDF、扫描件或照片，多页可一次选多张），系统自动识别合同号、供应商、总价、税率和付款节点并填入；识别结果只是预填，请核对后再创建。" />
       <div class="snap-row">
@@ -485,8 +485,8 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="payDlg" title="登记付款" width="560px">
-      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
-        title="图片识别服务未配置：上传回单不会自动识别，请手工填写（管理员需配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL）。" />
+      <el-alert v-if="recognizeOk === false" type="info" :closable="false" show-icon class="tip"
+        title="当前使用本机识别：原版电子回单 PDF 最准；截图/照片的金额可能读不全，请对照回单核对。" />
       <div class="snap-row">
         <SnapRecognize kind="receipt" label="拍照识别回单" @recognized="onReceiptRecognized" />
         <span class="sum">拍银行回单，自动填金额/日期/流水号并留存回单</span>
@@ -506,8 +506,8 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="invDlg" title="登记进项发票" width="560px">
-      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
-        title="图片识别服务未配置：上传发票不会自动识别，请手工填写（管理员需配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL）。" />
+      <el-alert v-if="recognizeOk === false" type="info" :closable="false" show-icon class="tip"
+        title="当前使用本机识别：电子发票 PDF 最准；图片/照片请对照发票核对。" />
       <div class="snap-row">
         <SnapRecognize kind="invoice" label="拍照识别发票" @recognized="onInvoiceRecognized" />
         <span class="sum">拍发票，自动填发票号/日期/金额并留存原件</span>

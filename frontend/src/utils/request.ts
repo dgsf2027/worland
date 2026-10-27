@@ -50,7 +50,8 @@ request.interceptors.response.use(
       return res.data
     }
     const message = res?.message || '请求失败'
-    ElMessage.error(message)
+    // silent：调用方自己处理失败(如「可选的大模型增强」失败时回退本地结果)，不弹错误提示
+    if (!(response.config as any).silent) ElMessage.error(message)
     return Promise.reject(new Error(message))
   },
   (error) => {
@@ -61,7 +62,7 @@ request.interceptors.response.use(
       if (!location.pathname.startsWith('/login')) location.href = `/login?redirect=${encodeURIComponent(location.pathname)}`
       return Promise.reject(error)
     }
-    ElMessage.error(error?.response?.data?.message || error?.message || '网络异常')
+    if (!(error?.config as any)?.silent) ElMessage.error(error?.response?.data?.message || error?.message || '网络异常')
     return Promise.reject(error)
   },
 )

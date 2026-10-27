@@ -40,6 +40,25 @@ async function loadPdfjs() {
   return pdfjsPromise
 }
 
+/**
+ * pdf.js 的文字块顺序是 PDF 内容流顺序，电子发票常把「标签」和「值」分开存放(先写所有标签再写所有值)，
+ * 直接拼接会让「发票号码」和号码隔得很远。这里按页面坐标重排：同一行(纵坐标相近)的块按横坐标从左到右拼成一行，
+ * 行按从上到下排列，还原肉眼看到的版面。
+ */
+export function itemsToLines(items: { str?: string; transform?: number[] }[]): string {
+  const rows: { y: number; parts: { x: number; s: string }[] }[] = []
+  for (const it of items) {
+    if (!it.str || !it.str.trim() || !it.transform) continue
+    const x = it.transform[4]
+    const y = it.transform[5]
+    let row = rows.find((r) => Math.abs(r.y - y) < 3)
+    if (!row) { row = { y, parts: [] }; rows.push(row) }
+    row.parts.push({ x, s: it.str })
+  }
+  rows.sort((a, b) => b.y - a.y)
+  return rows.map((r) => r.parts.sort((a, b) => a.x - b.x).map((p) => p.s.trim()).join(' ')).join('\n')
+}
+
 async function renderPageToFile(page: any, name: string): Promise<File> {
   const base = page.getViewport({ scale: 1 })
   // 目标长边约 1800px：够看清小字，又不会让图片过大
@@ -68,8 +87,8 @@ async function extractPdf(file: File, out: Extracted) {
   for (let p = 1; p <= pages; p++) {
     const page = await doc.getPage(p)
     const content = await page.getTextContent()
-    const pageText = content.items.map((i: any) => i.str).join(' ').replace(/\s+/g, ' ').trim()
-    if (pageText.length >= SCANNED_PAGE_MIN_CHARS) {
+    const pageText = itemsToLines(content.items).trim()
+    if (pageText.replace(/\s+/g, '').length >= SCANNED_PAGE_MIN_CHARS) {
       out.text += `\n【${file.name} 第${p}页】\n${pageText}`
     } else if (out.images.length < MAX_IMAGES) {
       out.images.push(await renderPageToFile(page, `${file.name.replace(/\.pdf$/i, '')}-p${p}.jpg`))

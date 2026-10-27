@@ -26,7 +26,7 @@ async function onPick(e: Event) {
   if (!files.length) return
   loading.value = true
   try {
-    const data = await recognizeFromFiles(props.kind, files)
+    const data = await recognizeFromFiles(props.kind, files, (m) => { if (m) ElMessage.info({ message: m, duration: 1500 }) })
     if (!data) return
     emit('recognized', data, files.filter((f) => KEEP_EXTS.includes(extOf(f))))
     ElMessage.success('已识别并填入，请核对后再保存')

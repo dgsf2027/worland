@@ -14,6 +14,7 @@ const props = defineProps<{ recognizeKind?: RecognizeKind }>()
 const emit = defineEmits<{ (e: 'recognized', data: any): void }>()
 const fileIds = defineModel<number[]>({ default: () => [] })
 const recognizing = ref(false)
+const progress = ref('')
 const files = ref<UploadedProof[]>([])
 const uploading = ref(false)
 const input = ref<HTMLInputElement>()
@@ -39,7 +40,10 @@ async function onPick(e: Event) {
   // 存档与识别同时进行：识别失败不影响文件已挂上
   recognizing.value = true
   try {
-    const [, data] = await Promise.all([addFiles(picked), recognizeFromFiles(props.recognizeKind, picked)])
+    const [, data] = await Promise.all([
+      addFiles(picked),
+      recognizeFromFiles(props.recognizeKind, picked, (m) => { progress.value = m }),
+    ])
     if (data) {
       emit('recognized', data)
       ElMessage.success('已识别并填入，请核对后再保存')
@@ -69,7 +73,7 @@ function remove(i: number) {
     <el-button size="small" :loading="uploading || recognizing" @click="input?.click()">
       {{ recognizeKind ? '＋ 上传并自动识别' : '＋ 上传回单' }}
     </el-button>
-    <span v-if="recognizing" class="pu-tip">正在识别，请稍候…（扫描件可能需要十几秒）</span>
+    <span v-if="recognizing" class="pu-tip">{{ progress || '正在识别，请稍候…' }}（扫描件每页约 5–10 秒，首次使用还要加载识别引擎）</span>
     <span v-else-if="recognizeKind" class="pu-tip">选文件后自动识别并填入表单，原件同时留存；jpg/png/pdf，单个 ≤ {{ PROOF_MAX_MB }}MB，可多张；上传后不可删除</span>
     <span v-else class="pu-tip">银行回单或支付截图，jpg/png/pdf，单个 ≤ {{ PROOF_MAX_MB }}MB，可多张；上传后不可删除</span>
     <input ref="input" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple hidden @change="onPick" />
