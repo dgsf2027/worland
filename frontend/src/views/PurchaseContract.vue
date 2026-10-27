@@ -85,7 +85,7 @@ function fillEvenly() {
   if (last && rest !== 0) { last.ratioPct = Math.round(((last.ratioPct || 0) + rest) * 10000) / 10000; onRatioInput(last) }
 }
 
-/** 公司名归一化：去空格括号、地区前缀(深圳市/广州市…)和「有限公司」后缀，便于「深圳市蚂蚁动力技术有限公司」匹配库里的「蚂蚁动力」 */
+/** 公司名归一化：去空格括号、地区前缀(深圳市/广州市…)和「有限公司」后缀，便于「某某市甲乙技术有限公司」匹配库里简写的「甲乙」 */
 function normName(n: string) {
   return n.replace(/[\s()（）]/g, '').replace(/(股份)?有限(责任)?公司$/, '').replace(/^[\u4e00-\u9fa5]{2,3}市/, '')
 }
