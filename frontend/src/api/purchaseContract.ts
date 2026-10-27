@@ -113,6 +113,10 @@ export interface RecognizedInvoice {
   totalAmount?: number | null
   taxRate?: number | null
 }
+/** 识别服务(LLM)是否已配置：未配置时页面提前提示，不必等上传后才失败 */
+export function fetchRecognizeStatus(): Promise<{ configured: boolean }> {
+  return request.get('/rent/purchase-contracts/recognize/status')
+}
 /** images=要看图识别的图片；text=从 PDF/文本里提取的文字(可空，二者至少给一项) */
 export function recognizePcDoc(kind: RecognizeKind, images: File[], text?: string): Promise<any> {
   const fd = new FormData()

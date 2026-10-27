@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { checkUploadFile } from '@/api/asset'
-import { recognizePcDoc, type RecognizeKind } from '@/api/purchaseContract'
-import { ExtractError, extractForRecognize, RECOGNIZE_EXTS } from '@/utils/docExtract'
+import type { RecognizeKind } from '@/api/purchaseContract'
+import { recognizeFromFiles } from '@/utils/recognizeFiles'
 
 /**
  * 拍照 / 选文件 → 自动识别合同、银行回单、发票的关键字段。
@@ -25,20 +24,12 @@ async function onPick(e: Event) {
   const files = Array.from((e.target as HTMLInputElement).files || [])
   ;(e.target as HTMLInputElement).value = ''
   if (!files.length) return
-  for (const f of files) {
-    const err = checkUploadFile(f, RECOGNIZE_EXTS, 10)
-    if (err) { ElMessage.warning(err + '（可识别：图片 / PDF / txt）'); return }
-  }
   loading.value = true
   try {
-    const ex = await extractForRecognize(files)
-    ex.notes.forEach((n) => ElMessage.info(n))
-    const data = await recognizePcDoc(props.kind, ex.images, ex.text || undefined)
+    const data = await recognizeFromFiles(props.kind, files)
+    if (!data) return
     emit('recognized', data, files.filter((f) => KEEP_EXTS.includes(extOf(f))))
     ElMessage.success('已识别并填入，请核对后再保存')
-  } catch (err: any) {
-    // 请求错误已由拦截器弹出；本地读取/解析 PDF 的错误在这里提示。识别失败不影响手工录入
-    if (err instanceof ExtractError) ElMessage.warning(err.message)
   } finally {
     loading.value = false
   }

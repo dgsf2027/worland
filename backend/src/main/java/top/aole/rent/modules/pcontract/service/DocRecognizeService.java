@@ -60,6 +60,11 @@ public class DocRecognizeService {
         return recognize(kind, files, null);
     }
 
+    /** 识别服务是否已配置(base-url/api-key/模型齐全)。页面据此提前提示,不必等上传后才失败。 */
+    public boolean configured() {
+        return !StrUtil.hasBlank(baseUrl, apiKey) && StrUtil.isNotBlank(StrUtil.blankToDefault(visionModel, model));
+    }
+
     /**
      * @param text 页面从 PDF(有文字层)/txt 里提取的文字,可空;与图片(拍照、扫描版 PDF 的页面图)至少给一项。
      *             文字内容直接交给模型抽取,比 OCR 更准,且纯文字不需要看图模型。

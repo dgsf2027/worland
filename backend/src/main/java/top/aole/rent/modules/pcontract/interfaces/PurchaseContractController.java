@@ -90,6 +90,15 @@ public class PurchaseContractController {
         return R.ok(recognizeService.recognize(kind, files, text));
     }
 
+    @ApiOperation("图片识别服务是否已配置(页面提前提示用)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购单据图片识别", targetType = "purchase_contract")
+    @GetMapping("/recognize/status")
+    public R<Map<String, Object>> recognizeStatus() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("configured", recognizeService.configured());
+        return R.ok(m);
+    }
+
     @ApiOperation("登记进项发票")
     @RequireRole(value = {"财务", "老板"}, action = "采购合同收票", targetType = "purchase_contract")
     @PostMapping("/{id}/invoices")

@@ -3,9 +3,17 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { checkUploadFile } from '@/api/asset'
 import { uploadProofFile, PROOF_EXTS, PROOF_MAX_MB, type UploadedProof } from '@/api/payProof'
+import type { RecognizeKind } from '@/api/purchaseContract'
+import { recognizeFromFiles } from '@/utils/recognizeFiles'
 
-/** 回单上传:选文件即上传,v-model 是已上传文件的 id 列表。移除只是不挂到本次登记上。 */
+/**
+ * 回单上传:选文件即上传,v-model 是已上传文件的 id 列表。移除只是不挂到本次登记上。
+ * 传 recognizeKind(合同/回单/发票)时：选文件的同时自动识别，识别出的字段通过 recognized 事件交给页面预填。
+ */
+const props = defineProps<{ recognizeKind?: RecognizeKind }>()
+const emit = defineEmits<{ (e: 'recognized', data: any): void }>()
 const fileIds = defineModel<number[]>({ default: () => [] })
+const recognizing = ref(false)
 const files = ref<UploadedProof[]>([])
 const uploading = ref(false)
 const input = ref<HTMLInputElement>()
@@ -27,7 +35,18 @@ async function addFiles(picked: File[]) {
 async function onPick(e: Event) {
   const picked = Array.from((e.target as HTMLInputElement).files || [])
   ;(e.target as HTMLInputElement).value = ''
-  await addFiles(picked)
+  if (!props.recognizeKind) { await addFiles(picked); return }
+  // 存档与识别同时进行：识别失败不影响文件已挂上
+  recognizing.value = true
+  try {
+    const [, data] = await Promise.all([addFiles(picked), recognizeFromFiles(props.recognizeKind, picked)])
+    if (data) {
+      emit('recognized', data)
+      ElMessage.success('已识别并填入，请核对后再保存')
+    }
+  } finally {
+    recognizing.value = false
+  }
 }
 /** 清空已选(弹窗重开时用) */
 function reset() {
@@ -47,8 +66,12 @@ function remove(i: number) {
       <span>📎 {{ f.fileName }}</span>
       <el-button link type="danger" size="small" @click="remove(i)">移除</el-button>
     </div>
-    <el-button size="small" :loading="uploading" @click="input?.click()">＋ 上传回单</el-button>
-    <span class="pu-tip">银行回单或支付截图，jpg/png/pdf，单个 ≤ {{ PROOF_MAX_MB }}MB，可多张；上传后不可删除</span>
+    <el-button size="small" :loading="uploading || recognizing" @click="input?.click()">
+      {{ recognizeKind ? '＋ 上传并自动识别' : '＋ 上传回单' }}
+    </el-button>
+    <span v-if="recognizing" class="pu-tip">正在识别，请稍候…（扫描件可能需要十几秒）</span>
+    <span v-else-if="recognizeKind" class="pu-tip">选文件后自动识别并填入表单，原件同时留存；jpg/png/pdf，单个 ≤ {{ PROOF_MAX_MB }}MB，可多张；上传后不可删除</span>
+    <span v-else class="pu-tip">银行回单或支付截图，jpg/png/pdf，单个 ≤ {{ PROOF_MAX_MB }}MB，可多张；上传后不可删除</span>
     <input ref="input" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple hidden @change="onPick" />
   </div>
 </template>

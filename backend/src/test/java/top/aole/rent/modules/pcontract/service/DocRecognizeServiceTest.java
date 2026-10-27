@@ -46,6 +46,20 @@ class DocRecognizeServiceTest {
     }
 
     @Test
+    void 配置状态_未配置为false_配齐为true() {
+        assertTrue(!new DocRecognizeService().configured());
+        assertTrue(configured("{}").configured());
+        // 只配了 base-url 与 key、没有任何模型名 → 仍视为未配置
+        DocRecognizeService half = new DocRecognizeService();
+        ReflectionTestUtils.setField(half, "baseUrl", "http://localhost");
+        ReflectionTestUtils.setField(half, "apiKey", "k");
+        assertTrue(!half.configured());
+        // 单独配了看图模型也算可用
+        ReflectionTestUtils.setField(half, "visionModel", "vision-m");
+        assertTrue(half.configured());
+    }
+
+    @Test
     void 非图片被拒() {
         DocRecognizeService s = configured("{}");
         MockMultipartFile pdf = new MockMultipartFile("files", "a.pdf", "application/pdf", IMG);

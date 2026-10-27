@@ -5,7 +5,7 @@ import { fetchSupplierPool } from '@/api/supplier'
 import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import {
-  addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
+  addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts, fetchRecognizeStatus,
   linkPcPurchases, payPurchaseContract, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
   type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice, type RecognizedReceipt,
 } from '@/api/purchaseContract'
@@ -18,6 +18,8 @@ const list = ref<PcContract[]>([])
 const loading = ref(false)
 const suppliers = ref<{ id: number; name: string }[]>([])
 const rentContracts = ref<ContractListItem[]>([])
+/** 图片识别服务是否已配置(null=查询中)；未配置时弹窗顶部提前提示，不必等上传后才失败 */
+const recognizeOk = ref<boolean | null>(null)
 
 function money(v?: number) {
   return v == null ? '-' : '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -32,6 +34,7 @@ onMounted(async () => {
   await load()
   suppliers.value = (await fetchSupplierPool({ page: 1, size: 500 })).records.map((x) => ({ id: x.id, name: x.name }))
   rentContracts.value = (await fetchContracts({ page: 1, size: 500 })).records
+  fetchRecognizeStatus().then((r) => { recognizeOk.value = r.configured }).catch(() => { recognizeOk.value = null })
 })
 
 // ---- 新建合同 ----
@@ -82,14 +85,24 @@ function fillEvenly() {
   if (last && rest !== 0) { last.ratioPct = Math.round(((last.ratioPct || 0) + rest) * 10000) / 10000; onRatioInput(last) }
 }
 
-/** 合同照片识别 → 预填表单；原图同时挂成合同原件 */
-async function onContractRecognized(d: RecognizedContract, files: File[]) {
+/** 公司名归一化：去空格括号、地区前缀(深圳市/广州市…)和「有限公司」后缀，便于「深圳市蚂蚁动力技术有限公司」匹配库里的「蚂蚁动力」 */
+function normName(n: string) {
+  return n.replace(/[\s()（）]/g, '').replace(/(股份)?有限(责任)?公司$/, '').replace(/^[\u4e00-\u9fa5]{2,3}市/, '')
+}
+const unmatchedSupplier = ref('')
+/** 合同识别 → 预填表单；files 非空时(拍照按钮)同时把原件挂上，从上传框触发时原件已挂 */
+async function onContractRecognized(d: RecognizedContract, files?: File[]) {
   if (d.contractNo) form.contractNo = d.contractNo
+  unmatchedSupplier.value = ''
   if (d.supplierName) {
+    const n = normName(d.supplierName)
     const hit = suppliers.value.find((x) => x.name === d.supplierName)
-      || suppliers.value.find((x) => x.name.includes(d.supplierName!) || d.supplierName!.includes(x.name))
+      || suppliers.value.find((x) => { const m = normName(x.name); return m && n && (m.includes(n) || n.includes(m)) })
     if (hit) form.supplierId = hit.id
-    else ElMessage.warning(`供应商库里没有匹配「${d.supplierName}」，请手动选择（或先到供应商模块建档）`)
+    else {
+      unmatchedSupplier.value = d.supplierName
+      ElMessage.warning(`供应商库里没有匹配「${d.supplierName}」，请先到「供应商」建档，再回来选择`)
+    }
   }
   if (d.mainContractNo) {
     const hit = rentContracts.value.find((x) => x.no === d.mainContractNo)
@@ -113,13 +126,26 @@ async function onContractRecognized(d: RecognizedContract, files: File[]) {
       return t
     })
   }
-  await nextTick()
-  await contractUploader.value?.addFiles(files)
+  if (files?.length) {
+    await nextTick()
+    await contractUploader.value?.addFiles(files)
+  }
 }
+/** 新建时同时关联采购入库单：同一供应商、未关联其他合同、未红冲；选了主合同则只列该主合同下的采购单。默认全部勾选，可取消 */
+const createCandidates = ref<PurchaseListItem[]>([])
+const createLinkIds = ref<number[]>([])
+async function refreshCreateCandidates() {
+  if (!createDlg.value || !form.supplierId) { createCandidates.value = []; createLinkIds.value = []; return }
+  const res = await fetchPurchases({ page: 1, size: 200 })
+  createCandidates.value = res.records.filter((p) => p.supplierId === form.supplierId && p.status !== '已红冲' && !p.pcId
+    && (!form.rentContractId || p.contractId === form.rentContractId))
+  createLinkIds.value = createCandidates.value.map((p) => p.id)
+}
+watch(() => [form.supplierId, form.rentContractId, createDlg.value], refreshCreateCandidates)
 async function submitCreate() {
   creating.value = true
   try {
-    await createPurchaseContract({
+    const newId = await createPurchaseContract({
       contractNo: form.contractNo, supplierId: form.supplierId, rentContractId: form.rentContractId, totalAmount: form.totalAmount,
       taxRate: form.taxPct / 100, signedDate: form.signedDate || undefined, remark: form.remark || undefined,
       proofFileIds: form.proofFileIds.length ? form.proofFileIds : undefined,
@@ -128,7 +154,8 @@ async function submitCreate() {
         ratio: t.ratioPct != null ? t.ratioPct / 100 : undefined, conditionText: t.conditionText || undefined,
       })),
     })
-    ElMessage.success('采购合同已创建')
+    if (createLinkIds.value.length) await linkPcPurchases(newId, createLinkIds.value)
+    ElMessage.success(createLinkIds.value.length ? `采购合同已创建，并关联了 ${createLinkIds.value.length} 张采购单` : '采购合同已创建')
     createDlg.value = false
     await load()
   } finally { creating.value = false }
@@ -181,7 +208,7 @@ const paying = ref(false)
 const payForm = reactive({ amount: undefined as number | undefined, paidDate: '', bankSerial: '', remark: '', proofFileIds: [] as number[] })
 const payUploader = ref<InstanceType<typeof ProofUploader>>()
 /** 回单照片识别 → 预填金额/日期/流水号；原图同时挂成付款回单（无需再手工上传） */
-async function onReceiptRecognized(d: RecognizedReceipt, files: File[]) {
+async function onReceiptRecognized(d: RecognizedReceipt, files?: File[]) {
   if (d.amount != null) payForm.amount = d.amount
   if (d.paidDate) payForm.paidDate = d.paidDate
   if (d.bankSerial) payForm.bankSerial = d.bankSerial
@@ -191,8 +218,10 @@ async function onReceiptRecognized(d: RecognizedReceipt, files: File[]) {
   if (d.payeeName && sup && !(d.payeeName.includes(sup) || sup.includes(d.payeeName))) {
     ElMessage.warning(`回单收款方「${d.payeeName}」与合同供应商「${sup}」不一致，请核对`)
   }
-  await nextTick()
-  await payUploader.value?.addFiles(files)
+  if (files?.length) {
+    await nextTick()
+    await payUploader.value?.addFiles(files)
+  }
 }
 function openPay() {
   Object.assign(payForm, { amount: undefined, paidDate: new Date().toISOString().slice(0, 10), bankSerial: '', remark: '', proofFileIds: [] })
@@ -228,7 +257,7 @@ const invSaving = ref(false)
 const invForm = reactive({ invoiceNo: '', invoiceType: '专票', issueDate: '', sellerName: '', amountExTax: undefined as number | undefined, taxAmount: undefined as number | undefined, remark: '', proofFileIds: [] as number[] })
 const invUploader = ref<InstanceType<typeof ProofUploader>>()
 /** 发票照片识别 → 预填发票号/类型/日期/金额；原图同时挂成发票原件 */
-async function onInvoiceRecognized(d: RecognizedInvoice, files: File[]) {
+async function onInvoiceRecognized(d: RecognizedInvoice, files?: File[]) {
   if (d.invoiceNo) invForm.invoiceNo = d.invoiceNo
   if (d.invoiceType) invForm.invoiceType = d.invoiceType
   if (d.issueDate) invForm.issueDate = d.issueDate
@@ -242,8 +271,10 @@ async function onInvoiceRecognized(d: RecognizedInvoice, files: File[]) {
   if (d.sellerName && sup && !(d.sellerName.includes(sup) || sup.includes(d.sellerName))) {
     ElMessage.warning(`发票销方「${d.sellerName}」与合同供应商「${sup}」不一致，请核对`)
   }
-  await nextTick()
-  await invUploader.value?.addFiles(files)
+  if (files?.length) {
+    await nextTick()
+    await invUploader.value?.addFiles(files)
+  }
 }
 const invTotal = computed(() => Math.round(((invForm.amountExTax || 0) + (invForm.taxAmount || 0)) * 100) / 100)
 function openInvoice() {
@@ -378,8 +409,10 @@ async function undoInvoice(id: number) {
     <ProofViewer v-model="proofView.show" :biz-type="proofView.type" :biz-id="proofView.id" :title="proofView.title" :can-supplement="false" />
 
     <el-dialog v-model="createDlg" title="新建采购合同" width="780px">
+      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
+        title="图片识别服务未配置：上传文件不会自动识别。请让管理员在部署环境配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL；现在可先手工录入。" />
       <el-alert type="info" :closable="false" show-icon class="tip"
-        title="拍一张合同照片（多页可一次选多张），系统自动识别合同号、供应商、总价、税率和付款节点；识别结果只是预填，请核对后再创建。" />
+        title="在下方「合同原件」上传合同（PDF、扫描件或照片，多页可一次选多张），系统自动识别合同号、供应商、总价、税率和付款节点并填入；识别结果只是预填，请核对后再创建。" />
       <div class="snap-row">
         <SnapRecognize kind="contract" label="拍照识别合同" @recognized="onContractRecognized" />
       </div>
@@ -389,6 +422,7 @@ async function undoInvoice(id: number) {
           <el-select v-model="form.supplierId" filterable style="width: 100%">
             <el-option v-for="s in suppliers" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
+          <div v-if="unmatchedSupplier && !form.supplierId" class="sum bad">合同上的供应商「{{ unmatchedSupplier }}」在供应商库里没有，请先到「供应商」建档后再选择</div>
         </el-form-item>
         <el-form-item label="主合同">
           <el-select v-model="form.rentContractId" filterable clearable placeholder="对应的客户租赁合同（先签约后采购）" style="width: 100%">
@@ -417,8 +451,17 @@ async function undoInvoice(id: number) {
             </div>
           </div>
         </el-form-item>
+        <el-form-item v-if="createCandidates.length" label="关联采购单">
+          <div>
+            <el-checkbox-group v-model="createLinkIds">
+              <div v-for="p in createCandidates" :key="p.id"><el-checkbox :value="p.id">{{ p.no }} · {{ p.status }} · {{ money(p.totalAmount) }}</el-checkbox></div>
+            </el-checkbox-group>
+            <div class="sum">已自动勾选该供应商未关联的采购单，创建后其应付会随合同付款自动冲销；不需要的请取消勾选</div>
+          </div>
+        </el-form-item>
         <el-form-item label="合同原件">
-          <ProofUploader :key="uploaderKey" ref="contractUploader" v-model="form.proofFileIds" />
+          <ProofUploader :key="uploaderKey" ref="contractUploader" v-model="form.proofFileIds"
+            recognize-kind="contract" @recognized="onContractRecognized" />
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
       </el-form>
@@ -442,6 +485,8 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="payDlg" title="登记付款" width="560px">
+      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
+        title="图片识别服务未配置：上传回单不会自动识别，请手工填写（管理员需配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL）。" />
       <div class="snap-row">
         <SnapRecognize kind="receipt" label="拍照识别回单" @recognized="onReceiptRecognized" />
         <span class="sum">拍银行回单，自动填金额/日期/流水号并留存回单</span>
@@ -451,7 +496,7 @@ async function undoInvoice(id: number) {
         <el-form-item label="付款日期" required><el-date-picker v-model="payForm.paidDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="银行流水号"><el-input v-model="payForm.bankSerial" placeholder="回单上的交易流水号，不可重复" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="payForm.remark" /></el-form-item>
-        <el-form-item label="付款回单" required><ProofUploader :key="uploaderKey" ref="payUploader" v-model="payForm.proofFileIds" /></el-form-item>
+        <el-form-item label="付款回单" required><ProofUploader :key="uploaderKey" ref="payUploader" v-model="payForm.proofFileIds" recognize-kind="receipt" @recognized="onReceiptRecognized" /></el-form-item>
       </el-form>
       <el-alert type="info" :closable="false" show-icon title="按节点顺序自动核销：先冲满第一个未付清的节点，余额冲下一个。" />
       <template #footer>
@@ -461,6 +506,8 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="invDlg" title="登记进项发票" width="560px">
+      <el-alert v-if="recognizeOk === false" type="warning" :closable="false" show-icon class="tip"
+        title="图片识别服务未配置：上传发票不会自动识别，请手工填写（管理员需配置 LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL）。" />
       <div class="snap-row">
         <SnapRecognize kind="invoice" label="拍照识别发票" @recognized="onInvoiceRecognized" />
         <span class="sum">拍发票，自动填发票号/日期/金额并留存原件</span>
@@ -473,7 +520,7 @@ async function undoInvoice(id: number) {
         <el-form-item label="不含税金额" required><el-input-number v-model="invForm.amountExTax" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="税额" required><el-input-number v-model="invForm.taxAmount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="价税合计">{{ money(invTotal) }}</el-form-item>
-        <el-form-item label="发票原件"><ProofUploader :key="uploaderKey" ref="invUploader" v-model="invForm.proofFileIds" /></el-form-item>
+        <el-form-item label="发票原件"><ProofUploader :key="uploaderKey" ref="invUploader" v-model="invForm.proofFileIds" recognize-kind="invoice" @recognized="onInvoiceRecognized" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="invForm.remark" /></el-form-item>
       </el-form>
       <template #footer>
