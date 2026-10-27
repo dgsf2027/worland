@@ -98,6 +98,37 @@ class DocRecognizeServiceTest {
     }
 
     @Test
+    void 只有文字没有图片_也能识别() {
+        String reply = "{\"invoiceNo\":\"12345678901234567890\",\"totalAmount\":113}";
+        Map<String, Object> r = configured(reply).recognize("invoice", null, "发票号码 12345678901234567890 价税合计 113.00");
+        assertEquals("12345678901234567890", r.get("invoiceNo"));
+        assertEquals(0, new BigDecimal("113").compareTo((BigDecimal) r.get("totalAmount")));
+    }
+
+    @Test
+    void 文字被带进提示词() {
+        final String[] seen = new String[1];
+        DocRecognizeService s = new DocRecognizeService() {
+            @Override
+            protected String callVision(String useModel, String prompt, List<String> dataUrls) {
+                seen[0] = prompt;
+                return "{}";
+            }
+        };
+        ReflectionTestUtils.setField(s, "baseUrl", "http://localhost");
+        ReflectionTestUtils.setField(s, "apiKey", "k");
+        ReflectionTestUtils.setField(s, "model", "m");
+        s.recognize("receipt", Collections.emptyList(), "转账金额 100.00 流水号 ABC");
+        assertTrue(seen[0].contains("流水号 ABC"));
+    }
+
+    @Test
+    void 图片和文字都没有_报错() {
+        DocRecognizeService s = configured("{}");
+        assertThrows(BizException.class, () -> s.recognize("invoice", Collections.emptyList(), "  "));
+    }
+
+    @Test
     void 模型无有效JSON_报错而不是返回空数据() {
         DocRecognizeService s = configured("无法识别");
         assertThrows(BizException.class, () -> s.recognize("invoice", Collections.singletonList(png())));

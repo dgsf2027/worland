@@ -39,6 +39,7 @@ public class DocRecognizeService {
     public static final String KIND_INVOICE = "invoice";
     static final int MAX_FILES = 6;
     static final long MAX_BYTES = 8L * 1024 * 1024;
+    static final int MAX_TEXT_CHARS = 30000;
     private static final List<String> IMAGE_TYPES = Arrays.asList("image/jpeg", "image/png", "image/webp");
 
     @Value("${llm.base-url:}")
@@ -56,12 +57,31 @@ public class DocRecognizeService {
     private boolean trustAllSsl;
 
     public Map<String, Object> recognize(String kind, List<MultipartFile> files) {
+        return recognize(kind, files, null);
+    }
+
+    /**
+     * @param text 页面从 PDF(有文字层)/txt 里提取的文字,可空;与图片(拍照、扫描版 PDF 的页面图)至少给一项。
+     *             文字内容直接交给模型抽取,比 OCR 更准,且纯文字不需要看图模型。
+     */
+    public Map<String, Object> recognize(String kind, List<MultipartFile> files, String text) {
         String prompt = promptOf(kind);
         if (StrUtil.hasBlank(baseUrl, apiKey) || StrUtil.isBlank(StrUtil.blankToDefault(visionModel, model))) {
             throw new BizException(400, "未配置图片识别服务(LLM_BASE_URL / LLM_API_KEY / LLM_VISION_MODEL),请先手工录入");
         }
-        if (files == null || files.isEmpty()) {
-            throw new BizException(400, "请先拍照或选择图片");
+        boolean hasText = StrUtil.isNotBlank(text);
+        if ((files == null || files.isEmpty()) && !hasText) {
+            throw new BizException(400, "请先拍照、选择图片，或选择带文字的 PDF/文本文件");
+        }
+        if (hasText) {
+            String t = text.trim();
+            if (t.length() > MAX_TEXT_CHARS) {
+                t = t.substring(0, MAX_TEXT_CHARS);
+            }
+            prompt = prompt + "\n\n以下是从文件中提取的文字内容(可能带有版面错位，按语义理解)：\n" + t;
+        }
+        if (files == null) {
+            files = new ArrayList<>();
         }
         if (files.size() > MAX_FILES) {
             throw new BizException(400, "一次最多识别 " + MAX_FILES + " 张图片");

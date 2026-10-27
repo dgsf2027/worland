@@ -85,8 +85,9 @@ public class PurchaseContractController {
     @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购单据图片识别", targetType = "purchase_contract")
     @PostMapping(value = "/recognize", consumes = "multipart/form-data")
     public R<Map<String, Object>> recognize(@RequestParam String kind,
-                                            @RequestParam("files") List<MultipartFile> files) {
-        return R.ok(recognizeService.recognize(kind, files));
+                                            @RequestParam(value = "files", required = false) List<MultipartFile> files,
+                                            @RequestParam(value = "text", required = false) String text) {
+        return R.ok(recognizeService.recognize(kind, files, text));
     }
 
     @ApiOperation("登记进项发票")
