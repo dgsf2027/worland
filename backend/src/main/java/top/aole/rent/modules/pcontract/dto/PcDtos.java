@@ -32,6 +32,8 @@ public final class PcDtos {
         private LocalDate signedDate;
         private String remark;
         private List<TermInput> terms;
+        /** 合同原件(照片/PDF)的文件 id,可选;经回单上传接口先上传 */
+        private List<Long> proofFileIds;
     }
 
     @Data
@@ -64,6 +66,8 @@ public final class PcDtos {
         private BigDecimal totalAmount;
         private BigDecimal taxRate;
         private String remark;
+        /** 发票原件(照片/PDF)的文件 id,可选 */
+        private List<Long> proofFileIds;
     }
 
     @Data
@@ -102,6 +106,13 @@ public final class PcDtos {
         private Long supplierId;
         private String supplierName;
         private Long rentContractId;
+        /** 主合同(客户租赁合同)信息 */
+        private String rentContractNo;
+        private String customerName;
+        private Integer rentTermMonths;
+        private BigDecimal rentMonthRent;
+        private LocalDate rentStartDate;
+        private String rentStatus;
         private BigDecimal totalAmount;
         private BigDecimal taxRate;
         private LocalDate signedDate;
@@ -141,6 +152,10 @@ public final class PcDtos {
     @Data
     public static class Detail {
         private List<LinkedPurchase> purchases;
+        /** 合同原件张数 */
+        private Integer contractProofCount;
+        /** 发票 id → 原件张数 */
+        private java.util.Map<Long, Integer> invoiceProofCounts;
         private ContractView contract;
         private List<TermView> terms;
         private List<PaymentView> payments;

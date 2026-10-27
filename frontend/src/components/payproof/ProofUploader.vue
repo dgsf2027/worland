@@ -10,9 +10,8 @@ const files = ref<UploadedProof[]>([])
 const uploading = ref(false)
 const input = ref<HTMLInputElement>()
 
-async function onPick(e: Event) {
-  const picked = Array.from((e.target as HTMLInputElement).files || [])
-  ;(e.target as HTMLInputElement).value = ''
+/** 上传一批文件并挂到本次登记上(选文件、拍照识别后都走这里) */
+async function addFiles(picked: File[]) {
   for (const f of picked) {
     const err = checkUploadFile(f, PROOF_EXTS, PROOF_MAX_MB)
     if (err) { ElMessage.warning(err); return }
@@ -25,6 +24,17 @@ async function onPick(e: Event) {
     uploading.value = false
   }
 }
+async function onPick(e: Event) {
+  const picked = Array.from((e.target as HTMLInputElement).files || [])
+  ;(e.target as HTMLInputElement).value = ''
+  await addFiles(picked)
+}
+/** 清空已选(弹窗重开时用) */
+function reset() {
+  files.value = []
+  fileIds.value = []
+}
+defineExpose({ addFiles, reset })
 function remove(i: number) {
   files.value.splice(i, 1)
   fileIds.value = files.value.map((f) => f.id)

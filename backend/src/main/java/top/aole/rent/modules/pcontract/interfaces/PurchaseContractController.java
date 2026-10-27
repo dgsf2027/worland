@@ -12,7 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 import top.aole.rent.common.auth.RequireRole;
 import top.aole.rent.common.result.R;
 import top.aole.rent.modules.pcontract.dto.PcDtos;
+import top.aole.rent.modules.pcontract.service.DocRecognizeService;
 import top.aole.rent.modules.pcontract.service.PurchaseContractService;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
+import java.util.Map;
 
 import java.util.List;
 
@@ -23,6 +27,7 @@ import java.util.List;
 public class PurchaseContractController {
 
     private final PurchaseContractService service;
+    private final DocRecognizeService recognizeService;
 
     @ApiOperation("采购合同列表(含合同额/已付/已收票汇总)")
     @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购合同查看", targetType = "purchase_contract")
@@ -74,6 +79,14 @@ public class PurchaseContractController {
     public R<Void> unlinkPurchase(@PathVariable Long id, @PathVariable Long purchaseInId) {
         service.unlinkPurchase(id, purchaseInId);
         return R.ok();
+    }
+
+    @ApiOperation("拍照识别:kind=contract/receipt/invoice,返回可预填的字段(不入库)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购单据图片识别", targetType = "purchase_contract")
+    @PostMapping(value = "/recognize", consumes = "multipart/form-data")
+    public R<Map<String, Object>> recognize(@RequestParam String kind,
+                                            @RequestParam("files") List<MultipartFile> files) {
+        return R.ok(recognizeService.recognize(kind, files));
     }
 
     @ApiOperation("登记进项发票")

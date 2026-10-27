@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchSupplierPool } from '@/api/supplier'
 import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
+import { fetchContracts, type ContractListItem } from '@/api/contract'
 import {
   addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
   linkPcPurchases, payPurchaseContract, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
-  type PcContract, type PcDetail,
+  type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice, type RecognizedReceipt,
 } from '@/api/purchaseContract'
 import ProofUploader from '@/components/payproof/ProofUploader.vue'
 import ProofViewer from '@/components/payproof/ProofViewer.vue'
+import SnapRecognize from '@/components/payproof/SnapRecognize.vue'
 
 /** 采购合同:合同(含付款节点)→ 付款(银行流水+回单,可跨节点)→ 进项发票,三者互相对账。 */
 const list = ref<PcContract[]>([])
 const loading = ref(false)
 const suppliers = ref<{ id: number; name: string }[]>([])
+const rentContracts = ref<ContractListItem[]>([])
 
 function money(v?: number) {
   return v == null ? '-' : '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -28,29 +31,102 @@ async function load() {
 onMounted(async () => {
   await load()
   suppliers.value = (await fetchSupplierPool({ page: 1, size: 500 })).records.map((x) => ({ id: x.id, name: x.name }))
+  rentContracts.value = (await fetchContracts({ page: 1, size: 500 })).records
 })
 
 // ---- 新建合同 ----
+interface TermRow { stageName: string; ratioPct?: number; amount?: number; manual: boolean; conditionText: string }
 const createDlg = ref(false)
 const creating = ref(false)
+const uploaderKey = ref(0)
+const contractUploader = ref<InstanceType<typeof ProofUploader>>()
 const form = reactive({
-  contractNo: '', supplierId: undefined as number | undefined, totalAmount: undefined as number | undefined,
-  taxPct: 13, signedDate: '', remark: '',
-  terms: [{ stageName: '首付', amount: undefined as number | undefined, conditionText: '' }],
+  contractNo: '', supplierId: undefined as number | undefined, rentContractId: undefined as number | undefined,
+  totalAmount: undefined as number | undefined,
+  taxPct: 13, signedDate: '', remark: '', proofFileIds: [] as number[],
+  terms: [] as TermRow[],
 })
-const termSum = computed(() => form.terms.reduce((s, t) => s + (t.amount || 0), 0))
+const round2 = (v: number) => Math.round(v * 100) / 100
+const newTerm = (name = ''): TermRow => ({ stageName: name, ratioPct: undefined, amount: undefined, manual: false, conditionText: '' })
+
+/** 按比例自动算金额(未手工改过金额的节点) */
+function recalcTerm(t: TermRow) {
+  if (!t.manual && form.totalAmount != null && t.ratioPct != null) t.amount = round2(form.totalAmount * t.ratioPct / 100)
+}
+function onRatioInput(t: TermRow) { t.manual = false; recalcTerm(t) }
+/** 点「改金额」进入手工编辑；点「按比例」回到自动算 */
+function toggleManual(t: TermRow) {
+  t.manual = !t.manual
+  if (!t.manual) recalcTerm(t)
+}
+function onAmountInput(t: TermRow) {
+  if (form.totalAmount && t.amount != null) t.ratioPct = Math.round(t.amount / form.totalAmount * 1000000) / 10000
+}
+watch(() => form.totalAmount, () => form.terms.forEach(recalcTerm))
+
+const termSum = computed(() => round2(form.terms.reduce((s, t) => s + (t.amount || 0), 0)))
+const ratioSum = computed(() => Math.round(form.terms.reduce((s, t) => s + (t.ratioPct || 0), 0) * 10000) / 10000)
+const termsOk = computed(() => form.totalAmount != null && Math.abs(termSum.value - form.totalAmount) <= 0.01)
+
 function openCreate() {
-  Object.assign(form, { contractNo: '', supplierId: undefined, totalAmount: undefined, taxPct: 13, signedDate: '', remark: '',
-    terms: [{ stageName: '首付', amount: undefined, conditionText: '' }] })
+  Object.assign(form, { contractNo: '', supplierId: undefined, rentContractId: undefined, totalAmount: undefined,
+    taxPct: 13, signedDate: '', remark: '', proofFileIds: [],
+    terms: [Object.assign(newTerm('首付款'), { ratioPct: 30 }), Object.assign(newTerm('验收款'), { ratioPct: 60 }), Object.assign(newTerm('尾款'), { ratioPct: 10 })] })
+  uploaderKey.value++
   createDlg.value = true
+}
+function fillEvenly() {
+  // 把未锁定节点的比例补齐到 100%：差额加到最后一个节点
+  const rest = Math.round((100 - ratioSum.value) * 10000) / 10000
+  const last = form.terms[form.terms.length - 1]
+  if (last && rest !== 0) { last.ratioPct = Math.round(((last.ratioPct || 0) + rest) * 10000) / 10000; onRatioInput(last) }
+}
+
+/** 合同照片识别 → 预填表单；原图同时挂成合同原件 */
+async function onContractRecognized(d: RecognizedContract, files: File[]) {
+  if (d.contractNo) form.contractNo = d.contractNo
+  if (d.supplierName) {
+    const hit = suppliers.value.find((x) => x.name === d.supplierName)
+      || suppliers.value.find((x) => x.name.includes(d.supplierName!) || d.supplierName!.includes(x.name))
+    if (hit) form.supplierId = hit.id
+    else ElMessage.warning(`供应商库里没有匹配「${d.supplierName}」，请手动选择（或先到供应商模块建档）`)
+  }
+  if (d.mainContractNo) {
+    const hit = rentContracts.value.find((x) => x.no === d.mainContractNo)
+    if (hit) form.rentContractId = hit.id
+  }
+  if (d.signedDate) form.signedDate = d.signedDate
+  if (d.taxRate != null) form.taxPct = Math.round(d.taxRate * 10000) / 100
+  if (d.totalAmount != null) form.totalAmount = d.totalAmount
+  if (d.terms?.length) {
+    form.terms = d.terms.map((x) => {
+      const t = newTerm(x.stageName || '')
+      t.conditionText = x.conditionText || ''
+      if (x.ratio != null) t.ratioPct = Math.round(x.ratio * 1000000) / 10000
+      if (x.amount != null) {
+        t.amount = x.amount
+        const calc = form.totalAmount != null && t.ratioPct != null ? round2(form.totalAmount * t.ratioPct / 100) : null
+        // 识别出的金额与按比例算的不一致（合同里写的是定额）→ 保留合同金额，标记为手工
+        t.manual = calc == null || Math.abs(calc - x.amount) > 0.01
+        if (x.ratio == null) onAmountInput(t)
+      } else recalcTerm(t)
+      return t
+    })
+  }
+  await nextTick()
+  await contractUploader.value?.addFiles(files)
 }
 async function submitCreate() {
   creating.value = true
   try {
     await createPurchaseContract({
-      contractNo: form.contractNo, supplierId: form.supplierId, totalAmount: form.totalAmount,
+      contractNo: form.contractNo, supplierId: form.supplierId, rentContractId: form.rentContractId, totalAmount: form.totalAmount,
       taxRate: form.taxPct / 100, signedDate: form.signedDate || undefined, remark: form.remark || undefined,
-      terms: form.terms.map((t) => ({ stageName: t.stageName, amount: t.amount, conditionText: t.conditionText || undefined })),
+      proofFileIds: form.proofFileIds.length ? form.proofFileIds : undefined,
+      terms: form.terms.map((t) => ({
+        stageName: t.stageName, amount: t.amount,
+        ratio: t.ratioPct != null ? t.ratioPct / 100 : undefined, conditionText: t.conditionText || undefined,
+      })),
     })
     ElMessage.success('采购合同已创建')
     createDlg.value = false
@@ -103,8 +179,24 @@ async function undoLink(id: number) {
 const payDlg = ref(false)
 const paying = ref(false)
 const payForm = reactive({ amount: undefined as number | undefined, paidDate: '', bankSerial: '', remark: '', proofFileIds: [] as number[] })
+const payUploader = ref<InstanceType<typeof ProofUploader>>()
+/** 回单照片识别 → 预填金额/日期/流水号；原图同时挂成付款回单（无需再手工上传） */
+async function onReceiptRecognized(d: RecognizedReceipt, files: File[]) {
+  if (d.amount != null) payForm.amount = d.amount
+  if (d.paidDate) payForm.paidDate = d.paidDate
+  if (d.bankSerial) payForm.bankSerial = d.bankSerial
+  const who = [d.payeeName ? `收款方 ${d.payeeName}` : '', d.remark || ''].filter(Boolean).join(' · ')
+  if (who && !payForm.remark) payForm.remark = who
+  const sup = detail.value?.contract.supplierName
+  if (d.payeeName && sup && !(d.payeeName.includes(sup) || sup.includes(d.payeeName))) {
+    ElMessage.warning(`回单收款方「${d.payeeName}」与合同供应商「${sup}」不一致，请核对`)
+  }
+  await nextTick()
+  await payUploader.value?.addFiles(files)
+}
 function openPay() {
   Object.assign(payForm, { amount: undefined, paidDate: new Date().toISOString().slice(0, 10), bankSerial: '', remark: '', proofFileIds: [] })
+  uploaderKey.value++
   payDlg.value = true
 }
 async function submitPay() {
@@ -125,16 +217,38 @@ async function undoPay(id: number) {
   ElMessage.success('已撤销')
   await reloadDetail()
 }
-const proofView = reactive({ show: false, id: 0, title: '' })
-function viewProof(id: number) { Object.assign(proofView, { show: true, id, title: `付款回单 #${id}` }) }
+const proofView = reactive({ show: false, id: 0, title: '', type: 'supplier_payment' as 'supplier_payment' | 'pc_contract' | 'pc_invoice' })
+function viewProof(id: number) { Object.assign(proofView, { show: true, id, type: 'supplier_payment', title: `付款回单 #${id}` }) }
+function viewContractFiles() { Object.assign(proofView, { show: true, id: detail.value!.contract.id, type: 'pc_contract', title: '合同原件' }) }
+function viewInvoiceFiles(id: number, no: string) { Object.assign(proofView, { show: true, id, type: 'pc_invoice', title: `发票原件 ${no}` }) }
 
 // ---- 登记收票 ----
 const invDlg = ref(false)
 const invSaving = ref(false)
-const invForm = reactive({ invoiceNo: '', invoiceType: '专票', issueDate: '', sellerName: '', amountExTax: undefined as number | undefined, taxAmount: undefined as number | undefined, remark: '' })
+const invForm = reactive({ invoiceNo: '', invoiceType: '专票', issueDate: '', sellerName: '', amountExTax: undefined as number | undefined, taxAmount: undefined as number | undefined, remark: '', proofFileIds: [] as number[] })
+const invUploader = ref<InstanceType<typeof ProofUploader>>()
+/** 发票照片识别 → 预填发票号/类型/日期/金额；原图同时挂成发票原件 */
+async function onInvoiceRecognized(d: RecognizedInvoice, files: File[]) {
+  if (d.invoiceNo) invForm.invoiceNo = d.invoiceNo
+  if (d.invoiceType) invForm.invoiceType = d.invoiceType
+  if (d.issueDate) invForm.issueDate = d.issueDate
+  if (d.sellerName) invForm.sellerName = d.sellerName
+  if (d.amountExTax != null) invForm.amountExTax = d.amountExTax
+  if (d.taxAmount != null) invForm.taxAmount = d.taxAmount
+  if (d.totalAmount != null && Math.abs(invTotal.value - d.totalAmount) > 0.01) {
+    ElMessage.warning(`识别的价税合计 ${d.totalAmount} 与不含税+税额 ${invTotal.value} 不一致，请对照发票核对`)
+  }
+  const sup = detail.value?.contract.supplierName
+  if (d.sellerName && sup && !(d.sellerName.includes(sup) || sup.includes(d.sellerName))) {
+    ElMessage.warning(`发票销方「${d.sellerName}」与合同供应商「${sup}」不一致，请核对`)
+  }
+  await nextTick()
+  await invUploader.value?.addFiles(files)
+}
 const invTotal = computed(() => Math.round(((invForm.amountExTax || 0) + (invForm.taxAmount || 0)) * 100) / 100)
 function openInvoice() {
-  Object.assign(invForm, { invoiceNo: '', invoiceType: '专票', issueDate: '', sellerName: detail.value?.contract.supplierName || '', amountExTax: undefined, taxAmount: undefined, remark: '' })
+  Object.assign(invForm, { invoiceNo: '', invoiceType: '专票', issueDate: '', sellerName: detail.value?.contract.supplierName || '', amountExTax: undefined, taxAmount: undefined, remark: '', proofFileIds: [] })
+  uploaderKey.value++
   invDlg.value = true
 }
 async function submitInvoice() {
@@ -144,6 +258,7 @@ async function submitInvoice() {
       invoiceNo: invForm.invoiceNo, invoiceType: invForm.invoiceType, issueDate: invForm.issueDate,
       sellerName: invForm.sellerName || undefined, amountExTax: invForm.amountExTax, taxAmount: invForm.taxAmount,
       totalAmount: invTotal.value, remark: invForm.remark || undefined,
+      proofFileIds: invForm.proofFileIds.length ? invForm.proofFileIds : undefined,
     })
     ElMessage.success('进项发票已登记')
     invDlg.value = false
@@ -190,7 +305,21 @@ async function undoInvoice(id: number) {
           <el-descriptions-item label="已付">{{ money(detail.contract.summary.paid) }}</el-descriptions-item>
           <el-descriptions-item label="已收票">{{ money(detail.contract.summary.invoiced) }}</el-descriptions-item>
           <el-descriptions-item label="已付未收票">{{ money(detail.contract.summary.paidNotInvoiced) }}</el-descriptions-item>
+          <el-descriptions-item label="合同原件">
+            <el-button link type="primary" size="small" @click="viewContractFiles">查看原件（{{ detail.contractProofCount }}）</el-button>
+          </el-descriptions-item>
         </el-descriptions>
+
+        <h4>主合同（客户租赁合同）</h4>
+        <el-descriptions v-if="detail.contract.rentContractNo" :column="3" border size="small">
+          <el-descriptions-item label="主合同号">{{ detail.contract.rentContractNo }}</el-descriptions-item>
+          <el-descriptions-item label="客户">{{ detail.contract.customerName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ detail.contract.rentStatus || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="租期">{{ detail.contract.rentTermMonths ?? '-' }} 个月</el-descriptions-item>
+          <el-descriptions-item label="月租">{{ money(detail.contract.rentMonthRent) }}</el-descriptions-item>
+          <el-descriptions-item label="起租日">{{ detail.contract.rentStartDate || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <el-empty v-else :image-size="40" description="未关联主合同（新建采购合同时可选择）" />
 
         <div class="sec"><h4>关联采购单</h4><el-button size="small" @click="openLink">关联采购单</el-button></div>
         <el-table :data="detail.purchases" size="small" border empty-text="尚未关联采购入库单">
@@ -236,16 +365,24 @@ async function undoInvoice(id: number) {
           <el-table-column label="税额" align="right" width="110"><template #default="{ row }">{{ money(row.taxAmount) }}</template></el-table-column>
           <el-table-column label="价税合计" align="right" width="120"><template #default="{ row }">{{ money(row.totalAmount) }}</template></el-table-column>
           <el-table-column prop="status" label="状态" width="70" />
-          <el-table-column label="操作" width="70">
-            <template #default="{ row }"><el-button v-if="row.status === '有效'" link type="danger" size="small" @click="undoInvoice(row.id)">作废</el-button></template>
+          <el-table-column label="操作" width="130">
+            <template #default="{ row }">
+              <el-button link size="small" @click="viewInvoiceFiles(row.id, row.invoiceNo)">原件({{ detail.invoiceProofCounts?.[row.id] || 0 }})</el-button>
+              <el-button v-if="row.status === '有效'" link type="danger" size="small" @click="undoInvoice(row.id)">作废</el-button>
+            </template>
           </el-table-column>
         </el-table>
       </template>
     </el-drawer>
 
-    <ProofViewer v-model="proofView.show" biz-type="supplier_payment" :biz-id="proofView.id" :title="proofView.title" :can-supplement="false" />
+    <ProofViewer v-model="proofView.show" :biz-type="proofView.type" :biz-id="proofView.id" :title="proofView.title" :can-supplement="false" />
 
-    <el-dialog v-model="createDlg" title="新建采购合同" width="640px">
+    <el-dialog v-model="createDlg" title="新建采购合同" width="780px">
+      <el-alert type="info" :closable="false" show-icon class="tip"
+        title="拍一张合同照片（多页可一次选多张），系统自动识别合同号、供应商、总价、税率和付款节点；识别结果只是预填，请核对后再创建。" />
+      <div class="snap-row">
+        <SnapRecognize kind="contract" label="拍照识别合同" @recognized="onContractRecognized" />
+      </div>
       <el-form :model="form" label-width="100px">
         <el-form-item label="合同号" required><el-input v-model="form.contractNo" /></el-form-item>
         <el-form-item label="供应商" required>
@@ -253,26 +390,41 @@ async function undoInvoice(id: number) {
             <el-option v-for="s in suppliers" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="主合同">
+          <el-select v-model="form.rentContractId" filterable clearable placeholder="对应的客户租赁合同（先签约后采购）" style="width: 100%">
+            <el-option v-for="c in rentContracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.termMonths}个月`" :value="c.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="含税总价" required><el-input-number v-model="form.totalAmount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="税率(%)"><el-input-number v-model="form.taxPct" :min="0" :max="100" :controls="false" /></el-form-item>
         <el-form-item label="签订日期"><el-date-picker v-model="form.signedDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="付款节点" required>
           <div class="terms">
+            <div class="term-row term-head"><span style="width:110px">节点名</span><span style="width:100px">合同比例(%)</span><span style="width:150px">金额(元)</span><span style="width:70px"></span><span>触发条件</span></div>
             <div v-for="(t, i) in form.terms" :key="i" class="term-row">
               <el-input v-model="t.stageName" placeholder="节点名" style="width: 110px" />
-              <el-input-number v-model="t.amount" :min="0" :precision="2" :controls="false" placeholder="金额" style="width: 150px" />
-              <el-input v-model="t.conditionText" placeholder="触发条件(可选)" style="width: 170px" />
+              <el-input-number v-model="t.ratioPct" :min="0" :max="100" :precision="2" :controls="false" placeholder="比例" style="width: 100px" @change="onRatioInput(t)" />
+              <el-input-number v-model="t.amount" :min="0" :precision="2" :controls="false" placeholder="金额" style="width: 150px"
+                :disabled="!t.manual" @change="onAmountInput(t)" />
+              <el-button size="small" :type="t.manual ? 'warning' : 'default'" style="width: 70px" @click="toggleManual(t)">{{ t.manual ? '按比例' : '改金额' }}</el-button>
+              <el-input v-model="t.conditionText" placeholder="触发条件(可选)" style="width: 150px" />
               <el-button link type="danger" :disabled="form.terms.length === 1" @click="form.terms.splice(i, 1)">删除</el-button>
             </div>
-            <el-button size="small" @click="form.terms.push({ stageName: '', amount: undefined, conditionText: '' })">＋ 加节点</el-button>
-            <span class="sum" :class="{ bad: form.totalAmount != null && Math.abs(termSum - form.totalAmount) > 0.01 }">节点合计 {{ money(termSum) }}</span>
+            <div class="term-row">
+              <el-button size="small" @click="form.terms.push(newTerm())">＋ 加节点</el-button>
+              <el-button size="small" :disabled="ratioSum === 100" @click="fillEvenly">比例补齐到100%</el-button>
+              <span class="sum" :class="{ bad: !termsOk }">比例合计 {{ ratioSum }}% · 金额合计 {{ money(termSum) }}{{ termsOk ? '' : '（须等于合同总价）' }}</span>
+            </div>
           </div>
+        </el-form-item>
+        <el-form-item label="合同原件">
+          <ProofUploader :key="uploaderKey" ref="contractUploader" v-model="form.proofFileIds" />
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createDlg = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+        <el-button type="primary" :loading="creating" :disabled="!termsOk" @click="submitCreate">创建</el-button>
       </template>
     </el-dialog>
 
@@ -290,12 +442,16 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="payDlg" title="登记付款" width="560px">
+      <div class="snap-row">
+        <SnapRecognize kind="receipt" label="拍照识别回单" @recognized="onReceiptRecognized" />
+        <span class="sum">拍银行回单，自动填金额/日期/流水号并留存回单</span>
+      </div>
       <el-form :model="payForm" label-width="100px">
         <el-form-item label="付款金额" required><el-input-number v-model="payForm.amount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="付款日期" required><el-date-picker v-model="payForm.paidDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="银行流水号"><el-input v-model="payForm.bankSerial" placeholder="回单上的交易流水号，不可重复" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="payForm.remark" /></el-form-item>
-        <el-form-item label="付款回单" required><ProofUploader v-model="payForm.proofFileIds" /></el-form-item>
+        <el-form-item label="付款回单" required><ProofUploader :key="uploaderKey" ref="payUploader" v-model="payForm.proofFileIds" /></el-form-item>
       </el-form>
       <el-alert type="info" :closable="false" show-icon title="按节点顺序自动核销：先冲满第一个未付清的节点，余额冲下一个。" />
       <template #footer>
@@ -305,6 +461,10 @@ async function undoInvoice(id: number) {
     </el-dialog>
 
     <el-dialog v-model="invDlg" title="登记进项发票" width="560px">
+      <div class="snap-row">
+        <SnapRecognize kind="invoice" label="拍照识别发票" @recognized="onInvoiceRecognized" />
+        <span class="sum">拍发票，自动填发票号/日期/金额并留存原件</span>
+      </div>
       <el-form :model="invForm" label-width="100px">
         <el-form-item label="发票号码" required><el-input v-model="invForm.invoiceNo" /></el-form-item>
         <el-form-item label="类型"><el-radio-group v-model="invForm.invoiceType"><el-radio value="专票">专票</el-radio><el-radio value="普通">普通</el-radio></el-radio-group></el-form-item>
@@ -313,6 +473,7 @@ async function undoInvoice(id: number) {
         <el-form-item label="不含税金额" required><el-input-number v-model="invForm.amountExTax" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="税额" required><el-input-number v-model="invForm.taxAmount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
         <el-form-item label="价税合计">{{ money(invTotal) }}</el-form-item>
+        <el-form-item label="发票原件"><ProofUploader :key="uploaderKey" ref="invUploader" v-model="invForm.proofFileIds" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="invForm.remark" /></el-form-item>
       </el-form>
       <template #footer>
@@ -332,7 +493,9 @@ async function undoInvoice(id: number) {
 h4 { margin: 16px 0 8px; }
 .warn { color: #e6a23c; font-weight: 600; }
 .terms { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-.term-row { display: flex; gap: 6px; align-items: center; }
+.term-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.term-head { font-size: 12px; color: #909399; }
+.snap-row { display: flex; gap: 10px; align-items: center; margin: 4px 0 12px; }
 .sum { font-size: 12px; color: #909399; }
 .sum.bad { color: #f56c6c; }
 :deep(.el-table__row) { cursor: pointer; }

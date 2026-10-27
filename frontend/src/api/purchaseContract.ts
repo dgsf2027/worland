@@ -16,6 +16,13 @@ export interface PcContract {
   supplierId: number
   supplierName?: string
   rentContractId?: number
+  /** 主合同(客户租赁合同)信息 */
+  rentContractNo?: string
+  customerName?: string
+  rentTermMonths?: number
+  rentMonthRent?: number
+  rentStartDate?: string
+  rentStatus?: string
   totalAmount: number
   taxRate: number
   signedDate?: string
@@ -67,10 +74,50 @@ export interface PcLinkedPurchase {
 }
 export interface PcDetail {
   contract: PcContract
+  /** 合同原件张数、各发票原件张数 */
+  contractProofCount: number
+  invoiceProofCounts: Record<number, number>
   purchases: PcLinkedPurchase[]
   terms: PcTerm[]
   payments: PcPayment[]
   invoices: PcInvoice[]
+}
+
+/** 拍照识别结果(只用于预填,字段缺失为 null) */
+export type RecognizeKind = 'contract' | 'receipt' | 'invoice'
+export interface RecognizedContract {
+  contractNo?: string | null
+  supplierName?: string | null
+  mainContractNo?: string | null
+  signedDate?: string | null
+  totalAmount?: number | null
+  taxRate?: number | null
+  terms: { stageName?: string | null; ratio?: number | null; amount?: number | null; conditionText?: string | null }[]
+}
+export interface RecognizedReceipt {
+  amount?: number | null
+  paidDate?: string | null
+  bankSerial?: string | null
+  payerName?: string | null
+  payeeName?: string | null
+  remark?: string | null
+}
+export interface RecognizedInvoice {
+  invoiceNo?: string | null
+  invoiceType?: string | null
+  issueDate?: string | null
+  sellerName?: string | null
+  buyerName?: string | null
+  amountExTax?: number | null
+  taxAmount?: number | null
+  totalAmount?: number | null
+  taxRate?: number | null
+}
+export function recognizePcDoc(kind: RecognizeKind, files: File[]): Promise<any> {
+  const fd = new FormData()
+  fd.append('kind', kind)
+  files.forEach((f) => fd.append('files', f))
+  return request.post('/rent/purchase-contracts/recognize', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
 }
 
 export function fetchPurchaseContracts(): Promise<PcContract[]> {

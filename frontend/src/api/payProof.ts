@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 
 /** 资金回单(10-07 纪要):登记付款/核销/退款/还款/赔偿收取前必须先上传 */
-export type ProofBizType = 'payable' | 'rent_bill' | 'inv_damage' | 'supplier_payment'
+export type ProofBizType = 'payable' | 'rent_bill' | 'inv_damage' | 'supplier_payment' | 'pc_contract' | 'pc_invoice'
 export const PROOF_EXTS = ['jpg', 'jpeg', 'png', 'pdf']
 export const PROOF_MAX_MB = 10
 

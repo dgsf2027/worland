@@ -58,7 +58,8 @@ class PurchaseContractFlowTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
                     classes = {PurchaseContractService.class, top.aole.rent.modules.finance.service.VoucherService.class}))
     @MapperScan({"top.aole.rent.modules.pcontract.mapper", "top.aole.rent.modules.finance.mapper",
-            "top.aole.rent.modules.purchase.mapper",
+            "top.aole.rent.modules.purchase.mapper", "top.aole.rent.modules.contract.mapper",
+            "top.aole.rent.modules.customer.mapper",
             "top.aole.rent.modules.billing.mapper", "top.aole.rent.common.audit"})
     static class Config {
         @Bean

@@ -55,6 +55,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
       LLM_TRUST_ALL_SSL: ${LLM_TRUST_ALL_SSL:-true}
     volumes:

@@ -29,6 +29,10 @@ import top.aole.rent.modules.purchase.mapper.PayableMapper;
 import top.aole.rent.modules.purchase.mapper.PurchaseInMapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import top.aole.rent.modules.supplier.domain.Supplier;
+import top.aole.rent.modules.contract.domain.Contract;
+import top.aole.rent.modules.contract.mapper.ContractMapper;
+import top.aole.rent.modules.customer.domain.Customer;
+import top.aole.rent.modules.customer.mapper.CustomerMapper;
 import top.aole.rent.modules.supplier.mapper.SupplierMapper;
 
 import java.math.BigDecimal;
@@ -53,6 +57,8 @@ import java.util.stream.Collectors;
 public class PurchaseContractService {
 
     public static final String PAYMENT_BIZ = "supplier_payment";
+    public static final String CONTRACT_BIZ = "pc_contract";
+    public static final String INVOICE_BIZ = "pc_invoice";
     private static final BigDecimal TOL = new BigDecimal("0.01");
 
     private final PurchaseContractMapper contractMapper;
@@ -67,6 +73,8 @@ public class PurchaseContractService {
     private final PurchaseInMapper purchaseInMapper;
     private final PayableMapper payableMapper;
     private final SupplierPaymentPayableMapper settleMapper;
+    private final ContractMapper rentContractMapper;
+    private final CustomerMapper customerMapper;
 
     // ---------------- 合同 ----------------
 
@@ -136,6 +144,9 @@ public class PurchaseContractService {
             termMapper.insert(term);
             i++;
         }
+        if (req.getProofFileIds() != null && !req.getProofFileIds().isEmpty()) {
+            payProofService.bind(CONTRACT_BIZ, Collections.singletonList(c.getId()), "合同", req.getProofFileIds());
+        }
         auditLogService.record("采购合同创建", "purchase_contract", c.getId(), AuditLogService.EXECUTED,
                 c.getContractNo() + " 含税 " + total + " · " + req.getTerms().size() + " 个付款节点");
         return c.getId();
@@ -200,9 +211,12 @@ public class PurchaseContractService {
         }
         d.setPayments(pvs);
         d.setPurchases(linkedPurchases(id));
+        d.setContractProofCount(payProofService.countMap(CONTRACT_BIZ, Collections.singletonList(id)).getOrDefault(id, 0));
         d.setInvoices(invoiceMapper.selectList(new LambdaQueryWrapper<PurchaseInvoice>()
                 .eq(PurchaseInvoice::getPcId, id)
                 .orderByAsc(PurchaseInvoice::getIssueDate).orderByAsc(PurchaseInvoice::getId)));
+        d.setInvoiceProofCounts(payProofService.countMap(INVOICE_BIZ,
+                d.getInvoices().stream().map(PurchaseInvoice::getId).collect(Collectors.toList())));
         return d;
     }
 
@@ -352,6 +366,9 @@ public class PurchaseContractService {
         inv.setRemark(req.getRemark());
         inv.setCreateByName(u.getUserName());
         invoiceMapper.insert(inv);
+        if (req.getProofFileIds() != null && !req.getProofFileIds().isEmpty()) {
+            payProofService.bind(INVOICE_BIZ, Collections.singletonList(inv.getId()), "发票", req.getProofFileIds());
+        }
         auditLogService.record("采购合同收票", "purchase_contract", pcId, AuditLogService.EXECUTED,
                 c.getContractNo() + " 发票 " + inv.getInvoiceNo() + " 价税合计 " + total);
         return inv.getId();
@@ -561,6 +578,18 @@ public class PurchaseContractService {
         Supplier s = supplierMapper.selectById(c.getSupplierId());
         v.setSupplierName(s == null ? null : s.getName());
         v.setRentContractId(c.getRentContractId());
+        if (c.getRentContractId() != null) {
+            Contract rc = rentContractMapper.selectById(c.getRentContractId());
+            if (rc != null) {
+                v.setRentContractNo(rc.getNo());
+                Customer cu = rc.getCustomerId() == null ? null : customerMapper.selectById(rc.getCustomerId());
+                v.setCustomerName(cu == null ? null : cu.getName());
+                v.setRentTermMonths(rc.getTermMonths());
+                v.setRentMonthRent(rc.getMonthRent());
+                v.setRentStartDate(rc.getStartDate());
+                v.setRentStatus(rc.getStatus());
+            }
+        }
         v.setTotalAmount(c.getTotalAmount());
         v.setTaxRate(c.getTaxRate());
         v.setSignedDate(c.getSignedDate());
