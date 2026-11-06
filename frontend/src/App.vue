@@ -9,18 +9,22 @@ watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 import { refreshSession } from '@/api/auth'
 import { clearSession, sessionDisplayName, sessionRole } from '@/utils/session'
 import BrandLockup from '@/components/BrandLockup.vue'
+import { startHeartbeat } from '@/utils/heartbeat'
 const displayName = sessionDisplayName
 const current = sessionRole
 async function syncProfile() {
   if (route.meta.public) return
   try {
-    await refreshSession()
+    const profile = await refreshSession()
+    // 平台应用日报的「使用时长」：报本系统账号 id（AI 中台经 yc_rent_auth_user.portal_uid 归人）
+    if (profile) startHeartbeat({ id: profile.accountId, name: profile.displayName })
   } catch { /* 登录失效由请求拦截器处理 */ }
 }
 watch(() => route.fullPath, syncProfile, { immediate: true })
 onMounted(() => window.addEventListener('focus', syncProfile))
 onUnmounted(() => window.removeEventListener('focus', syncProfile))
 function logout() {
+  startHeartbeat(null)
   clearSession()
   window.location.href = '/login'
 }
