@@ -6,6 +6,10 @@
 **/*.log
 **/.DS_Store
 **/.idea
+# 真实环境配置不能进入构建上下文或镜像；部署由 compose 单独读取服务器 .env。
+**/.env
+**/.env.*
+!**/.env.example
 backend/storage
 deploy/storage
 # 文档/运营资料不进镜像上下文
