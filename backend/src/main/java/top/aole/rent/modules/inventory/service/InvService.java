@@ -179,6 +179,50 @@ public class InvService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public void updateLocation(Long id, InvDtos.LocationSave req) {
+        CurrentUser user = UserContext.require();
+        InvItem item = requireItem(id);
+        if (req == null || req.getLongitude() == null || req.getLatitude() == null
+                || req.getLongitude().abs().compareTo(new BigDecimal("180")) > 0
+                || req.getLatitude().abs().compareTo(new BigDecimal("90")) > 0) {
+            throw new BizException(400, "请提供有效的经纬度：经度 -180 至 180，纬度 -90 至 90");
+        }
+        if (!Arrays.asList("amap", "baidu", "tencent", "browser", "manual").contains(req.getProvider())
+                || !Arrays.asList("map", "gps", "manual").contains(req.getSource())) {
+            throw new BizException(400, "定位来源无效");
+        }
+        String address = trimToNull(req.getAddress());
+        if (address != null && address.length() > 255) throw new BizException(400, "定位地址不能超过 255 字");
+        BigDecimal accuracy = "gps".equals(req.getSource()) ? req.getAccuracy() : null;
+        if (accuracy != null && (accuracy.signum() < 0 || accuracy.compareTo(new BigDecimal("10000000")) > 0)) {
+            throw new BizException(400, "定位精度无效");
+        }
+        int updated = itemMapper.update(null, new LambdaUpdateWrapper<InvItem>().eq(InvItem::getId, id)
+                .set(InvItem::getMapLongitude, req.getLongitude().setScale(7, java.math.RoundingMode.HALF_UP))
+                .set(InvItem::getMapLatitude, req.getLatitude().setScale(7, java.math.RoundingMode.HALF_UP))
+                .set(InvItem::getMapAddress, address).set(InvItem::getMapProvider, req.getProvider())
+                .set(InvItem::getMapSource, req.getSource()).set(InvItem::getMapAccuracy, accuracy)
+                .set(InvItem::getMapUpdatedAt, LocalDateTime.now()).set(InvItem::getMapUpdatedBy, user.getUserName()));
+        if (updated != 1) throw new BizException(404, "资产不存在");
+        auditLogService.record("资产定位", TARGET, id, AuditLogService.EXECUTED,
+                "编号=" + item.getCode() + " 坐标=" + req.getLongitude() + "," + req.getLatitude()
+                        + " 来源=" + req.getProvider() + "/" + req.getSource());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void clearLocation(Long id) {
+        CurrentUser user = UserContext.require();
+        InvItem item = requireItem(id);
+        int updated = itemMapper.update(null, new LambdaUpdateWrapper<InvItem>().eq(InvItem::getId, id)
+                .set(InvItem::getMapLongitude, null).set(InvItem::getMapLatitude, null)
+                .set(InvItem::getMapAddress, null).set(InvItem::getMapProvider, null)
+                .set(InvItem::getMapSource, null).set(InvItem::getMapAccuracy, null)
+                .set(InvItem::getMapUpdatedAt, LocalDateTime.now()).set(InvItem::getMapUpdatedBy, user.getUserName()));
+        if (updated != 1) throw new BizException(404, "资产不存在");
+        auditLogService.record("资产定位清除", TARGET, id, AuditLogService.EXECUTED, "编号=" + item.getCode());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public void deleteItem(Long id) {
         InvItem item = requireItem(id);
         if (nz(item.getReservedQty()) > 0 || nz(item.getRentedQty()) > 0) {
@@ -857,6 +901,14 @@ public class InvService {
             v.setCategory(it.getCategory());
             v.setUnit(it.getUnit());
             v.setLocation(it.getLocation());
+            v.setMapLongitude(it.getMapLongitude());
+            v.setMapLatitude(it.getMapLatitude());
+            v.setMapAddress(it.getMapAddress());
+            v.setMapProvider(it.getMapProvider());
+            v.setMapSource(it.getMapSource());
+            v.setMapAccuracy(it.getMapAccuracy());
+            v.setMapUpdatedAt(it.getMapUpdatedAt());
+            v.setMapUpdatedBy(it.getMapUpdatedBy());
             v.setRemark(it.getRemark());
             v.setTotalQty(nz(it.getTotalQty()));
             v.setStockQty(nz(it.getStockQty()));

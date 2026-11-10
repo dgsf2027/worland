@@ -12,9 +12,17 @@ ARG GIT_COMMIT=unknown
 ARG GIT_COMMIT_TIME=unknown
 ARG GIT_BRANCH=unknown
 ENV GIT_COMMIT=$GIT_COMMIT GIT_COMMIT_TIME=$GIT_COMMIT_TIME GIT_BRANCH=$GIT_BRANCH
+ARG VITE_AMAP_KEY=
+ARG VITE_BAIDU_MAP_AK=
+ARG VITE_TENCENT_MAP_KEY=
+ARG VITE_AMAP_SERVICE_HOST=
+ENV VITE_AMAP_KEY=$VITE_AMAP_KEY VITE_BAIDU_MAP_AK=$VITE_BAIDU_MAP_AK VITE_TENCENT_MAP_KEY=$VITE_TENCENT_MAP_KEY VITE_AMAP_SERVICE_HOST=$VITE_AMAP_SERVICE_HOST
 RUN pnpm build
 
 FROM nginx:alpine
 COPY deploy/frontend-nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/amap-proxy.conf.template /opt/amap-proxy.conf.template
+COPY deploy/25-amap-proxy.sh /docker-entrypoint.d/25-amap-proxy.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.d/25-amap-proxy.sh && chmod +x /docker-entrypoint.d/25-amap-proxy.sh
 COPY --from=build /build/dist /usr/share/nginx/html
 EXPOSE 80

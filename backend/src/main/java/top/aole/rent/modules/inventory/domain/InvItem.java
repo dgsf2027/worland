@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 /**
  * 资产(一批同规格实物,按数量管理)。total = stock + reserved + rented + repair + scrapped。
@@ -43,6 +44,16 @@ public class InvItem {
     private Integer scrappedQty;
 
     private String location;
+
+    /** 地图位置统一使用 GCJ-02；不覆盖仓内存放位置 location。 */
+    private BigDecimal mapLongitude;
+    private BigDecimal mapLatitude;
+    private String mapAddress;
+    private String mapProvider;
+    private String mapSource;
+    private BigDecimal mapAccuracy;
+    private LocalDateTime mapUpdatedAt;
+    private String mapUpdatedBy;
 
     /** 二维码令牌 */
     private String qrToken;

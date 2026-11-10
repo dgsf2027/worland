@@ -22,6 +22,14 @@ export interface InvItem {
   category?: string
   unit: string
   location?: string
+  mapLongitude?: number | null
+  mapLatitude?: number | null
+  mapAddress?: string
+  mapProvider?: string
+  mapSource?: string
+  mapAccuracy?: number | null
+  mapUpdatedAt?: string
+  mapUpdatedBy?: string
   remark?: string
   totalQty: number
   stockQty: number
@@ -215,6 +223,20 @@ export function createInvItem(body: Record<string, any>): Promise<number> {
 }
 export function updateInvItem(id: number, body: Record<string, any>): Promise<void> {
   return request.put(`/rent/inventory/items/${id}`, body)
+}
+export interface InvLocationSave {
+  longitude: number
+  latitude: number
+  address?: string
+  provider: 'amap' | 'baidu' | 'tencent' | 'browser' | 'manual'
+  source: 'map' | 'gps' | 'manual'
+  accuracy?: number | null
+}
+export function updateInvLocation(id: number, body: InvLocationSave): Promise<void> {
+  return request.put(`/rent/inventory/items/${id}/map-location`, body)
+}
+export function clearInvLocation(id: number): Promise<void> {
+  return request.delete(`/rent/inventory/items/${id}/map-location`)
 }
 export function deleteInvItem(id: number): Promise<void> {
   return request.delete(`/rent/inventory/items/${id}`)

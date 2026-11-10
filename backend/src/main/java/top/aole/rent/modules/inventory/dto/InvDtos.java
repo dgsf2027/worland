@@ -38,6 +38,17 @@ public final class InvDtos {
     }
 
     @Data
+    public static class LocationSave {
+        /** GCJ-02 经度/纬度，必须成对传入。 */
+        private BigDecimal longitude;
+        private BigDecimal latitude;
+        private String address;
+        private String provider;
+        private String source;
+        private BigDecimal accuracy;
+    }
+
+    @Data
     public static class ItemView {
         private Long id;
         private String code;
@@ -46,6 +57,14 @@ public final class InvDtos {
         private String category;
         private String unit;
         private String location;
+        private BigDecimal mapLongitude;
+        private BigDecimal mapLatitude;
+        private String mapAddress;
+        private String mapProvider;
+        private String mapSource;
+        private BigDecimal mapAccuracy;
+        private LocalDateTime mapUpdatedAt;
+        private String mapUpdatedBy;
         private String remark;
         private Integer totalQty;
         private Integer stockQty;

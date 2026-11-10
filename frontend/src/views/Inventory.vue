@@ -15,6 +15,8 @@ import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import PhotoGallery from '@/components/PhotoGallery.vue'
 import MovementForm from '@/components/inventory/MovementForm.vue'
+import AssetLocationDialog from '@/components/inventory/AssetLocationDialog.vue'
+import { validPoint } from '@/utils/assetLocation'
 import { printQrLabels, qrDataUrl } from '@/utils/qrLabel'
 
 const route = useRoute()
@@ -92,6 +94,7 @@ const itemFilters = reactive({ keyword: '', category: '' })
 const items = ref<InvItem[]>([])
 const itemsLoading = ref(false)
 const selectedItems = ref<InvItem[]>([])
+const locationItem = ref<InvItem | null>(null)
 async function loadItems() {
   itemsLoading.value = true
   try {
@@ -454,6 +457,13 @@ onMounted(() => {
           <el-table-column prop="spec" label="规格" min-width="120" show-overflow-tooltip />
           <el-table-column prop="category" label="类别" width="80" />
           <el-table-column prop="location" label="存放位置" min-width="120" show-overflow-tooltip />
+          <el-table-column label="资产定位" min-width="160">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="locationItem = row">{{ validPoint(row.mapLongitude, row.mapLatitude) ? '查看定位 / 导航' : (canOperate ? '设置定位' : '尚未定位') }}</el-button>
+              <div v-if="row.mapAddress">{{ row.mapAddress }}</div>
+              <div v-if="row.mapUpdatedAt" class="tip">{{ fmtTime(row.mapUpdatedAt) }}</div>
+            </template>
+          </el-table-column>
           <el-table-column label="总数" width="70" align="right">
             <template #default="{ row }">{{ row.totalQty }} {{ row.unit }}</template>
           </el-table-column>
@@ -732,6 +742,7 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 资产详情 -->
+    <AssetLocationDialog v-if="locationItem" :key="locationItem.id" :item="locationItem" :editable="canOperate" @close="locationItem = null" @saved="refreshAfterChange" />
     <el-drawer v-model="detailVisible" size="760px" :title="detail ? `${detail.item.name} · ${detail.item.code}` : '资产详情'">
       <div v-loading="detailLoading">
         <template v-if="detail">
@@ -741,6 +752,7 @@ onMounted(() => {
             <el-descriptions-item label="规格">{{ detail.item.spec || '—' }}</el-descriptions-item>
             <el-descriptions-item label="类别">{{ detail.item.category || '—' }}</el-descriptions-item>
             <el-descriptions-item label="存放位置">{{ detail.item.location || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="资产定位"><el-button link type="primary" @click="locationItem = detail.item">{{ validPoint(detail.item.mapLongitude, detail.item.mapLatitude) ? '查看定位 / 导航' : '设置 / 查看定位' }}</el-button></el-descriptions-item>
             <el-descriptions-item label="总数量">{{ detail.item.totalQty }} {{ detail.item.unit }}</el-descriptions-item>
             <el-descriptions-item label="备注" :span="2">{{ detail.item.remark || '—' }}</el-descriptions-item>
           </el-descriptions>

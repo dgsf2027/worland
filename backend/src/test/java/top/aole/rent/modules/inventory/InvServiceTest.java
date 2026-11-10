@@ -63,6 +63,75 @@ import static org.mockito.Mockito.when;
  */
 class InvServiceTest {
 
+    private static InvDtos.LocationSave locationRequest() {
+        InvDtos.LocationSave req = new InvDtos.LocationSave();
+        req.setLongitude(new BigDecimal("113.26440006"));
+        req.setLatitude(new BigDecimal("23.12910002"));
+        req.setProvider("browser");
+        req.setSource("gps");
+        req.setAccuracy(new BigDecimal("18.25"));
+        req.setAddress(" 广州仓库 ");
+        return req;
+    }
+
+    @Test
+    void 资产定位只更新位置不覆盖库存或存放位置() {
+        when(itemMapper.selectById(1L)).thenReturn(item(5, 2, 3));
+        when(itemMapper.update(isNull(), any())).thenReturn(1);
+        service.updateLocation(1L, locationRequest());
+        ArgumentCaptor<LambdaUpdateWrapper<InvItem>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(itemMapper).update(isNull(), captor.capture());
+        LambdaUpdateWrapper<InvItem> wrapper = captor.getValue();
+        assertTrue(wrapper.getSqlSet().contains("map_longitude"));
+        assertTrue(!wrapper.getSqlSet().contains("stock_qty") && !wrapper.getSqlSet().contains("location="));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue(new BigDecimal("113.2644001")));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue("广州仓库"));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue("供应链"));
+    }
+
+    @Test
+    void 资产定位拒绝缺坐标越界来源和超长地址() {
+        when(itemMapper.selectById(1L)).thenReturn(item(1, 0, 0));
+        InvDtos.LocationSave req = locationRequest();
+        req.setLatitude(null);
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setLatitude(new BigDecimal("91"));
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setLatitude(BigDecimal.ZERO); req.setLongitude(new BigDecimal("181"));
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setLongitude(BigDecimal.ZERO); req.setProvider("unknown");
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setProvider("browser"); req.setSource("ip");
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setSource("gps"); req.setAccuracy(new BigDecimal("-1"));
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        req.setAccuracy(null); req.setAddress(String.join("", Collections.nCopies(256, "字")));
+        assertThrows(BizException.class, () -> service.updateLocation(1L, req));
+        verify(itemMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 清除定位清空坐标且保留操作人时间() {
+        when(itemMapper.selectById(1L)).thenReturn(item(1, 0, 0));
+        when(itemMapper.update(isNull(), any())).thenReturn(1);
+        service.clearLocation(1L);
+        ArgumentCaptor<LambdaUpdateWrapper<InvItem>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(itemMapper).update(isNull(), captor.capture());
+        assertTrue(captor.getValue().getSqlSet().contains("map_updated_at"));
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue(null));
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue("供应链"));
+    }
+
+    @Test
+    void 资产定位接口限制写权限且公开扫码不含坐标() throws Exception {
+        for (String method : Arrays.asList("updateLocation", "clearLocation")) {
+            Method m = Arrays.stream(top.aole.rent.modules.inventory.interfaces.InvController.class.getMethods())
+                    .filter(v -> v.getName().equals(method)).findFirst().get();
+            assertEquals(Arrays.asList("老板", "供应链", "业务"), Arrays.asList(m.getAnnotation(top.aole.rent.common.auth.RequireRole.class).value()));
+        }
+        assertTrue(Arrays.stream(InvDtos.PublicScanView.class.getDeclaredFields()).noneMatch(f -> f.getName().startsWith("map")));
+    }
+
     private InvItemMapper itemMapper;
     private InvRentalMapper rentalMapper;
     private InvMovementMapper movementMapper;

@@ -77,7 +77,13 @@ services:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         GIT_COMMIT_TIME: ${GIT_COMMIT_TIME:-unknown}
         GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        VITE_AMAP_KEY: ${VITE_AMAP_KEY:-}
+        VITE_BAIDU_MAP_AK: ${VITE_BAIDU_MAP_AK:-}
+        VITE_TENCENT_MAP_KEY: ${VITE_TENCENT_MAP_KEY:-}
+        VITE_AMAP_SERVICE_HOST: ${VITE_AMAP_SERVICE_HOST:-}
     container_name: worland-web
+    environment:
+      AMAP_SECURITY_JS_CODE: ${AMAP_SECURITY_JS_CODE:-}
     ports:
       - "${WEB_PORT:-8088}:80"   # 发布口(本地默认8088;ECS 用 .env 的 WEB_PORT 避端口冲突)
     restart: unless-stopped

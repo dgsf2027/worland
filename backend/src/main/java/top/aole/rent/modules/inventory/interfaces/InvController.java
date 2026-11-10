@@ -64,6 +64,22 @@ public class InvController {
         return R.ok();
     }
 
+    @ApiOperation("更新资产地图位置(GCJ-02)")
+    @RequireRole(value = {"老板", "供应链", "业务"}, action = "资产定位", targetType = "inv_item")
+    @PutMapping("/items/{id}/map-location")
+    public R<Void> updateLocation(@PathVariable Long id, @RequestBody InvDtos.LocationSave req) {
+        invService.updateLocation(id, req);
+        return R.ok();
+    }
+
+    @ApiOperation("清除资产地图位置")
+    @RequireRole(value = {"老板", "供应链", "业务"}, action = "资产定位清除", targetType = "inv_item")
+    @DeleteMapping("/items/{id}/map-location")
+    public R<Void> clearLocation(@PathVariable Long id) {
+        invService.clearLocation(id);
+        return R.ok();
+    }
+
     @ApiOperation("删除资产(无预订/出租中数量)")
     @RequireRole(value = {"老板", "供应链"}, action = "资产删除", targetType = "inv_item")
     @DeleteMapping("/items/{id}")

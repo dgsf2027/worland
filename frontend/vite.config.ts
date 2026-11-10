@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import UnoCSS from 'unocss/vite'
 
@@ -28,22 +28,35 @@ const buildInfo = {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  define: { __BUILD_INFO__: JSON.stringify(buildInfo) },
-  plugins: [vue(), UnoCSS()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-    },
-  },
-  server: {
-    port: 5175,
-    proxy: {
-      // /api → 后端 8082(后端 context-path 就是 /api,前缀原样转发)
-      '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8082',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  // 仅开发服务器读取安全码，VITE_ 前缀白名单不会将它打包到浏览器。
+  const securityCode = loadEnv(mode, process.cwd(), 'AMAP_').AMAP_SECURITY_JS_CODE || ''
+  const rewriteMap = (path: string) => {
+    const url = new URL(path.replace(/^\/_AMapService/, ''), 'https://restapi.amap.com')
+    url.searchParams.set('jscode', securityCode)
+    return `${url.pathname}${url.search}`
+  }
+  return {
+    define: { __BUILD_INFO__: JSON.stringify(buildInfo) },
+    plugins: [vue(), UnoCSS()],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
-  },
+    server: {
+      port: 5175,
+      proxy: {
+        ...(securityCode ? {
+          '/_AMapService/v4/map/styles': { target: 'https://webapi.amap.com', changeOrigin: true, rewrite: rewriteMap },
+          '/_AMapService/': { target: 'https://restapi.amap.com', changeOrigin: true, rewrite: rewriteMap },
+        } : {}),
+        // /api → 后端 8082(后端 context-path 就是 /api,前缀原样转发)
+        '/api': {
+          target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8082',
+          changeOrigin: true,
+        },
+      },
+    },
+  }
 })
