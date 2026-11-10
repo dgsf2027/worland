@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -11,6 +11,8 @@ import {
 import { checkUploadFile, saveFile } from '@/api/asset'
 import PhotoGallery from '@/components/PhotoGallery.vue'
 import { sessionRole } from '@/utils/session'
+import { LICENSE_ACCEPT, recognizeBusinessLicense } from '@/utils/businessLicenseOcr'
+import { LICENSE_FIELDS, applyLicenseFields, type LicenseField, type LicenseFields } from '@/utils/businessLicenseParse'
 
 const router = useRouter()
 const canReview = computed(() => sessionRole.value === '供应链' || sessionRole.value === '老板')
@@ -98,8 +100,65 @@ const formMode = ref<'create' | 'edit'>('create')
 const saving = ref(false)
 const form = reactive<Record<string, any>>({})
 const queuedFiles = ref<File[]>([])
+const licenseBusy = ref(false)
+const licenseProgress = ref('')
+const licenseResult = ref<LicenseFields>({})
+const licenseText = ref('')
+const licenseMessage = ref('')
+const licenseReview = ref(true)
+const licenseInput = ref<HTMLInputElement>()
+let licenseController: AbortController | undefined
+let licenseVersion = 0
+function resetLicense() {
+  licenseVersion++
+  licenseController?.abort()
+  licenseBusy.value = false
+  licenseProgress.value = ''
+  licenseResult.value = {}
+  licenseText.value = ''
+  licenseMessage.value = ''
+}
+watch(formVisible, (visible) => { if (!visible) resetLicense() }, { flush: 'sync' })
+onBeforeUnmount(resetLicense)
+
+async function readLicense(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || licenseBusy.value || saving.value) return
+  resetLicense()
+  const version = licenseVersion
+  licenseController = new AbortController()
+  licenseBusy.value = true
+  try {
+    const result = await recognizeBusinessLicense(file, (message) => {
+      if (version === licenseVersion) licenseProgress.value = message
+    }, licenseController.signal, licenseReview.value)
+    if (version !== licenseVersion || !formVisible.value) return
+    licenseResult.value = result.fields
+    licenseText.value = result.text
+    const applied = applyLicenseFields(form, result.fields)
+    const missing = (Object.keys(LICENSE_FIELDS) as LicenseField[]).filter((key) => !result.fields[key])
+    licenseMessage.value = `已识别 ${6 - missing.length} 项，填入 ${applied.length} 项空白字段。${missing.length ? `未识别：${missing.map((key) => LICENSE_FIELDS[key]).join('、')}。` : ''}${result.note || '请对照原件核对后保存。'}`
+    if (!Object.keys(result.fields).length) ElMessage.warning('没有读到营业执照字段，请换清晰文件或手工填写')
+  } catch (error: any) {
+    if (version === licenseVersion && error?.name !== 'AbortError') ElMessage.warning(error?.message || '识别失败，请换清晰文件或手工填写')
+  } finally {
+    if (version === licenseVersion) { licenseBusy.value = false; licenseProgress.value = '' }
+  }
+}
+async function overwriteLicense() {
+  const version = licenseVersion
+  await ElMessageBox.confirm('用本次识别结果替换对应的已填字段？未识别的字段保持不变。', '应用营业执照信息', { type: 'warning' }).catch(() => false).then((answer) => {
+    if (answer && version === licenseVersion && formVisible.value) {
+      applyLicenseFields(form, licenseResult.value, true)
+      licenseMessage.value = '已应用识别结果，请逐项核对后保存。'
+    }
+  })
+}
 
 function resetForm(values: Record<string, any>) {
+  resetLicense()
   Object.keys(form).forEach((k) => delete form[k])
   Object.assign(form, {
     id: undefined, sortNo: undefined, companyName: '', legalPerson: '', registeredCapitalWan: '',
@@ -159,6 +218,7 @@ function trimOrNull(v: any) {
 }
 
 async function submitForm() {
+  if (licenseBusy.value || saving.value) return
   if (!String(form.companyName || '').trim()) {
     ElMessage.warning('公司名称必填')
     return
@@ -446,7 +506,23 @@ onMounted(loadList)
 
     <!-- 新增 / 编辑 -->
     <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑考察供应商' : '新增考察供应商'" width="720px" :close-on-click-modal="false">
-      <el-form :model="form" label-width="110px" size="small" :disabled="saving">
+      <div class="license-box">
+        <input ref="licenseInput" type="file" :accept="LICENSE_ACCEPT" hidden @change="readLicense" />
+        <el-button type="primary" plain :loading="licenseBusy" :disabled="saving" @click="licenseInput?.click()">上传营业执照并识别</el-button>
+        <div class="upload-tip">支持单页 PDF、JPG、PNG、WebP，最大 20MB。自动填写公司信息，请核对后保存。</div>
+        <el-checkbox v-model="licenseReview" :disabled="licenseBusy || saving">疑难文字精细复核（服务可用时）</el-checkbox>
+        <div class="upload-tip">默认在本机识别；开启复核后，仅在有疑点时将字段区域图发给识别服务。</div>
+        <div v-if="licenseBusy" class="upload-tip" role="status">{{ licenseProgress }}</div>
+        <el-alert v-if="licenseMessage" :title="licenseMessage" type="warning" :closable="false" show-icon class="license-result" />
+        <el-collapse v-if="licenseText" class="license-result">
+          <el-collapse-item title="核对识别结果与原文" name="license">
+            <div v-for="(label, key) in LICENSE_FIELDS" :key="key" class="license-field"><b>{{ label }}：</b>{{ licenseResult[key] || '未识别，请手工填写' }}</div>
+            <el-button v-if="Object.keys(licenseResult).length" size="small" :disabled="saving || licenseBusy" @click="overwriteLicense">用识别结果替换已填字段</el-button>
+            <pre class="license-text">{{ licenseText }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <el-form :model="form" label-width="110px" size="small" :disabled="saving || licenseBusy">
         <el-row :gutter="12">
           <el-col :span="8">
             <el-form-item label="序号">
@@ -515,7 +591,7 @@ onMounted(loadList)
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitForm">保存</el-button>
+        <el-button type="primary" :loading="saving" :disabled="licenseBusy" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
 
@@ -562,6 +638,10 @@ onMounted(loadList)
 
 <style scoped>
 .page { padding: 4px; }
+.license-box { margin-bottom: 18px; padding: 12px; border: 1px solid #d9ecff; border-radius: 6px; background: #f5faff; }
+.license-result { margin-top: 10px; }
+.license-field { margin-bottom: 6px; overflow-wrap: anywhere; }
+.license-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; color: #606266; }
 .sub { color: #666; font-size: 13px; margin-bottom: 10px; line-height: 1.6; }
 .filterbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .cnt { color: #999; font-size: 12px; margin-left: auto; }

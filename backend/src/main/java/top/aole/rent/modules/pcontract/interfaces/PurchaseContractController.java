@@ -57,6 +57,13 @@ public class PurchaseContractController {
         return R.ok(service.pay(id, req));
     }
 
+    @ApiOperation("按回单逐笔登记付款(整批成功或整批回滚)")
+    @RequireRole(value = {"财务", "老板"}, action = "采购合同付款", targetType = "purchase_contract")
+    @PostMapping("/{id}/payments/batch")
+    public R<List<Long>> payBatch(@PathVariable Long id, @RequestBody PcDtos.BatchPaymentRequest req) {
+        return R.ok(service.payBatch(id, req));
+    }
+
     @ApiOperation("撤销付款(红冲付款凭证)")
     @RequireRole(value = {"财务", "老板"}, action = "采购合同撤销付款", targetType = "purchase_contract")
     @PostMapping("/payments/{paymentId}/void")

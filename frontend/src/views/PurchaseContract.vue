@@ -6,12 +6,14 @@ import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import {
   addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts, fetchRecognizeStatus,
-  linkPcPurchases, payPurchaseContract, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
-  type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice, type RecognizedReceipt,
+  linkPcPurchases, payPurchaseContractBatch, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
+  type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice,
 } from '@/api/purchaseContract'
 import ProofUploader from '@/components/payproof/ProofUploader.vue'
 import ProofViewer from '@/components/payproof/ProofViewer.vue'
 import SnapRecognize from '@/components/payproof/SnapRecognize.vue'
+import ReceiptPaymentEditor from '@/components/payproof/ReceiptPaymentEditor.vue'
+import { receiptPaymentBody, receiptPaymentError, type ReceiptPaymentDraft } from '@/utils/receiptPayments'
 
 /** 采购合同:合同(含付款节点)→ 付款(银行流水+回单,可跨节点)→ 进项发票,三者互相对账。 */
 const list = ref<PcContract[]>([])
@@ -205,37 +207,25 @@ async function undoLink(id: number) {
 // ---- 登记付款 ----
 const payDlg = ref(false)
 const paying = ref(false)
-const payForm = reactive({ amount: undefined as number | undefined, paidDate: '', bankSerial: '', remark: '', proofFileIds: [] as number[] })
-const payUploader = ref<InstanceType<typeof ProofUploader>>()
-/** 回单照片识别 → 预填金额/日期/流水号；原图同时挂成付款回单（无需再手工上传） */
-async function onReceiptRecognized(d: RecognizedReceipt, files?: File[]) {
-  if (d.amount != null) payForm.amount = d.amount
-  if (d.paidDate) payForm.paidDate = d.paidDate
-  if (d.bankSerial) payForm.bankSerial = d.bankSerial
-  const who = [d.payeeName ? `收款方 ${d.payeeName}` : '', d.remark || ''].filter(Boolean).join(' · ')
-  if (who && !payForm.remark) payForm.remark = who
-  const sup = detail.value?.contract.supplierName
-  if (d.payeeName && sup && !(d.payeeName.includes(sup) || sup.includes(d.payeeName))) {
-    ElMessage.warning(`回单收款方「${d.payeeName}」与合同供应商「${sup}」不一致，请核对`)
-  }
-  if (files?.length) {
-    await nextTick()
-    await payUploader.value?.addFiles(files)
-  }
-}
+const payRows = ref<ReceiptPaymentDraft[]>([])
+const payReading = ref(false)
+const payError = computed(() => receiptPaymentError(payRows.value))
+const payTotal = computed(() => payRows.value.reduce((sum, row) => sum + Math.round((row.amount || 0) * 100), 0) / 100)
 function openPay() {
-  Object.assign(payForm, { amount: undefined, paidDate: new Date().toISOString().slice(0, 10), bankSerial: '', remark: '', proofFileIds: [] })
+  payRows.value = []
+  payReading.value = false
   uploaderKey.value++
   payDlg.value = true
 }
 async function submitPay() {
+  if (paying.value || payReading.value) return
+  if (payError.value) { ElMessage.warning(payError.value); return }
+  if (payTotal.value > (detail.value?.contract.summary.unpaid ?? 0)) { ElMessage.warning('本次付款合计超过合同未付金额，请核对各张回单'); return }
+  const payments = receiptPaymentBody(payRows.value)
   paying.value = true
   try {
-    await payPurchaseContract(detail.value!.contract.id, {
-      amount: payForm.amount, paidDate: payForm.paidDate, bankSerial: payForm.bankSerial || undefined,
-      remark: payForm.remark || undefined, proofFileIds: payForm.proofFileIds,
-    })
-    ElMessage.success('付款已登记并生成凭证')
+    await payPurchaseContractBatch(detail.value!.contract.id, payments)
+    ElMessage.success(`已分别登记 ${payments.length} 笔付款，并逐笔生成凭证`)
     payDlg.value = false
     await reloadDetail()
   } finally { paying.value = false }
@@ -484,24 +474,15 @@ async function undoInvoice(id: number) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="payDlg" title="登记付款" width="560px">
+    <el-dialog v-model="payDlg" title="登记付款 · 按回单逐笔登记" width="760px" destroy-on-close :close-on-click-modal="false" :show-close="!payReading && !paying" :close-on-press-escape="!payReading && !paying">
       <el-alert v-if="recognizeOk === false" type="info" :closable="false" show-icon class="tip"
         title="当前使用本机识别：原版电子回单 PDF 最准；截图/照片的金额可能读不全，请对照回单核对。" />
-      <div class="snap-row">
-        <SnapRecognize kind="receipt" label="拍照识别回单" @recognized="onReceiptRecognized" />
-        <span class="sum">拍银行回单，自动填金额/日期/流水号并留存回单</span>
-      </div>
-      <el-form :model="payForm" label-width="100px">
-        <el-form-item label="付款金额" required><el-input-number v-model="payForm.amount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
-        <el-form-item label="付款日期" required><el-date-picker v-model="payForm.paidDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-        <el-form-item label="银行流水号"><el-input v-model="payForm.bankSerial" placeholder="回单上的交易流水号，不可重复" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="payForm.remark" /></el-form-item>
-        <el-form-item label="付款回单" required><ProofUploader :key="uploaderKey" ref="payUploader" v-model="payForm.proofFileIds" recognize-kind="receipt" @recognized="onReceiptRecognized" /></el-form-item>
-      </el-form>
-      <el-alert type="info" :closable="false" show-icon title="按节点顺序自动核销：先冲满第一个未付清的节点，余额冲下一个。" />
+      <ReceiptPaymentEditor :key="uploaderKey" v-model="payRows" v-model:busy="payReading" :disabled="paying" :supplier-name="detail?.contract.supplierName" />
+      <div class="sum">共 {{ payRows.length }} 笔付款，合计 {{ money(payTotal) }}；合同未付 {{ money(detail?.contract.summary.unpaid) }}</div>
+      <el-alert type="info" :closable="false" show-icon title="每张回单单独生成付款记录和凭证，各自按节点顺序核销。请逐笔核对金额与日期后提交。" />
       <template #footer>
-        <el-button @click="payDlg = false">取消</el-button>
-        <el-button type="primary" :loading="paying" :disabled="!payForm.proofFileIds.length || !payForm.amount" @click="submitPay">确认登记</el-button>
+        <el-button :disabled="payReading || paying" @click="payDlg = false">取消</el-button>
+        <el-button type="primary" :loading="paying" :disabled="payReading || !!payError" @click="submitPay">确认登记 {{ payRows.length }} 笔</el-button>
       </template>
     </el-dialog>
 

@@ -162,6 +162,62 @@ class PurchaseContractFlowTest {
     }
 
     @Test
+    void 多张回单逐笔入账_金额流水与凭证分别保存() {
+        Long pc = newContract("BATCH-001");
+        PcDtos.PaymentRequest first = pay("45000", "BATCH-A");
+        PcDtos.PaymentRequest second = pay("10000", "BATCH-B");
+        second.setProofFileIds(Collections.singletonList(2L));
+        second.setPaidDate(LocalDate.of(2026, 1, 6));
+        PcDtos.BatchPaymentRequest batch = new PcDtos.BatchPaymentRequest();
+        batch.setPayments(Arrays.asList(first, second));
+        List<Long> ids = service.payBatch(pc, batch);
+        assertEquals(2, ids.size());
+        PcDtos.Detail detail = service.detail(pc);
+        assertEquals(2, detail.getPayments().size());
+        assertEquals(0, new BigDecimal("45000").compareTo(detail.getPayments().get(0).getAmount()));
+        assertEquals("BATCH-A", detail.getPayments().get(0).getBankSerial());
+        assertEquals(0, new BigDecimal("10000").compareTo(detail.getPayments().get(1).getAmount()));
+        assertEquals("BATCH-B", detail.getPayments().get(1).getBankSerial());
+        assertEquals(0, new BigDecimal("55000").compareTo(detail.getContract().getSummary().getPaid()));
+        assertEquals(2, jdbc.queryForObject("select count(*) from yc_rent_voucher where source_doc_type='supplier_payment' and is_reversal=0", Integer.class));
+    }
+
+    @Test
+    void 批次第二笔失败_首笔付款核销凭证全部回滚() {
+        Long pc = newContract("BATCH-ROLLBACK");
+        PcDtos.PaymentRequest first = pay("45000", "ROLLBACK-A");
+        PcDtos.PaymentRequest second = pay("10000", "ROLLBACK-B");
+        second.setProofFileIds(Collections.singletonList(2L));
+        PcDtos.AllocInput invalid = new PcDtos.AllocInput();
+        invalid.setTermId(-1L);
+        invalid.setAmount(new BigDecimal("10000"));
+        second.setAllocs(Collections.singletonList(invalid));
+        PcDtos.BatchPaymentRequest batch = new PcDtos.BatchPaymentRequest();
+        batch.setPayments(Arrays.asList(first, second));
+        assertThrows(BizException.class, () -> service.payBatch(pc, batch));
+        assertEquals(0, service.detail(pc).getPayments().size());
+        assertEquals(0, jdbc.queryForObject("select count(*) from yc_rent_supplier_payment_alloc", Integer.class));
+        assertEquals(0, jdbc.queryForObject("select count(*) from yc_rent_voucher where source_doc_type='supplier_payment'", Integer.class));
+        assertEquals(0, BigDecimal.ZERO.compareTo(service.detail(pc).getContract().getSummary().getPaid()));
+    }
+
+    @Test
+    void 批次拒绝重复回单流水和超额() {
+        Long pc = newContract("BATCH-INVALID");
+        PcDtos.PaymentRequest first = pay("60000", "DUP-A");
+        PcDtos.PaymentRequest second = pay("50000", "DUP-B");
+        PcDtos.BatchPaymentRequest batch = new PcDtos.BatchPaymentRequest();
+        batch.setPayments(Arrays.asList(first, second));
+        assertThrows(BizException.class, () -> service.payBatch(pc, batch));
+        second.setProofFileIds(Collections.singletonList(2L));
+        second.setBankSerial("DUP-A");
+        assertThrows(BizException.class, () -> service.payBatch(pc, batch));
+        second.setBankSerial("DUP-B");
+        assertThrows(BizException.class, () -> service.payBatch(pc, batch));
+        assertEquals(0, service.detail(pc).getPayments().size());
+    }
+
+    @Test
     void 合同_付款_凭证_收票_撤销_全链路() {
         Long pc = newContract("IT-001");
 

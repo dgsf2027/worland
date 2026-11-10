@@ -128,6 +128,19 @@ public class PayProofService {
         return out;
     }
 
+    /** 批量付款重试时，同一回单不能再次生成另一笔付款。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void assertUnusedForPayment(List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) return;
+        fileObjectMapper.selectList(new LambdaQueryWrapper<FileObject>()
+                .in(FileObject::getId, fileIds).orderByAsc(FileObject::getId).last("FOR UPDATE"));
+        Long count = payProofMapper.selectCount(new LambdaQueryWrapper<PayProof>()
+                .eq(PayProof::getBizType, "supplier_payment").in(PayProof::getFileId, fileIds));
+        if (count != null && count > 0) {
+            throw new BizException(400, "所选回单已登记过付款，请刷新付款记录核对，勿重复提交");
+        }
+    }
+
     /** 各单据挂了几张回单;没有回单的 id 不在结果里。 */
     public Map<Long, Integer> countMap(String bizType, Collection<Long> bizIds) {
         Map<Long, Integer> m = new HashMap<>();

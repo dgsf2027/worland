@@ -85,6 +85,15 @@ class PayProofServiceTest {
     }
 
     @Test
+    void 已登记的付款回单不可重试生成第二笔付款() {
+        service.assertUnusedForPayment(Collections.singletonList(1L));
+        when(proofMapper.selectCount(any())).thenReturn(1L);
+        BizException error = assertThrows(BizException.class,
+                () -> service.assertUnusedForPayment(Collections.singletonList(1L)));
+        assertTrue(error.getMessage().contains("已登记过付款"));
+    }
+
+    @Test
     void 没传回单直接拒() {
         BizException e = assertThrows(BizException.class,
                 () -> service.bind(PayProofService.PAYABLE, Collections.singletonList(1L), "付款", Collections.emptyList()));

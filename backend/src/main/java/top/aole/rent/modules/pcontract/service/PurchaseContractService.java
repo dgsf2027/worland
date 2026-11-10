@@ -222,6 +222,44 @@ public class PurchaseContractService {
 
     // ---------------- 付款 ----------------
 
+    /** 一张回单一笔付款；任何一笔失败时，付款、核销、应付和凭证全部回滚。 */
+    @Transactional(rollbackFor = Exception.class)
+    public List<Long> payBatch(Long pcId, PcDtos.BatchPaymentRequest req) {
+        List<PcDtos.PaymentRequest> rows = req == null ? null : req.getPayments();
+        if (rows == null || rows.isEmpty() || rows.size() > 20) {
+            throw new BizException(400, "一次请登记 1 至 20 笔付款");
+        }
+        // 同一合同批次串行校验余额，避免两个批次同时读到相同未付金额。
+        PurchaseContract locked = contractMapper.selectOne(new LambdaQueryWrapper<PurchaseContract>()
+                .eq(PurchaseContract::getId, pcId).last("FOR UPDATE"));
+        if (locked == null) throw new BizException(404, "采购合同不存在: id=" + pcId);
+        java.util.Set<Long> files = new java.util.HashSet<>();
+        java.util.Set<String> serials = new java.util.HashSet<>();
+        BigDecimal total = BigDecimal.ZERO;
+        for (PcDtos.PaymentRequest row : rows) {
+            if (row == null || money(row.getAmount()).signum() <= 0 || row.getPaidDate() == null) {
+                throw new BizException(400, "请逐笔填写大于 0 的金额和付款日期");
+            }
+            if (row.getProofFileIds() == null || row.getProofFileIds().size() != 1 || row.getProofFileIds().get(0) == null) {
+                throw new BizException(400, "逐笔登记时每笔付款须对应一份回单");
+            }
+            if (!files.add(row.getProofFileIds().get(0))) throw new BizException(400, "同一回单不能重复登记到多笔付款");
+            if (!blank(row.getBankSerial()) && !serials.add(row.getBankSerial().trim())) {
+                throw new BizException(400, "本批次银行流水号重复，请核对回单");
+            }
+            if (row.getBankSerial() != null && row.getBankSerial().length() > 64) throw new BizException(400, "银行流水号不能超过 64 字");
+            total = total.add(money(row.getAmount()));
+        }
+        if (paidTotal(pcId).add(total).compareTo(locked.getTotalAmount()) > 0) {
+            throw new BizException(400, "本批次付款合计将超过合同剩余未付金额");
+        }
+        payProofService.assertUnusedForPayment(new ArrayList<>(files));
+        List<Long> ids = new ArrayList<>();
+        // 外层事务覆盖内部 pay 调用，无需逐笔单独开启事务。
+        for (PcDtos.PaymentRequest row : rows) ids.add(pay(pcId, row));
+        return ids;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public Long pay(Long pcId, PcDtos.PaymentRequest req) {
         PurchaseContract c = requireActive(pcId);

@@ -55,6 +55,11 @@ public final class PcDtos {
     }
 
     @Data
+    public static class BatchPaymentRequest {
+        private List<PaymentRequest> payments;
+    }
+
+    @Data
     public static class InvoiceRequest {
         private String invoiceNo;
         /** 专票/普通 */

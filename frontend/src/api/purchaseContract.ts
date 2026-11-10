@@ -127,6 +127,16 @@ export function recognizePcDoc(kind: RecognizeKind, images: File[], text?: strin
     { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000, silent } as any)
 }
 
+/** 营业执照按需复核：最多一张裁剪图，短文本，不影响其他单据的识别类型。 */
+export function reviewBusinessLicense(image: File, text: string, signal?: AbortSignal): Promise<Record<string, string | number | null>> {
+  const fd = new FormData()
+  fd.append('kind', 'business_license')
+  fd.append('files', image)
+  fd.append('text', text.slice(0, 6000))
+  return request.post('/rent/purchase-contracts/recognize', fd,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 90000, silent: true, signal } as any)
+}
+
 export function fetchPurchaseContracts(): Promise<PcContract[]> {
   return request.get('/rent/purchase-contracts')
 }
@@ -138,6 +148,9 @@ export function createPurchaseContract(body: Record<string, any>): Promise<numbe
 }
 export function payPurchaseContract(id: number, body: Record<string, any>): Promise<number> {
   return request.post(`/rent/purchase-contracts/${id}/payments`, body)
+}
+export function payPurchaseContractBatch(id: number, payments: Record<string, any>[]): Promise<number[]> {
+  return request.post(`/rent/purchase-contracts/${id}/payments/batch`, { payments })
 }
 export function voidPcPayment(paymentId: number, reason?: string): Promise<void> {
   return request.post(`/rent/purchase-contracts/payments/${paymentId}/void`, { reason })

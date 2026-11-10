@@ -28,7 +28,7 @@ export class ExtractError extends Error {}
 const extOf = (f: File) => (f.name.split('.').pop() || '').toLowerCase()
 
 let pdfjsPromise: Promise<any> | null = null
-async function loadPdfjs() {
+export async function loadPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
       const pdfjs: any = await import('pdfjs-dist')

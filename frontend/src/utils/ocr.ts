@@ -10,7 +10,7 @@ import coreUrl from 'tesseract.js-core/tesseract-core-lstm.wasm.js?url'
 const abs = (u: string) => new URL(u, location.href).href
 
 /** 浏览器是否支持 WASM SIMD(决定用哪个核心文件) */
-function supportsSimd(): boolean {
+export function supportsSimd(): boolean {
   try {
     return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]))
   } catch {
