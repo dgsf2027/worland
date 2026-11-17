@@ -12,7 +12,7 @@ const pending = new Map<MapProvider, Promise<Sdk>>()
 let sequence = 0
 function loadSdk(provider: MapProvider): Promise<Sdk> {
   const key = MAP_KEYS[provider]
-  if (!key) return Promise.reject(new Error('尚未配置此地图，可使用现场定位或粘贴坐标'))
+  if (!key) return Promise.reject(new Error('尚未配置此地图，请联系管理员启用地图服务'))
   const existing = pending.get(provider)
   if (existing) return existing
   const win = window as unknown as Record<string, Sdk>

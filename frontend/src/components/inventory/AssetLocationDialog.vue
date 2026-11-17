@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { clearInvLocation, updateInvLocation, type InvItem, type InvLocationSave } from '@/api/inventory'
-import { MAP_KEYS, MAP_PROVIDERS, PICKER_URLS, convertPoint, mapLink, parseCoordinates, validPoint,
-  type CoordinateSystem, type MapPoint, type MapProvider } from '@/utils/assetLocation'
+import { MAP_KEYS, MAP_PROVIDERS, convertPoint, mapLink, validPoint,
+  type MapPoint, type MapProvider } from '@/utils/assetLocation'
 import { createAssetMap, type AssetMap } from '@/utils/assetMapSdk'
 
 const props = defineProps<{ item: InvItem; editable: boolean }>()
@@ -18,15 +18,12 @@ const saving = ref(false)
 const locating = ref(false)
 const searching = ref(false)
 const searchText = ref('')
-const coordinates = ref('')
-const system = ref<CoordinateSystem>('GCJ02')
 const point = ref<MapPoint | null>(validPoint(props.item.mapLongitude, props.item.mapLatitude)
   ? { longitude: props.item.mapLongitude!, latitude: props.item.mapLatitude! } : null)
 const draft = reactive({ address: props.item.mapAddress || '',
   provider: (props.item.mapProvider || 'manual') as InvLocationSave['provider'],
   source: (props.item.mapSource || 'manual') as InvLocationSave['source'], accuracy: props.item.mapAccuracy ?? null })
 const hasSaved = validPoint(props.item.mapLongitude, props.item.mapLatitude)
-const providerName = computed(() => MAP_PROVIDERS.find(p => p.value === provider.value)!.label)
 let map: AssetMap | null = null
 let alive = true, mapVersion = 0, pointVersion = 0, gpsVersion = 0
 function stop() {
@@ -54,7 +51,7 @@ async function startMap() {
   } catch (e) { if (alive && version === mapVersion) mapError.value = e instanceof Error ? e.message : '地图加载失败' }
   finally { if (version === mapVersion) mapLoading.value = false }
 }
-watch(provider, p => { system.value = p === 'baidu' ? 'BD09' : 'GCJ02'; ++gpsVersion; locating.value = false; startMap() })
+watch(provider, () => { ++gpsVersion; locating.value = false; startMap() })
 async function choose(p: MapPoint, from: InvLocationSave['provider'], source: InvLocationSave['source'], accuracy: number | null = null) {
   if (!validPoint(p.longitude, p.latitude)) { ElMessage.warning('定位结果无效，请重新选点'); return }
   ++gpsVersion; locating.value = false
@@ -95,11 +92,6 @@ async function search() {
   } catch (e) { if (alive && current === mapVersion && version === pointVersion) ElMessage.warning(e instanceof Error ? e.message : '未找到地址') }
   finally { searching.value = false }
 }
-function applyCoordinates() {
-  if (!props.editable || saving.value) return
-  try { choose(parseCoordinates(coordinates.value, system.value), 'manual', 'manual') }
-  catch (e) { ElMessage.warning((e as Error).message) }
-}
 function link(p: MapProvider, navigation = false) { return point.value ? mapLink(p, point.value, `${props.item.name} ${props.item.code}`, navigation) : null }
 async function save() {
   if (!props.editable || !point.value || saving.value) return
@@ -122,43 +114,29 @@ async function clear() {
 <template>
   <el-dialog v-model="visible" :title="`资产定位 · ${item.name} · ${item.code}`" width="860px" class="asset-location-dialog"
     append-to-body :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @opened="startMap">
-    <p class="location-note">每条台账保存一个位置。现场定位取得的是当前设备位置，请在资产现场操作并确认后保存。</p>
+    <p class="location-note">搜索地址或点击地图选择资产位置，确认标记后保存。每条台账保存一个位置。</p>
     <p v-if="item.mapUpdatedAt" class="location-note">最近更新：{{ item.mapUpdatedAt.replace('T', ' ') }} · {{ item.mapUpdatedBy || '—' }}</p>
     <div class="location-bar">
-      <el-radio-group v-model="provider" :disabled="saving"><el-radio-button v-for="p in MAP_PROVIDERS" :key="p.value" :label="p.value">{{ p.label }}地图</el-radio-button></el-radio-group>
+      <el-radio-group v-model="provider" :disabled="saving"><el-radio-button v-for="p in MAP_PROVIDERS" :key="p.value" :label="p.value" :disabled="p.value !== 'amap' && !MAP_KEYS[p.value]">{{ p.label }}地图</el-radio-button></el-radio-group>
       <el-button v-if="editable" :loading="locating" :disabled="saving" @click="locate">使用现场位置</el-button>
     </div>
-    <div v-if="MAP_KEYS[provider]">
-      <div v-if="editable" class="location-bar">
-        <el-input v-model="searchText" placeholder="输入完整地址（省市、街道、门牌）" :disabled="saving" @keyup.enter="search" />
-        <el-button :loading="searching" :disabled="!mapReady || saving" @click="search">查找地址</el-button>
-      </div>
-      <div :key="provider" ref="canvas" class="asset-map" v-loading="mapLoading" />
+    <div v-if="editable" class="location-bar">
+      <el-input v-model="searchText" placeholder="搜索资产地址，如广州市白云区某仓库" :disabled="!mapReady || saving" clearable @keyup.enter="search" />
+      <el-button type="primary" :loading="searching" :disabled="!mapReady || saving || !searchText.trim()" @click="search">搜索地址</el-button>
+    </div>
+    <template v-if="MAP_KEYS[provider]">
+      <div :key="provider" ref="canvas" class="asset-map" :class="{ 'can-pick': editable }" v-loading="mapLoading" element-loading-text="正在加载地图…" />
       <el-alert v-if="mapError" :title="mapError" type="warning" :closable="false" />
       <el-button v-if="mapError" link @click="startMap">重新加载地图</el-button>
-      <p v-if="editable && mapReady" class="location-note">点击地图选定位置，再点击“保存位置”。</p>
-    </div>
-    <el-alert v-else :title="`${providerName}内嵌地图尚未配置。可先使用现场定位、粘贴坐标，再打开地图核对。`" type="info" :closable="false" />
-    <div v-if="editable" class="coordinate-entry">
-      <div class="location-bar">
-        <a :href="PICKER_URLS[provider]" target="_blank" rel="noopener noreferrer">打开{{ providerName }}官方选点工具 ↗</a>
-        <span class="location-note">选点后复制经纬度，返回此处粘贴。</span>
-      </div>
-      <p v-if="provider === 'baidu'" class="location-note">百度游客坐标仅保留两位小数，不能准确定位资产；请认证后拾取，或使用现场定位。</p>
-      <div class="location-bar">
-        <el-input v-model="coordinates" aria-label="粘贴坐标" placeholder="经度,纬度" :disabled="saving" />
-        <el-select v-model="system" aria-label="坐标系" style="min-width:200px" :disabled="saving">
-          <el-option label="高德 / 腾讯（GCJ-02）" value="GCJ02" />
-          <el-option label="百度（BD-09）" value="BD09" />
-          <el-option label="GPS（WGS-84）" value="WGS84" />
-        </el-select>
-        <el-button :disabled="saving" @click="applyCoordinates">应用坐标</el-button>
-      </div>
-    </div>
+      <p v-if="editable && mapReady" class="location-note">点击地图移动位置标记；地址搜索后也可点选微调。</p>
+    </template>
+    <el-empty v-else class="map-unavailable" :image-size="60" description="地图选点暂未启用，请联系管理员配置地图服务">
+      <span class="location-note">在资产现场时，也可使用上方“使用现场位置”。</span>
+    </el-empty>
     <el-form label-width="86px" class="location-form">
-      <el-form-item label="当前选点"><span v-if="point">{{ point.longitude.toFixed(7) }}, {{ point.latitude.toFixed(7) }}</span><span v-else>尚未定位</span></el-form-item>
+      <el-form-item label="选点状态"><el-tag v-if="point" type="success">已选择位置</el-tag><span v-else>请在地图上选择资产位置</span></el-form-item>
       <el-form-item v-if="draft.source === 'gps' && draft.accuracy != null && point" label="定位精度">约 {{ Math.ceil(draft.accuracy) }} 米（请结合现场核对）</el-form-item>
-      <el-form-item label="位置说明"><el-input v-model="draft.address" maxlength="255" show-word-limit :disabled="!editable || saving" placeholder="如广州市某仓库东门；可手动补充" /></el-form-item>
+      <el-form-item label="位置说明"><el-input v-model="draft.address" maxlength="255" show-word-limit :disabled="!editable || saving" placeholder="选点后自动显示地址，可补充楼层、仓位等说明" /></el-form-item>
     </el-form>
     <div v-if="point" class="navigation-links">
       <div v-for="p in MAP_PROVIDERS" :key="p.value">
@@ -180,8 +158,10 @@ async function clear() {
 .location-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .location-bar > .el-input { flex: 1; min-width: 180px; }
 .location-bar > .el-select { width: 210px; }
-.asset-map { height: 330px; background: #f1f5f9; border-radius: 6px; }
-.coordinate-entry { padding: 4px 12px; background: #f7f9fc; margin-top: 14px; border-radius: 6px; }
+.asset-map { height: 400px; background: #f1f5f9; border-radius: 6px; }
+.can-pick { cursor: crosshair; }
+.map-unavailable { min-height: 260px; background: #f7f9fc; border-radius: 6px; }
+@media (max-width: 600px) { .asset-map { height: 300px; } }
 .location-form { margin-top: 16px; }
 .navigation-links { display: flex; flex-wrap: wrap; gap: 22px; }
 a { color: #1677d2; text-decoration: none; }
