@@ -3,6 +3,8 @@ package top.aole.rent.modules.contract.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import top.aole.rent.modules.billing.domain.RentBill;
+import top.aole.rent.modules.billing.mapper.RentBillMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import top.aole.rent.common.audit.AuditLogService;
@@ -76,6 +78,7 @@ public class ContractService {
     private final CustomerMapper customerMapper;
     private final RuleConfigService rules;
     private final AuditLogService auditLogService;
+    private final RentBillMapper rentBillMapper;
 
     private static final String NATURE = "分期收款销售";
     private static final String FORBIDDEN = "融资租赁";
@@ -90,6 +93,9 @@ public class ContractService {
                 .and(keyword != null && !keyword.trim().isEmpty(), w -> w.like(Contract::getNo, keyword.trim()))
                 .orderByDesc(Contract::getId);
         List<Contract> all = contractMapper.selectList(qw);
+        Map<Long, BigDecimal> receipts = all.isEmpty() ? new HashMap<>() : ContractReceipts.totals(
+                rentBillMapper.selectList(new LambdaQueryWrapper<RentBill>()
+                        .in(RentBill::getContractId, all.stream().map(Contract::getId).collect(Collectors.toList()))));
 
         List<ContractListItem> items = new ArrayList<>();
         for (Contract c : all) {
@@ -106,6 +112,9 @@ public class ContractService {
             it.setAssetCount(assetLinks(c.getId()).size());
             it.setStartDate(c.getStartDate());
             it.setElapsedPeriods(elapsedPeriods(c.getId()));
+            it.setCollectedRent(receipts.getOrDefault(c.getId(), BigDecimal.ZERO));
+            it.setTotalRent(ContractReceipts.totalRent(c.getMonthRent(), c.getTermMonths()));
+            it.setRepaymentRatio(ContractReceipts.ratio(it.getCollectedRent(), it.getTotalRent()));
             items.add(it);
         }
 
@@ -329,9 +338,11 @@ public class ContractService {
         rp.setTotalPeriods(totalPeriods);
         rp.setElapsedPeriods(elapsed);
         rp.setBilledPeriods(billed);
-        rp.setProgressRatio(totalPeriods > 0
-                ? BigDecimal.valueOf(elapsed).divide(BigDecimal.valueOf(totalPeriods), 4, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO);
+        BigDecimal received = ContractReceipts.totals(rentBillMapper.selectList(new LambdaQueryWrapper<RentBill>()
+                .eq(RentBill::getContractId, c.getId()))).getOrDefault(c.getId(), BigDecimal.ZERO);
+        rp.setCollectedRent(received);
+        rp.setTotalRent(ContractReceipts.totalRent(c.getMonthRent(), c.getTermMonths()));
+        rp.setProgressRatio(ContractReceipts.ratio(received, rp.getTotalRent()));
         return rp;
     }
 

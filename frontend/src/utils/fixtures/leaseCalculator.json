@@ -1,0 +1,605 @@
+{
+  "source": "levy1688888/equipment-lease-calculator@316cc706a4d3aa118c2be49ed00d6db53de645c7",
+  "cases": [
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "a",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 7396.53,
+        "totalRent": 443791.8,
+        "totalInterest": 191791.8,
+        "totalPrincipal": 252000,
+        "profit": 221791.79999999996,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.36549185947175866,
+        "nominalAnnualIrr": 0.3155933088401164,
+        "customerAnnualIrr": 0.2807312642125126,
+        "lastInterest": 150.57
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "a",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 7396.53,
+        "totalRent": 443791.8,
+        "totalInterest": 191791.8,
+        "totalPrincipal": 252000,
+        "profit": 249791.79999999996,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.38365863604623485,
+        "nominalAnnualIrr": 0.32916484325915585,
+        "customerAnnualIrr": 0.3000891690422889,
+        "lastInterest": 150.57
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "a",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 22418.49,
+        "totalRent": 448369.8,
+        "totalInterest": 196369.8,
+        "totalPrincipal": 252000,
+        "profit": 226369.79999999996,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3547172301023376,
+        "nominalAnnualIrr": 0.3154109074778071,
+        "customerAnnualIrr": 0.27442927550772245,
+        "lastInterest": 1318.67
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "a",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 22418.49,
+        "totalRent": 448369.8,
+        "totalInterest": 196369.8,
+        "totalPrincipal": 252000,
+        "profit": 254369.8,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3725579489996944,
+        "nominalAnnualIrr": 0.32954904470261814,
+        "customerAnnualIrr": 0.2933262068860434,
+        "lastInterest": 1318.67
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "a",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 45516.69,
+        "totalRent": 455166.9,
+        "totalInterest": 203166.9,
+        "totalPrincipal": 252000,
+        "profit": 233166.90000000002,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3399614014008865,
+        "nominalAnnualIrr": 0.3151340362068773,
+        "customerAnnualIrr": 0.26562501166229024,
+        "lastInterest": 5057.44
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "a",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 45516.69,
+        "totalRent": 455166.9,
+        "totalInterest": 203166.9,
+        "totalPrincipal": 252000,
+        "profit": 261166.90000000002,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.35733113601289435,
+        "nominalAnnualIrr": 0.3300911020927011,
+        "customerAnnualIrr": 0.2838724218234263,
+        "lastInterest": 5057.44
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "a",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 93705.38,
+        "totalRent": 468526.9,
+        "totalInterest": 216526.9,
+        "totalPrincipal": 252000,
+        "profit": 246526.90000000002,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3145791151295052,
+        "nominalAnnualIrr": 0.3145791151295051,
+        "customerAnnualIrr": 0.25000000837291125,
+        "lastInterest": 18741.07
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "a",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 93705.38,
+        "totalRent": 468526.9,
+        "totalInterest": 216526.9,
+        "totalPrincipal": 252000,
+        "profit": 274526.9,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.33106990090210875,
+        "nominalAnnualIrr": 0.33106990090210864,
+        "customerAnnualIrr": 0.2670800847565684,
+        "lastInterest": 18741.07
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "b",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 8218.37,
+        "totalRent": 493102.2,
+        "totalInterest": 213102.2,
+        "totalPrincipal": 280000,
+        "profit": 271102.19999999984,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.4448057702984123,
+        "nominalAnnualIrr": 0.3736749080069015,
+        "customerAnnualIrr": 0.35042552320819165,
+        "lastInterest": 167.66
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "b",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 8218.37,
+        "totalRent": 493102.2,
+        "totalInterest": 213102.2,
+        "totalPrincipal": 280000,
+        "profit": 299102.19999999984,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.46023247008594237,
+        "nominalAnnualIrr": 0.3846312331272874,
+        "customerAnnualIrr": 0.3670302556323417,
+        "lastInterest": 167.66
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "b",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 24909.44,
+        "totalRent": 498188.8,
+        "totalInterest": 218188.8,
+        "totalPrincipal": 280000,
+        "profit": 276188.8,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.4292201187495597,
+        "nominalAnnualIrr": 0.3735568044445734,
+        "customerAnnualIrr": 0.3404957699574358,
+        "lastInterest": 1465.4
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "b",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 24909.44,
+        "totalRent": 498188.8,
+        "totalInterest": 218188.8,
+        "totalPrincipal": 280000,
+        "profit": 304188.80000000005,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.44446071015789745,
+        "nominalAnnualIrr": 0.38516990244427474,
+        "customerAnnualIrr": 0.3567833495927708,
+        "lastInterest": 1465.4
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "b",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 50574.1,
+        "totalRent": 505741,
+        "totalInterest": 225741,
+        "totalPrincipal": 280000,
+        "profit": 283741,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.408186392652127,
+        "nominalAnnualIrr": 0.3733405930478051,
+        "customerAnnualIrr": 0.3268550857313002,
+        "lastInterest": 5619.35
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "b",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 50574.1,
+        "totalRent": 505741,
+        "totalInterest": 225741,
+        "totalPrincipal": 280000,
+        "profit": 311741,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.42314476516277355,
+        "nominalAnnualIrr": 0.3859126263656625,
+        "customerAnnualIrr": 0.3426871286690847,
+        "lastInterest": 5619.35
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "b",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 104117.09,
+        "totalRent": 520585.45,
+        "totalInterest": 240585.45,
+        "totalPrincipal": 280000,
+        "profit": 298585.44999999995,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3728081387854201,
+        "nominalAnnualIrr": 0.3728081387854202,
+        "customerAnnualIrr": 0.30327908153734384,
+        "lastInterest": 20823.43
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "b",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 104117.09,
+        "totalRent": 520585.45,
+        "totalInterest": 240585.45,
+        "totalPrincipal": 280000,
+        "profit": 326585.44999999995,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.3872034245907807,
+        "nominalAnnualIrr": 0.38720342459078083,
+        "customerAnnualIrr": 0.31826808736943146,
+        "lastInterest": 20823.43
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "c",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 10500,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 408000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.6698643593101519,
+        "nominalAnnualIrr": 0.5238544688826718,
+        "customerAnnualIrr": 0.5454050215765316,
+        "lastInterest": 5833.53
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 12,
+        "mode": "c",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 10500,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 436000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.6799648384633361,
+        "nominalAnnualIrr": 0.530149770179007,
+        "customerAnnualIrr": 0.5566086286918235,
+        "lastInterest": 5833.53
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "c",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 31500,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 408000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.6273584970190025,
+        "nominalAnnualIrr": 0.5178395219325131,
+        "customerAnnualIrr": 0.5142363760992499,
+        "lastInterest": 17500
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 4,
+        "mode": "c",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 31500,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 436000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.6377192861536862,
+        "nominalAnnualIrr": 0.5250132703079848,
+        "customerAnnualIrr": 0.5255864222044386,
+        "lastInterest": 17500
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "c",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 63000,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 408000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.5734041099349971,
+        "nominalAnnualIrr": 0.5087081216713891,
+        "customerAnnualIrr": 0.4739529771162523,
+        "lastInterest": 35000
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 2,
+        "mode": "c",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 63000,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 436000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.5840803927083571,
+        "nominalAnnualIrr": 0.5172051109977966,
+        "customerAnnualIrr": 0.4854659581941996,
+        "lastInterest": 35000
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "c",
+        "refundDeposit": true
+      },
+      "expected": {
+        "rent": 126000,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 408000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.49038356248844517,
+        "nominalAnnualIrr": 0.49038356248844506,
+        "customerAnnualIrr": 0.41041496500941843,
+        "lastInterest": 70000
+      }
+    },
+    {
+      "input": {
+        "contractPrice": 280000,
+        "purchasePrice": 250000,
+        "depositPercent": 10,
+        "residualPercent": 10,
+        "annualRatePercent": 25,
+        "years": 5,
+        "frequency": 1,
+        "mode": "c",
+        "refundDeposit": false
+      },
+      "expected": {
+        "rent": 126000,
+        "totalRent": 630000,
+        "totalInterest": 350000,
+        "totalPrincipal": 280000,
+        "profit": 436000,
+        "equity": 222000,
+        "effectiveAnnualIrr": 0.5014826304327784,
+        "nominalAnnualIrr": 0.5014826304327784,
+        "customerAnnualIrr": 0.42209849743560746,
+        "lastInterest": 70000
+      }
+    }
+  ]
+}

@@ -64,6 +64,7 @@ class ContractEditTest {
     private ContractChangeMapper changeMapper;
     private AssetService assetService;
     private CustomerMapper customerMapper;
+    private top.aole.rent.modules.billing.mapper.RentBillMapper rentBillMapper;
     private ContractService service;
     private Contract contract;
 
@@ -71,7 +72,7 @@ class ContractEditTest {
     static void initLambdaCache() {
         MapperBuilderAssistant a = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         for (Class<?> c : new Class<?>[]{Contract.class, ContractAsset.class, RentSchedule.class, DepositLedger.class,
-                ContractChange.class, Customer.class}) {
+                ContractChange.class, Customer.class, top.aole.rent.modules.billing.domain.RentBill.class}) {
             TableInfoHelper.initTableInfo(a, c);
         }
     }
@@ -85,9 +86,11 @@ class ContractEditTest {
         changeMapper = mock(ContractChangeMapper.class);
         assetService = mock(AssetService.class);
         customerMapper = mock(CustomerMapper.class);
+        rentBillMapper = mock(top.aole.rent.modules.billing.mapper.RentBillMapper.class);
         service = new ContractService(contractMapper, contractAssetMapper, mock(ContractBoqService.class), mock(ContractPaymentService.class), mock(top.aole.rent.modules.purchase.mapper.PayableMapper.class),
                 scheduleMapper, depositMapper, changeMapper,
-                mock(AssetMapper.class), assetService, customerMapper, mock(RuleConfigService.class), mock(AuditLogService.class));
+                mock(AssetMapper.class), assetService, customerMapper, mock(RuleConfigService.class), mock(AuditLogService.class),
+                rentBillMapper);
         UserContext.set(new CurrentUser(1005L, "财务", "财务", null));
 
         contract = new Contract();
@@ -177,6 +180,24 @@ class ContractEditTest {
         verify(depositMapper, never()).insert(any(DepositLedger.class));
         verify(assetService, never()).changeHolder(anyLong(), eq(7L));
         verify(contractMapper).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void listProgressUsesActualReceiptsEvenWhenRentalPeriodsHaveElapsed() {
+        when(contractMapper.selectList(any(Wrapper.class))).thenReturn(Arrays.asList(contract));
+        when(rentBillMapper.selectList(any(Wrapper.class))).thenReturn(new ArrayList<>());
+        top.aole.rent.modules.contract.dto.ContractListItem row = service.list(null,null,null,1,20).getRecords().get(0);
+        assertTrue(row.getElapsedPeriods() > 0);
+        assertEquals(0,row.getCollectedRent().compareTo(BigDecimal.ZERO));
+        assertEquals(0,row.getRepaymentRatio().compareTo(BigDecimal.ZERO));
+
+        top.aole.rent.modules.billing.domain.RentBill paid = new top.aole.rent.modules.billing.domain.RentBill();
+        paid.setId(1L); paid.setContractId(contract.getId()); paid.setBillKind("正常"); paid.setStatus("已核销");
+        paid.setReceivedAmount(contract.getMonthRent());
+        when(rentBillMapper.selectList(any(Wrapper.class))).thenReturn(Arrays.asList(paid));
+        row = service.list(null,null,null,1,20).getRecords().get(0);
+        assertEquals(0,row.getCollectedRent().compareTo(contract.getMonthRent()));
+        assertEquals(0,row.getRepaymentRatio().compareTo(BigDecimal.ONE.divide(BigDecimal.valueOf(contract.getTermMonths()),6,java.math.RoundingMode.HALF_UP)));
     }
 
     private ContractEditRequest request(int term, String rent, String deposit, Long customerId) {

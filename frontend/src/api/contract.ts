@@ -15,6 +15,9 @@ export interface ContractListItem {
   assetCount?: number
   startDate?: string
   elapsedPeriods?: number
+  collectedRent?: number
+  totalRent?: number
+  repaymentRatio?: number
 }
 
 export interface Reconciliation {
@@ -128,7 +131,7 @@ export interface ContractDetail {
   sensitiveMasked?: boolean
   assets: { assetId: number; serialNo?: string; category?: string; model?: string; assetStatus?: string; allocRent: number }[]
   reconciliation: Reconciliation
-  repayment: { totalPeriods: number; elapsedPeriods: number; billedPeriods: number; progressRatio: number }
+  repayment: { totalPeriods: number; elapsedPeriods: number; billedPeriods: number; progressRatio: number; collectedRent?: number; totalRent?: number }
   schedule: ScheduleLine[]
   rentComposition?: RentComposition
   pnl?: Pnl

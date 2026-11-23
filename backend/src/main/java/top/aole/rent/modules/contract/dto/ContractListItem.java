@@ -23,6 +23,10 @@ public class ContractListItem {
     private BigDecimal endTransferPrice;
     private Integer assetCount;
     private LocalDate startDate;
-    /** 回款进度:已过期数/总期数(计划态口径) */
+    /** 已过租期数，仅表示时间进度 */
     private Integer elapsedPeriods;
+    private BigDecimal collectedRent;
+    private BigDecimal totalRent;
+    /** 实际净收租 / 合同全期租金，不含押金、留购和罚息 */
+    private BigDecimal repaymentRatio;
 }

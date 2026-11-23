@@ -513,7 +513,8 @@ onMounted(() => {
       <el-table-column label="转让价" width="100"><template #default="{ row }">{{ money(row.endTransferPrice) }}</template></el-table-column>
       <el-table-column prop="assetCount" label="设备(台)" width="90" />
       <el-table-column label="回款进度" width="130"><template #default="{ row }">
-        <el-progress :percentage="row.termMonths ? Math.round((row.elapsedPeriods || 0) / row.termMonths * 100) : 0" :stroke-width="12" />
+        <el-progress v-if="row.repaymentRatio != null" :percentage="Math.round(row.repaymentRatio * 100)" :stroke-width="12" />
+        <span v-else>暂无实收数据</span>
       </template></el-table-column>
     </el-table>
 
@@ -583,9 +584,10 @@ onMounted(() => {
         </div>
 
         <!-- 回款进度 -->
-        <div class="block-title">回款进度(计划态口径;真实收款态归 M2)</div>
-        <el-progress :percentage="Math.round(detail.repayment.progressRatio * 100)" :stroke-width="16" />
-        <div class="sub">已过 {{ detail.repayment.elapsedPeriods }} / {{ detail.repayment.totalPeriods }} 期 · 已生成收租单 {{ detail.repayment.billedPeriods }} 期</div>
+        <div class="block-title">回款进度（实际收租）</div>
+        <el-progress v-if="detail.repayment.collectedRent != null" :percentage="Math.round(detail.repayment.progressRatio * 100)" :stroke-width="16" />
+        <div class="sub" v-if="detail.repayment.collectedRent != null">实际净收租 {{ money(detail.repayment.collectedRent) }} / 全期租金 {{ money(detail.repayment.totalRent) }}（不含押金、留购价和罚息）</div>
+        <div class="sub">租期时间进度：已过 {{ detail.repayment.elapsedPeriods }} / {{ detail.repayment.totalPeriods }} 期 · 已生成收租单 {{ detail.repayment.billedPeriods }} 期</div>
 
         <!-- 每期租金构成 -->
         <div class="block-title" v-if="detail.rentComposition">每期租金构成</div>
