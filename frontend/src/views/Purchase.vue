@@ -5,9 +5,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchPurchases, fetchPurchaseDetail, createPurchaseOrder, receivePurchase, returnPurchase,
   editPurchaseHeader, replacePurchaseItems, editPayable, payPayable, unpayPayable,
+  bindPurchaseContract, recordPurchaseAcceptance,
   type PurchaseListItem, type PurchaseDetail, type PayableLine,
 } from '@/api/purchase'
-import { toTermInputs, checkTermRows, fetchAssets, type TermRow, type AssetListItem } from '@/api/asset'
+import { fetchAssets, type AssetListItem } from '@/api/asset'
+import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchSupplierPool } from '@/api/supplier'
 import { fetchContracts, fetchContractPaymentTerms, type ContractListItem,
   type ContractPaymentTermView } from '@/api/contract'
@@ -38,15 +40,23 @@ async function openDetail(id: number) {
   activeTab.value = 'detail'
 }
 
-// ---- 下单:选合同 → 勾该合同下的台账设备(供应商/付款条件/预计付款金额自动带出) ----
+// ---- 下单:支持先签后采(选合同)与先采后签(不选合同,填意向客户/选未签约设备) ----
 const orderDlg = ref(false)
-const oForm = reactive<Record<string, any>>({ no: '', contractId: undefined, remark: '', expectReceiveDate: '' })
+const oForm = reactive<Record<string, any>>({
+  no: '', contractId: undefined, intendedCustomerId: undefined,
+  remark: '', expectReceiveDate: '',
+  warrantyYears: 5, deliveryAddress: '', deliveryContact: '', weighTons: undefined,
+})
 const contracts = ref<ContractListItem[]>([])
 const contractsLoading = ref(false)
+const customers = ref<CustomerPoolItem[]>([])
 const candidateAssets = ref<AssetListItem[]>([])
 const assetsLoading = ref(false)
 const pickedAssets = ref<AssetListItem[]>([])
 
+async function loadCustomers() {
+  customers.value = (await fetchCustomerPool({ page: 1, size: 500 })).records
+}
 async function loadContracts() {
   contractsLoading.value = true
   try {
@@ -59,10 +69,15 @@ async function loadCandidateAssets(contractId?: number) {
   candidateAssets.value = []
   pickedAssets.value = []
   loadOrderPayTerms(contractId)
-  if (!contractId) return
   assetsLoading.value = true
   try {
-    candidateAssets.value = (await fetchAssets({ contractId, page: 1, size: 500 })).records
+    if (contractId) {
+      candidateAssets.value = (await fetchAssets({ contractId, page: 1, size: 500 })).records
+    } else {
+      // 先采后签：加载状态为采购/投放且尚未签约的设备
+      const all = (await fetchAssets({ page: 1, size: 500 })).records
+      candidateAssets.value = all.filter((a) => !a.contractId && (a.status === '采购' || a.status === '投放'))
+    }
   } finally {
     assetsLoading.value = false
   }
@@ -76,32 +91,107 @@ async function loadOrderPayTerms(contractId?: number) {
 }
 /** 预计付款金额合计 = 勾选设备的合同价合计 */
 const orderTotal = computed(() => pickedAssets.value.reduce((s, a) => s + Number(a.purchasePrice || 0), 0))
-const unavailableTip = (row: AssetListItem) => (row.purchasePrice == null ? '该设备没有合同价，请先在合同清单里填单价' : '')
+const unavailableTip = (row: AssetListItem) => (row.purchasePrice == null ? '该设备没有合同价，请先在设备台账或合同清单里填价格' : '')
 async function openOrder() {
-  Object.assign(oForm, { no: '', contractId: undefined, remark: '', expectReceiveDate: '' })
+  Object.assign(oForm, {
+    no: '', contractId: undefined, intendedCustomerId: undefined,
+    remark: '', expectReceiveDate: '',
+    warrantyYears: 5, deliveryAddress: '', deliveryContact: '', weighTons: undefined,
+  })
   candidateAssets.value = []
   pickedAssets.value = []
   orderPayView.value = null
   orderDlg.value = true
-  if (!contracts.value.length) await loadContracts()
+  await Promise.all([
+    contracts.value.length ? null : loadContracts(),
+    customers.value.length ? null : loadCustomers(),
+  ])
+  await loadCandidateAssets(undefined)
 }
 async function submitOrder() {
-  if (!oForm.no || !oForm.contractId) { ElMessage.warning('采购单号与合同必填（先签约后采购）'); return }
+  if (!oForm.no) { ElMessage.warning('采购单号必填'); return }
   if (!pickedAssets.value.length) { ElMessage.warning('请在下方勾选要采购的设备'); return }
   const noPrice = pickedAssets.value.filter((a) => a.purchasePrice == null)
-  if (noPrice.length) { ElMessage.warning(`有 ${noPrice.length} 台设备没有合同价，请先在合同清单里填单价`); return }
+  if (noPrice.length) { ElMessage.warning(`有 ${noPrice.length} 台设备没有合同价，请先填价格`); return }
+  await createPurchaseOrder({
+    no: oForm.no,
+    contractId: oForm.contractId || undefined,
+    intendedCustomerId: oForm.intendedCustomerId || undefined,
+    remark: oForm.remark,
+    expectReceiveDate: oForm.expectReceiveDate || undefined,
+    warrantyYears: oForm.warrantyYears ?? undefined,
+    deliveryAddress: oForm.deliveryAddress || undefined,
+    deliveryContact: oForm.deliveryContact || undefined,
+    weighTons: oForm.weighTons ?? undefined,
+    items: pickedAssets.value.map((a) => ({ assetId: a.id })),
+  })
+  ElMessage.success(oForm.contractId
+    ? '采购下单成功（已按合同付款方式一次生成全部阶段的应付）'
+    : '先采后签采购单已创建（可待租赁合同签约后再补绑合同）')
+  orderDlg.value = false
+  loadList()
+}
+
+// ---- 补绑租赁合同（先采后签） ----
+const bindDlg = ref(false)
+const bindSaving = ref(false)
+const bindContractId = ref<number | undefined>(undefined)
+async function openBindContract() {
+  bindContractId.value = undefined
+  if (!contracts.value.length) await loadContracts()
+  bindDlg.value = true
+}
+async function submitBindContract() {
+  if (!detail.value || !bindContractId.value) { ElMessage.warning('请选择租赁合同'); return }
+  bindSaving.value = true
   try {
-    await createPurchaseOrder({
-      no: oForm.no,
-      contractId: oForm.contractId,
-      remark: oForm.remark,
-      expectReceiveDate: oForm.expectReceiveDate || undefined,
-      items: pickedAssets.value.map((a) => ({ assetId: a.id })),
-    })
-    ElMessage.success('采购下单成功（已按合同付款方式一次生成全部阶段的应付）')
-    orderDlg.value = false
+    detail.value = await bindPurchaseContract(detail.value.id, bindContractId.value)
+    bindDlg.value = false
+    ElMessage.success('已补绑租赁合同，相关设备已自动关联')
     loadList()
-  } catch { /* 无合同拒绝已提示 */ }
+  } finally {
+    bindSaving.value = false
+  }
+}
+
+// ---- 登记验收 / 资料审核 / 质保 ----
+const accDlg = ref(false)
+const accSaving = ref(false)
+const accForm = reactive<Record<string, any>>({
+  acceptanceDate: '', auditPassDate: '', warrantyYears: 5, weighTons: undefined,
+  deliveryAddress: '', deliveryContact: '',
+})
+function openAcceptance() {
+  const d = detail.value
+  if (!d) return
+  Object.assign(accForm, {
+    acceptanceDate: d.acceptanceDate || new Date().toISOString().slice(0, 10),
+    auditPassDate: d.auditPassDate || '',
+    warrantyYears: d.warrantyYears ?? 5,
+    weighTons: d.weighTons ?? undefined,
+    deliveryAddress: d.deliveryAddress || '',
+    deliveryContact: d.deliveryContact || '',
+  })
+  accDlg.value = true
+}
+async function submitAcceptance() {
+  if (!detail.value) return
+  accSaving.value = true
+  try {
+    detail.value = await recordPurchaseAcceptance(detail.value.id, {
+      acceptanceDate: accForm.acceptanceDate || undefined,
+      auditPassDate: accForm.auditPassDate || undefined,
+      warrantyYears: accForm.warrantyYears ?? undefined,
+      weighTons: accForm.weighTons ?? undefined,
+      deliveryAddress: accForm.deliveryAddress || undefined,
+      deliveryContact: accForm.deliveryContact || undefined,
+    })
+    accDlg.value = false
+    ElMessage.success('验收/审核及质保已登记，对应月结/验收应付到期日已兑现')
+    loadList()
+  } finally {
+    accSaving.value = false
+  }
 }
 async function doReceive(row: PurchaseListItem) {
   await ElMessageBox.confirm(`入库将给单上的设备登记入库，并按付款条件逐台生成「入库」阶段应付，确认？`, '采购入库', { type: 'warning' })
@@ -319,7 +409,7 @@ onMounted(() => {
 <template>
   <div>
     <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
-      title="先签约后采购：下单必绑存续合同（无合同拒建单）→ 按合同付款条件逐台生成应付（下单阶段下单即生成、入库阶段入库生成；=负债，进现金流驾驶舱）→ 退货红冲。成本对 GP/LP 打码 🔒。" />
+      title="支持「先签约后采购」与「先采购后补绑租赁合同」两种场景；按付款方式生成全部阶段应付，验收/审核通过后自动兑现月结账期并起算质保期。成本对 GP/LP 打码 🔒。" />
     <el-tabs v-model="activeTab">
       <el-tab-pane label="采购单列表" name="list">
         <div class="bar">
@@ -364,21 +454,39 @@ onMounted(() => {
       <el-tab-pane label="采购详情" name="detail" :disabled="!detail">
         <template v-if="detail">
           <div class="dt-bar">
-            <span class="muted">试跑阶段数据可改：单头 / 明细 / 应付三块都能编辑，改动全部留痕。已红冲的单只读。</span>
-            <el-button v-if="canEdit" type="warning" size="small" @click="openHdrEdit">编辑单头</el-button>
+            <span class="muted">试跑阶段数据可改：单头 / 明细 / 应付均可编辑；支持补绑租赁合同及登记验收/质保。已红冲的单只读。</span>
+            <div style="display:flex;gap:8px">
+              <el-button v-if="canEdit && !detail.contractId" type="primary" size="small" @click="openBindContract">补绑租赁合同</el-button>
+              <el-button v-if="canEdit" type="success" size="small" @click="openAcceptance">登记验收 / 质保</el-button>
+              <el-button v-if="canEdit" type="warning" size="small" @click="openHdrEdit">编辑单头</el-button>
+            </div>
           </div>
           <el-descriptions :column="3" border>
             <el-descriptions-item label="采购单号">{{ detail.no }}</el-descriptions-item>
             <el-descriptions-item label="状态"><el-tag size="small" :type="statusTag[detail.status] || 'info'">{{ detail.status }}</el-tag></el-descriptions-item>
             <el-descriptions-item label="采购总额">{{ money(detail.totalAmount) }}</el-descriptions-item>
-            <el-descriptions-item label="合同">{{ detail.contractNo }}</el-descriptions-item>
-            <el-descriptions-item label="客户">{{ detail.customerName }}</el-descriptions-item>
+            <el-descriptions-item label="租赁合同">
+              <a v-if="detail.contractId" class="lnk" @click="goContract(detail.contractId)">{{ detail.contractNo }}</a>
+              <el-tag v-else size="small" type="warning" effect="plain">先采后签·待补绑</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="客户 / 意向客户">{{ detail.customerName || detail.intendedCustomerName || '—' }}</el-descriptions-item>
             <el-descriptions-item label="供应商">{{ detail.supplierName }}</el-descriptions-item>
             <el-descriptions-item label="待付应付">{{ money(detail.payableOutstanding) }}</el-descriptions-item>
             <el-descriptions-item label="下单日">{{ detail.orderDate }}</el-descriptions-item>
             <el-descriptions-item label="入库日">{{ detail.receiveDate || '—' }}</el-descriptions-item>
             <el-descriptions-item label="预计入库日">{{ detail.expectReceiveDate || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="付款方式（继承自合同）" :span="2">
+            <el-descriptions-item label="验收合格 / 审核日">
+              {{ detail.acceptanceDate || '—' }} / {{ detail.auditPassDate || '—' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="质保 / 过磅">
+              {{ detail.warrantyYears ? `${detail.warrantyYears}年` : '—' }}
+              <span v-if="detail.warrantyEndDate">（至 {{ detail.warrantyEndDate }}）</span>
+              <span v-if="detail.weighTons"> · {{ detail.weighTons }}吨</span>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detail.deliveryAddress || detail.deliveryContact" label="交付地 / 联系人" :span="3">
+              {{ detail.deliveryAddress || '—' }} <span v-if="detail.deliveryContact">（{{ detail.deliveryContact }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="付款方式（继承自合同）" :span="3">
               {{ detail.contractPaymentTerms || '—' }}
             </el-descriptions-item>
           </el-descriptions>
@@ -620,17 +728,67 @@ onMounted(() => {
     <ProofViewer v-model="proofView.show" biz-type="payable" :biz-id="proofView.id" :title="proofView.title"
       :can-supplement="canSupplementPay" @changed="onProofChanged" />
 
-    <!-- 下单弹窗 -->
-    <el-dialog v-model="orderDlg" title="采购下单（先签约后采购）" width="800px">
-      <el-form :inline="true">
-        <el-form-item label="采购单号"><el-input v-model="oForm.no" placeholder="CG-2026-xxx" /></el-form-item>
-        <el-form-item label="合同">
-          <el-select v-model="oForm.contractId" filterable clearable style="width:280px" :loading="contractsLoading"
-            placeholder="选合同（先签约后采购）" @change="loadCandidateAssets">
+    <!-- 补绑租赁合同 -->
+    <el-dialog v-model="bindDlg" title="补绑租赁合同（先采后签）" width="480px">
+      <el-form label-width="100px">
+        <el-form-item label="租赁合同" required>
+          <el-select v-model="bindContractId" filterable style="width:100%" placeholder="选择待绑定的租赁合同">
             <el-option v-for="c in contracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.status}`" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="oForm.remark" style="width:200px" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bindDlg = false">取消</el-button>
+        <el-button type="primary" :loading="bindSaving" @click="submitBindContract">确认补绑</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 登记验收 / 资料审核 / 质保 -->
+    <el-dialog v-model="accDlg" title="登记验收合格 / 资料审核 / 质保" width="520px">
+      <el-form label-width="110px">
+        <el-form-item label="验收合格日">
+          <el-date-picker v-model="accForm.acceptanceDate" type="date" value-format="YYYY-MM-DD" style="width:200px" />
+          <span class="muted" style="margin-left:8px">自动起算质保到期日</span>
+        </el-form-item>
+        <el-form-item label="审核通过日">
+          <el-date-picker v-model="accForm.auditPassDate" type="date" value-format="YYYY-MM-DD" style="width:200px" />
+          <span class="muted" style="margin-left:8px">兑现「审核通过」月结应付</span>
+        </el-form-item>
+        <el-form-item label="质保年限(年)">
+          <el-input-number v-model="accForm.warrantyYears" :min="0" :max="20" :precision="0" style="width:140px" />
+        </el-form-item>
+        <el-form-item label="过磅重量(吨)">
+          <el-input-number v-model="accForm.weighTons" :min="0" :precision="2" :controls="false" style="width:140px" placeholder="如 45" />
+        </el-form-item>
+        <el-form-item label="交付/安装地址"><el-input v-model="accForm.deliveryAddress" /></el-form-item>
+        <el-form-item label="交付联系人"><el-input v-model="accForm.deliveryContact" placeholder="姓名 + 电话" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="accDlg = false">取消</el-button>
+        <el-button type="primary" :loading="accSaving" @click="submitAcceptance">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 下单弹窗 -->
+    <el-dialog v-model="orderDlg" title="采购下单（支持先签约后采购 / 先采后签）" width="840px">
+      <el-form :inline="true" size="small">
+        <el-form-item label="采购单号" required><el-input v-model="oForm.no" placeholder="CG-2026-xxx" /></el-form-item>
+        <el-form-item label="租赁合同">
+          <el-select v-model="oForm.contractId" filterable clearable style="width:260px" :loading="contractsLoading"
+            placeholder="可选（留空=先采后签）" @change="loadCandidateAssets">
+            <el-option v-for="c in contracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.status}`" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="!oForm.contractId" label="意向客户">
+          <el-select v-model="oForm.intendedCustomerId" filterable clearable style="width:200px" placeholder="先采后签时记录">
+            <el-option v-for="cu in customers" :key="cu.id" :label="cu.name" :value="cu.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="质保(年)"><el-input-number v-model="oForm.warrantyYears" :min="0" :max="20" :precision="0" :controls="false" style="width:70px" /></el-form-item>
+        <el-form-item label="过磅(吨)"><el-input-number v-model="oForm.weighTons" :min="0" :precision="2" :controls="false" style="width:80px" /></el-form-item>
+        <el-form-item label="交付地址"><el-input v-model="oForm.deliveryAddress" style="width:220px" placeholder="如 花都区茶塘园区B区1楼" /></el-form-item>
+        <el-form-item label="交付联系人"><el-input v-model="oForm.deliveryContact" style="width:160px" placeholder="姓名+电话" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="oForm.remark" style="width:180px" /></el-form-item>
       </el-form>
       <h4>勾选设备（该合同下的设备租赁台账；供应商、付款条件、预计付款金额自动带出）</h4>
       <el-table :data="candidateAssets" v-loading="assetsLoading" size="small" border max-height="300"

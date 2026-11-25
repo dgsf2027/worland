@@ -33,11 +33,17 @@ public class ContractPaymentTerm {
     /** 付款比例(0-1),同合同各段合计=1 */
     private BigDecimal ratio;
 
-    /** 触发时点:下单/入库 */
+    /** 触发时点:下单/入库/验收合格/审核通过 */
     private String triggerPoint;
 
-    /** 到期天数(触发日 + N 天) */
+    /** 到期天数(触发日或月末 + N 天) */
     private Integer dueDays;
+
+    /** 到期规则:after_days/month_end_days/next_month_day/next_2_month_day */
+    private String dueRule;
+
+    /** 指定自然月日(1-31,空=月末) */
+    private Integer dueDayOfMonth;
 
     private LocalDateTime createTime;
 

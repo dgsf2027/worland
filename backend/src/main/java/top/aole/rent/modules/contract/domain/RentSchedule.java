@@ -30,6 +30,18 @@ public class RentSchedule {
 
     private BigDecimal amount;
 
+    /** 期初本金余额(元) */
+    private BigDecimal openingPrincipal;
+
+    /** 本期利息(元) */
+    private BigDecimal interestAmount;
+
+    /** 本期归还本金(元) */
+    private BigDecimal principalAmount;
+
+    /** 期末本金余额(元) */
+    private BigDecimal closingPrincipal;
+
     private Long rentBillId;
 
     /** 计划态:未到期/已生成单 */

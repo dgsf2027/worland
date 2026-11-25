@@ -210,15 +210,19 @@ const assetDialogVisible = ref(false)
 const assetDialogMode = ref<'create' | 'edit'>('create')
 const assetForm = reactive<Record<string, any>>({
   category: '播种墙', model: '', marketPrice: undefined,
-  purchasePrice: undefined, supplierId: undefined, monthlyLaborValue: undefined,
-  replaceHeadcount: undefined, remark: '',
+  purchasePrice: undefined, dealPriceOverride: undefined, supplierId: undefined,
+  monthlyLaborValue: undefined, replaceHeadcount: undefined,
+  warrantyYears: undefined, warrantyStartDate: '', warrantyEndDate: '',
+  deliveryAddress: '', deliveryContact: '', weighTons: undefined, remark: '',
 })
 
 function resetAssetForm() {
   Object.assign(assetForm, {
     category: '播种墙', model: '', marketPrice: undefined,
-    purchasePrice: undefined, supplierId: undefined, monthlyLaborValue: undefined,
-    replaceHeadcount: undefined, remark: '',
+    purchasePrice: undefined, dealPriceOverride: undefined, supplierId: undefined,
+    monthlyLaborValue: undefined, replaceHeadcount: undefined,
+    warrantyYears: undefined, warrantyStartDate: '', warrantyEndDate: '',
+    deliveryAddress: '', deliveryContact: '', weighTons: undefined, remark: '',
   })
 }
 
@@ -236,9 +240,16 @@ function openEditAsset() {
     model: detail.value.model || '',
     marketPrice: detail.value.marketPrice,
     purchasePrice: detail.value.purchasePrice,
+    dealPriceOverride: detail.value.dealPriceOverride,
     supplierId: detail.value.supplierId,
     monthlyLaborValue: detail.value.monthlyLaborValue,
     replaceHeadcount: detail.value.replaceHeadcount,
+    warrantyYears: detail.value.warrantyYears,
+    warrantyStartDate: detail.value.warrantyStartDate || '',
+    warrantyEndDate: detail.value.warrantyEndDate || '',
+    deliveryAddress: detail.value.deliveryAddress || '',
+    deliveryContact: detail.value.deliveryContact || '',
+    weighTons: detail.value.weighTons,
     remark: detail.value.remark || '',
   })
   assetDialogVisible.value = true
@@ -259,7 +270,12 @@ async function submitAsset() {
     ElMessage.warning('品类必填')
     return
   }
-  const body = { ...assetForm, supplierId: assetForm.supplierId || null }
+  const body = {
+    ...assetForm,
+    supplierId: assetForm.supplierId || null,
+    warrantyStartDate: assetForm.warrantyStartDate || null,
+    warrantyEndDate: assetForm.warrantyEndDate || null,
+  }
   if (assetDialogMode.value === 'edit' && detail.value) {
     await updateAsset(detail.value.id, body)
     ElMessage.success('设备资料已更新')
@@ -882,6 +898,14 @@ onMounted(async () => {
           <el-descriptions-item label="残值(市场价×转让率)">{{ money(detail.residualValue) }}</el-descriptions-item>
           <el-descriptions-item label="月替代人工">{{ money(detail.monthlyLaborValue) }}</el-descriptions-item>
           <el-descriptions-item label="自购回本(月)">{{ detail.selfPurchasePayback ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="质保期">
+            {{ detail.warrantyYears ? `${detail.warrantyYears}年` : '—' }}
+            <span v-if="detail.warrantyEndDate">（至 {{ detail.warrantyEndDate }}）</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="过磅重量(吨)">{{ detail.weighTons ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="交付/安装地" :span="2">
+            {{ detail.deliveryAddress || '—' }}<span v-if="detail.deliveryContact">（{{ detail.deliveryContact }}）</span>
+          </el-descriptions-item>
           <el-descriptions-item label="承接客户" :span="3">
             <template v-if="detail.currentHolderCustomerId">
               <a class="lnk" @click="goCustomer(detail.currentHolderCustomerId)">{{ detail.currentHolderName }}</a>
@@ -1202,6 +1226,30 @@ onMounted(async () => {
         <el-form-item label="替代人数">
           <el-input-number v-model="assetForm.replaceHeadcount" :min="0" :step="1" style="width:100%" />
         </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="质保年限(年)">
+              <el-input-number v-model="assetForm.warrantyYears" :min="0" :max="20" :precision="0" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="过磅重量(吨)">
+              <el-input-number v-model="assetForm.weighTons" :min="0" :precision="2" :controls="false" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="质保起算日">
+              <el-date-picker v-model="assetForm.warrantyStartDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="质保到期日">
+              <el-date-picker v-model="assetForm.warrantyEndDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="交付/安装地址"><el-input v-model="assetForm.deliveryAddress" maxlength="255" /></el-form-item>
+        <el-form-item label="交付联系人"><el-input v-model="assetForm.deliveryContact" maxlength="64" placeholder="姓名 + 电话" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="assetForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>

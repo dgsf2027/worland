@@ -84,10 +84,12 @@ DROP TABLE IF EXISTS yc_rent_supplier_payment_payable;
 DROP TABLE IF EXISTS yc_rent_payable;
 DROP TABLE IF EXISTS yc_rent_purchase_in;
 CREATE TABLE yc_rent_purchase_in (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY, no VARCHAR(64), contract_id BIGINT, supplier_id BIGINT,
-  status VARCHAR(16), total_amount DECIMAL(14,2), first_pay_ratio DECIMAL(6,4), account_days INT,
-  pc_id BIGINT,
-  order_date DATE, expect_receive_date DATE, receive_date DATE, project_id BIGINT, remark VARCHAR(500),
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, no VARCHAR(64), contract_id BIGINT, intended_customer_id BIGINT,
+  supplier_id BIGINT, status VARCHAR(16), total_amount DECIMAL(14,2), first_pay_ratio DECIMAL(6,4),
+  account_days INT, pc_id BIGINT, order_date DATE, expect_receive_date DATE, receive_date DATE,
+  acceptance_date DATE, audit_pass_date DATE, warranty_years INT, warranty_end_date DATE,
+  delivery_address VARCHAR(255), delivery_contact VARCHAR(64), weigh_tons DECIMAL(10,2),
+  project_id BIGINT, remark VARCHAR(500),
   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   is_deleted TINYINT NOT NULL DEFAULT 0
 );

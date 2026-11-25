@@ -25,12 +25,21 @@ public class ContractDetailResponse {
     private BigDecimal deposit;
     private BigDecimal endTransferPrice;
     private BigDecimal targetIrr;
+    private BigDecimal leaseAnnualRate;
+    private String interestMode;
     /** 合同税率(0-1) */
     private BigDecimal taxRate;
-    /** 设备总价(含税)= 合同清单合计 */
+    private BigDecimal invoiceTaxRate;
+    private Integer invoiceDeadlineDays;
+    private BigDecimal overdueDailyRate;
+    /** 设备总价(含税)= 合同清单最终成交价 */
     private BigDecimal equipmentTotal;
+    private BigDecimal boqDiscountAmount;
+    private BigDecimal finalDealPrice;
     private LocalDate signDate;
     private LocalDate startDate;
+    private Integer payDayOfMonth;
+    private LocalDate firstPayDate;
     private String remark;
     private Boolean sensitiveMasked;
 
@@ -102,6 +111,10 @@ public class ContractDetailResponse {
         private Integer periodNo;
         private LocalDate dueDate;
         private BigDecimal amount;
+        private BigDecimal openingPrincipal;
+        private BigDecimal interestAmount;
+        private BigDecimal principalAmount;
+        private BigDecimal closingPrincipal;
         private String planStatus;
         private Long rentBillId;
         /** 相对今天:未到期/已到期 */

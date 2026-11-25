@@ -24,8 +24,15 @@ export interface PcContract {
   rentStartDate?: string
   rentStatus?: string
   totalAmount: number
+  detailSubtotal?: number
+  discountAmount?: number
   taxRate: number
   signedDate?: string
+  warrantyYears?: number
+  deliveryAddress?: string
+  deliveryContact?: string
+  acceptanceDate?: string
+  auditPassDate?: string
   status: string
   remark?: string
   summary: PcSummary
@@ -38,6 +45,12 @@ export interface PcTerm {
   amount: number
   paid: number
   unpaid: number
+  triggerPoint?: string
+  dueRule?: string
+  dueDays?: number
+  dueDayOfMonth?: number
+  dueDate?: string
+  ruleDesc?: string
   conditionText?: string
 }
 export interface PcPayment {
@@ -166,4 +179,10 @@ export function addPcInvoice(id: number, body: Record<string, any>): Promise<num
 }
 export function voidPcInvoice(invoiceId: number, reason?: string): Promise<void> {
   return request.post(`/rent/purchase-contracts/invoices/${invoiceId}/void`, { reason })
+}
+export function bindPcRentContract(id: number, rentContractId: number | null): Promise<void> {
+  return request.put(`/rent/purchase-contracts/${id}/bind-rent-contract`, { rentContractId })
+}
+export function recordPcAcceptance(id: number, body: { acceptanceDate?: string; auditPassDate?: string }): Promise<void> {
+  return request.post(`/rent/purchase-contracts/${id}/acceptance`, body)
 }

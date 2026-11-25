@@ -3,6 +3,7 @@ package top.aole.rent.modules.transfer.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import top.aole.rent.common.audit.AuditLogService;
@@ -66,6 +67,9 @@ public class TransferService {
     private final AssetMapper assetMapper;
     private final CustomerMapper customerMapper;
 
+    @Autowired(required = false)
+    private top.aole.rent.modules.billing.mapper.RentBillMapper rentBillMapper;
+
     // ============ M4-01/02 到期转让 ============
 
     /**
@@ -122,7 +126,8 @@ public class TransferService {
         orderMapper.insert(order);
 
         List<String> nominalHits = new ArrayList<>();
-        int count = 0;
+        BigDecimal totalPlannedPrice = BigDecimal.ZERO;
+        Map<Long, BigDecimal> resolvedPrices = new HashMap<>();
         for (Long assetId : assetIds) {
             Asset a = assetService.requireAsset(assetId);
             BigDecimal price = priceByAsset.get(assetId);
@@ -132,9 +137,18 @@ public class TransferService {
             if (price == null) {
                 price = BigDecimal.ZERO;
             }
+            resolvedPrices.put(assetId, price);
+            totalPlannedPrice = totalPlannedPrice.add(price);
+        }
+        boolean agreedBuyout = isContractualNominalBuyout(c, totalPlannedPrice);
+
+        int count = 0;
+        for (Long assetId : assetIds) {
+            Asset a = assetService.requireAsset(assetId);
+            BigDecimal price = resolvedPrices.get(assetId);
             BigDecimal book = assetService.snapshotBookValue(assetId);
             BigDecimal gain = price.subtract(book == null ? BigDecimal.ZERO : book).setScale(2, RoundingMode.HALF_UP);
-            boolean nominal = isNominal(price, book, a.getMarketPrice());
+            boolean nominal = !agreedBuyout && isNominal(price, book, a.getMarketPrice());
 
             TransferOrderLine line = new TransferOrderLine();
             line.setTransferOrderId(order.getId());
@@ -143,6 +157,9 @@ public class TransferService {
             line.setTransferPrice(price);
             line.setGain(gain);
             line.setNominalFlag(nominal ? 1 : 0);
+            if (agreedBuyout) {
+                line.setRemark("按合同约定留购价(" + c.getEndTransferPrice() + "元)正常履约过户");
+            }
             lineMapper.insert(line);
             if (nominal) {
                 nominalHits.add(a.getSerialNo() + "(转让价" + price + " vs 账面" + book
@@ -462,6 +479,29 @@ public class TransferService {
         }
         Customer cust = customerMapper.selectById(c.getCustomerId());
         return cust != null ? cust.getName() : ("客户#" + c.getCustomerId());
+    }
+
+    /**
+     * 合同约定名义留购价正常履约判定(V129):
+     * 合同本身明确约定了期末留购价(如 1.00 元),且本次转让总价 >= 合同约定留购价,
+     * 并且该合同全部正常期次租金已足额核销 → 属于正常履约过户,不再误触名义价异常拦截。
+     */
+    private boolean isContractualNominalBuyout(Contract c, BigDecimal totalTransferPrice) {
+        if (c == null || c.getEndTransferPrice() == null || c.getEndTransferPrice().signum() <= 0) {
+            return false;
+        }
+        if (totalTransferPrice == null || totalTransferPrice.compareTo(c.getEndTransferPrice()) < 0) {
+            return false;
+        }
+        if (rentBillMapper == null || c.getTermMonths() == null || c.getTermMonths() <= 0) {
+            return false;
+        }
+        long settledPeriods = rentBillMapper.selectCount(
+                new LambdaQueryWrapper<top.aole.rent.modules.billing.domain.RentBill>()
+                        .eq(top.aole.rent.modules.billing.domain.RentBill::getContractId, c.getId())
+                        .eq(top.aole.rent.modules.billing.domain.RentBill::getBillKind, "正常")
+                        .eq(top.aole.rent.modules.billing.domain.RentBill::getStatus, "已核销"));
+        return settledPeriods >= c.getTermMonths();
     }
 
     /** 名义价守卫判定:转让价 &lt; 账面价 或 转让价 &lt; 市场价×下限。 */

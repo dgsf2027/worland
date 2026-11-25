@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -37,6 +38,9 @@ public class Asset {
 
     /** 集采价(元·成本口径);book_value 折旧基数 */
     private BigDecimal purchasePrice;
+
+    /** 整单折让后最终成交价(元) */
+    private BigDecimal dealPriceOverride;
 
     private Long supplierId;
 
@@ -73,6 +77,13 @@ public class Asset {
     private Integer overrideIdleDays;
 
     private String remark;
+
+    private Integer warrantyYears;
+    private LocalDate warrantyStartDate;
+    private LocalDate warrantyEndDate;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private BigDecimal weighTons;
 
     private LocalDateTime createTime;
 

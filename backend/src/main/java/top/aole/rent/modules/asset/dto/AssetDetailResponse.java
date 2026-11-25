@@ -33,6 +33,13 @@ public class AssetDetailResponse {
     private Long intendedCustomerId;
     private String intendedCustomerName;
     private Long contractId;
+    private BigDecimal dealPriceOverride;
+    private Integer warrantyYears;
+    private LocalDate warrantyStartDate;
+    private LocalDate warrantyEndDate;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private BigDecimal weighTons;
     private String remark;
     private Boolean sensitiveMasked;
     /** 由哪一行合同清单生成(空=非清单生成) */

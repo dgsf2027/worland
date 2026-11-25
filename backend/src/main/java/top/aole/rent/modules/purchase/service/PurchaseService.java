@@ -130,24 +130,26 @@ public class PurchaseService {
         return new PageResult<>(total, page, size, records);
     }
 
-    // ============ 下单(先签约后采购) ============
+    // ============ 下单(支持先采后签,contractId 可空) ============
 
     @Transactional
     public Long order(PurchaseOrderRequest req) {
-        // 先签约后采购:合同必存在且未作废
-        Contract c = contractMapper.selectById(req.getContractId());
-        if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
-            throw new BizException(404, "合同不存在,不允许建采购单(先签约后采购): contractId=" + req.getContractId());
-        }
-        if ("已作废".equals(c.getStatus())) {
-            throw new BizException(400, "合同已作废,不允许建采购单: " + c.getNo());
+        Contract c = null;
+        if (req.getContractId() != null) {
+            c = contractMapper.selectById(req.getContractId());
+            if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
+                throw new BizException(404, "合同不存在: contractId=" + req.getContractId());
+            }
+            if ("已作废".equals(c.getStatus())) {
+                throw new BizException(400, "合同已作废,不允许建采购单: " + c.getNo());
+            }
         }
         PurchaseIn dup = purchaseInMapper.selectOne(new LambdaQueryWrapper<PurchaseIn>()
                 .eq(PurchaseIn::getNo, req.getNo().trim()));
         if (dup != null) {
             throw new BizException(400, "采购单号已存在: " + req.getNo());
         }
-        // 明细 = 勾选该合同下设备租赁台账里的设备(供应商/价格/付款条件都从台账带出)
+        // 明细 = 勾选台账设备(有合同时校验属于该合同;先采后签时允许勾选未归属合同的设备)
         List<Asset> assets = new ArrayList<>();
         List<Long> pickedIds = new ArrayList<>();
         for (PurchaseOrderRequest.Item item : req.getItems()) {
@@ -160,8 +162,11 @@ public class PurchaseService {
             if (a == null || Integer.valueOf(1).equals(a.getIsDeleted())) {
                 throw new BizException(404, "设备不存在: id=" + assetId);
             }
-            if (!req.getContractId().equals(a.getContractId())) {
+            if (req.getContractId() != null && !req.getContractId().equals(a.getContractId())) {
                 throw new BizException(400, "设备「" + assetLabel(a) + "」不属于合同 " + c.getNo() + ",不能采购");
+            }
+            if (req.getContractId() == null && a.getContractId() != null) {
+                throw new BizException(400, "设备「" + assetLabel(a) + "」已归属租赁合同,请选对应合同下单");
             }
             if (a.getPurchaseInId() != null) {
                 PurchaseIn other = purchaseInMapper.selectById(a.getPurchaseInId());
@@ -169,7 +174,7 @@ public class PurchaseService {
                         + (other == null ? a.getPurchaseInId() : other.getNo()) + " 里,不能重复采购");
             }
             if (a.getPurchasePrice() == null) {
-                throw new BizException(400, "设备「" + assetLabel(a) + "」没有合同价,请先在合同清单里填单价");
+                throw new BizException(400, "设备「" + assetLabel(a) + "」没有合同价/集采价,请先补全价格");
             }
             assets.add(a);
         }
@@ -181,7 +186,6 @@ public class PurchaseService {
         }
         total = total.setScale(2, RoundingMode.HALF_UP);
 
-        // 单头供应商:入参优先;没给就取设备台账上的供应商(全单同一家时)
         Long headSupplier = req.getSupplierId();
         if (headSupplier == null) {
             List<Long> distinct = assets.stream().map(Asset::getSupplierId)
@@ -192,6 +196,8 @@ public class PurchaseService {
         PurchaseIn p = new PurchaseIn();
         p.setNo(req.getNo().trim());
         p.setContractId(req.getContractId());
+        p.setIntendedCustomerId(req.getIntendedCustomerId());
+        p.setPcId(req.getPcId());
         p.setSupplierId(headSupplier);
         p.setStatus("已下单");
         p.setTotalAmount(total);
@@ -200,19 +206,22 @@ public class PurchaseService {
         p.setOrderDate(orderDate);
         p.setExpectReceiveDate(req.getExpectReceiveDate() != null ? req.getExpectReceiveDate()
                 : orderDate.plusDays(purchaseLeadDays()));
+        p.setWarrantyYears(req.getWarrantyYears());
+        p.setDeliveryAddress(req.getDeliveryAddress());
+        p.setDeliveryContact(req.getDeliveryContact());
+        p.setWeighTons(req.getWeighTons());
         p.setRemark(req.getRemark());
         purchaseInMapper.insert(p);
 
-        // 付款条件:明细级 > 整单级 > 默认三段(首付取整单首付比例);逐台生成 触发=下单 的应付
-        // 合同还没设付款方式时按规则写入默认三段(以合同为唯一真相源)
-        contractPaymentService.ensureDefault(req.getContractId(), req.getFirstPayRatio(), req.getAccountDays());
+        if (req.getContractId() != null) {
+            contractPaymentService.ensureDefault(req.getContractId(), req.getFirstPayRatio(), req.getAccountDays());
+        }
         for (int i = 0; i < req.getItems().size(); i++) {
             PurchaseOrderRequest.Item item = req.getItems().get(i);
             Asset a = assets.get(i);
             PurchaseItem pi = new PurchaseItem();
             pi.setPurchaseInId(p.getId());
             pi.setAssetId(a.getId());
-            // 快照设备台账字段(单据留痕用,页面不再展示)
             pi.setSerialNo(a.getSerialNo());
             pi.setCategory(a.getCategory());
             pi.setModel(a.getModel());
@@ -224,14 +233,87 @@ public class PurchaseService {
             pi.setRemark(item.getRemark());
             purchaseItemMapper.insert(pi);
             assetService.bindPurchase(a.getId(), p.getId(), p.getNo());
-            // 付款条件以合同为准(V118):不再接收明细级/整单级条件,
-            // 下单即按合同付款方式一次生成全部阶段的应付
             paymentService.onOrder(p, pi, a.getId(), req.getContractId());
         }
 
         log.info("采购下单: no={}, id={}, contract={}, 勾选设备{}台, total={}, 下单应付={}",
-                p.getNo(), p.getId(), c.getNo(), assets.size(), total, outstanding(p.getId()));
+                p.getNo(), p.getId(), c == null ? "(先采后签)" : c.getNo(), assets.size(), total, outstanding(p.getId()));
         return p.getId();
+    }
+
+    /** 补绑租赁合同(先采后签场景:8 月采购下单、11 月补签租赁合同后一键关联)。 */
+    @Transactional
+    public void bindContract(Long id, Long contractId) {
+        PurchaseIn p = load(id);
+        requireEditable(p);
+        Contract c = contractMapper.selectById(contractId);
+        if (c == null || Integer.valueOf(1).equals(c.getIsDeleted())) {
+            throw new BizException(404, "租赁合同不存在: id=" + contractId);
+        }
+        if ("已作废".equals(c.getStatus())) {
+            throw new BizException(400, "合同已作废,不能关联: " + c.getNo());
+        }
+        p.setContractId(contractId);
+        p.setIntendedCustomerId(c.getCustomerId());
+        purchaseInMapper.updateById(p);
+        auditLogService.record("采购单补绑租赁合同", "purchase_in", id, AuditLogService.EXECUTED,
+                "采购单 " + p.getNo() + " → 租赁合同 " + c.getNo());
+    }
+
+    /** 登记验收合格 / 资料审核通过 / 过磅与质保(自动兑现应付到期日并回填设备质保/交付信息)。 */
+    @Transactional
+    public void recordAcceptance(Long id, PurchaseEditDtos.AcceptanceRequest req) {
+        PurchaseIn p = load(id);
+        requireEditable(p);
+        if (req.getAcceptanceDate() != null) {
+            p.setAcceptanceDate(req.getAcceptanceDate());
+        }
+        if (req.getAuditPassDate() != null) {
+            p.setAuditPassDate(req.getAuditPassDate());
+        }
+        if (req.getWarrantyYears() != null) {
+            p.setWarrantyYears(req.getWarrantyYears());
+        }
+        if (req.getDeliveryAddress() != null) {
+            p.setDeliveryAddress(req.getDeliveryAddress());
+        }
+        if (req.getDeliveryContact() != null) {
+            p.setDeliveryContact(req.getDeliveryContact());
+        }
+        if (req.getWeighTons() != null) {
+            p.setWeighTons(req.getWeighTons());
+        }
+        if (p.getAcceptanceDate() != null && p.getWarrantyYears() != null && p.getWarrantyYears() > 0) {
+            p.setWarrantyEndDate(p.getAcceptanceDate().plusYears(p.getWarrantyYears()));
+        }
+        if (req.getRemark() != null && !req.getRemark().trim().isEmpty()) {
+            p.setRemark(appendRemark(p.getRemark(), "验收:" + req.getRemark().trim()));
+        }
+        purchaseInMapper.updateById(p);
+
+        // 回填验收与质保信息到关联设备台账
+        for (PurchaseItem pi : itemsOf(id)) {
+            if (pi.getAssetId() == null) {
+                continue;
+            }
+            LambdaUpdateWrapper<Asset> uw = new LambdaUpdateWrapper<Asset>().eq(Asset::getId, pi.getAssetId());
+            boolean dirty = false;
+            if (p.getWarrantyYears() != null) { uw.set(Asset::getWarrantyYears, p.getWarrantyYears()); dirty = true; }
+            if (p.getAcceptanceDate() != null) { uw.set(Asset::getWarrantyStartDate, p.getAcceptanceDate()); dirty = true; }
+            if (p.getWarrantyEndDate() != null) { uw.set(Asset::getWarrantyEndDate, p.getWarrantyEndDate()); dirty = true; }
+            if (p.getDeliveryAddress() != null) { uw.set(Asset::getDeliveryAddress, p.getDeliveryAddress()); dirty = true; }
+            if (p.getDeliveryContact() != null) { uw.set(Asset::getDeliveryContact, p.getDeliveryContact()); dirty = true; }
+            if (p.getWeighTons() != null) { uw.set(Asset::getWeighTons, p.getWeighTons()); dirty = true; }
+            if (dirty) {
+                assetMapper.update(null, uw);
+            }
+        }
+        int fixed = paymentService.onAcceptanceUpdated(p);
+        auditLogService.record("采购验收登记", "purchase_in", id, AuditLogService.EXECUTED,
+                "采购单 " + p.getNo() + " 验收日=" + p.getAcceptanceDate() + " 审核日=" + p.getAuditPassDate()
+                        + (p.getWeighTons() != null ? " 过磅=" + p.getWeighTons() + "吨" : "")
+                        + (p.getWarrantyEndDate() != null ? " 质保至=" + p.getWarrantyEndDate() : "")
+                        + (fixed > 0 ? " · 兑现应付到期 " + fixed + " 笔" : ""));
     }
 
     // ============ 整单编辑(V120) ============
@@ -537,10 +619,14 @@ public class PurchaseService {
             if (!"待付".equals(pay.getStatus()) || !Integer.valueOf(1).equals(pay.getDueProvisional())) {
                 continue;
             }
-            int days = paymentService.dueDaysOfTerm(pay.getTermId());
+            LocalDate newDue = paymentService.computeProvisionalDueDate(pay.getTermId(), p.getExpectReceiveDate());
+            if (newDue == null) {
+                int days = paymentService.dueDaysOfTerm(pay.getTermId());
+                newDue = p.getExpectReceiveDate().plusDays(days);
+            }
             payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
                     .eq(Payable::getId, pay.getId())
-                    .set(Payable::getDueDate, p.getExpectReceiveDate().plusDays(days)));
+                    .set(Payable::getDueDate, newDue));
             n++;
         }
         return n;
@@ -677,6 +763,18 @@ public class PurchaseService {
         r.setOrderDate(p.getOrderDate());
         r.setReceiveDate(p.getReceiveDate());
         r.setExpectReceiveDate(p.getExpectReceiveDate());
+        r.setIntendedCustomerId(p.getIntendedCustomerId());
+        if (p.getIntendedCustomerId() != null) {
+            Customer ic = customerMapper.selectById(p.getIntendedCustomerId());
+            r.setIntendedCustomerName(ic != null ? ic.getName() : ("客户#" + p.getIntendedCustomerId()));
+        }
+        r.setAcceptanceDate(p.getAcceptanceDate());
+        r.setAuditPassDate(p.getAuditPassDate());
+        r.setWarrantyYears(p.getWarrantyYears());
+        r.setWarrantyEndDate(p.getWarrantyEndDate());
+        r.setDeliveryAddress(p.getDeliveryAddress());
+        r.setDeliveryContact(p.getDeliveryContact());
+        r.setWeighTons(p.getWeighTons());
         r.setContractPaymentTerms(contractPaymentService.describe(p.getContractId()));
         r.setRemark(p.getRemark());
         r.setSensitiveMasked(!seeCost);

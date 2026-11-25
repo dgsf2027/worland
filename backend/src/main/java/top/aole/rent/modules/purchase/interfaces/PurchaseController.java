@@ -64,6 +64,24 @@ public class PurchaseController {
         return R.ok();
     }
 
+    @ApiOperation("补绑租赁合同(先采后签场景)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购单补绑合同", targetType = "purchase_in")
+    @PostMapping("/{id}/bind-contract")
+    public R<PurchaseDetailResponse> bindContract(
+            @PathVariable Long id, @Validated @RequestBody PurchaseEditDtos.BindContractRequest req) {
+        purchaseService.bindContract(id, req.getContractId());
+        return R.ok(purchaseService.detail(id));
+    }
+
+    @ApiOperation("登记验收/审核通过/过磅与质保(自动兑现月结应付到期日并回填设备质保)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购验收登记", targetType = "purchase_in")
+    @PostMapping("/{id}/accept")
+    public R<PurchaseDetailResponse> recordAcceptance(
+            @PathVariable Long id, @RequestBody PurchaseEditDtos.AcceptanceRequest req) {
+        purchaseService.recordAcceptance(id, req);
+        return R.ok(purchaseService.detail(id));
+    }
+
     // ============ 整单编辑(V120:试跑阶段要能把已录的单改对) ============
 
     @ApiOperation("编辑采购单头(单号/供应商/下单日/预计入库日/入库日/备注);已红冲只读")

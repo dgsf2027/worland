@@ -110,10 +110,24 @@ class ContractPaymentServiceTest {
     }
 
     @Test
-    void 触发点只能是下单或入库() {
+    void 触发点仅允许四种标准节点() {
         BizException e = assertThrows(BizException.class, () -> service.replaceAll(60L,
                 Collections.singletonList(term("首付", "1", "验收", 0))));
-        assertTrue(e.getMessage().contains("下单 或 入库"), e.getMessage());
+        assertTrue(e.getMessage().contains("下单 / 入库 / 验收合格 / 审核通过"), e.getMessage());
+    }
+
+    @Test
+    void 支持验收合格和审核通过及月结规则() {
+        PaymentTermDtos.TermInput t1 = new PaymentTermDtos.TermInput("首笔验收款", new BigDecimal("0.4"), "审核通过", 30, "month_end_days", null);
+        PaymentTermDtos.TermInput t2 = new PaymentTermDtos.TermInput("次月进度款", new BigDecimal("0.3"), "审核通过", 0, "next_month_day", 30);
+        PaymentTermDtos.TermInput t3 = new PaymentTermDtos.TermInput("次次月尾款", new BigDecimal("0.3"), "审核通过", 0, "next_2_month_day", 30);
+        List<ContractPaymentTerm> saved = service.replaceAll(60L, Arrays.asList(t1, t2, t3));
+        assertEquals(3, saved.size());
+        assertEquals("审核通过", saved.get(0).getTriggerPoint());
+        assertEquals("month_end_days", saved.get(0).getDueRule());
+        assertEquals("next_month_day", saved.get(1).getDueRule());
+        assertEquals(Integer.valueOf(30), saved.get(1).getDueDayOfMonth());
+        assertEquals("next_2_month_day", saved.get(2).getDueRule());
     }
 
     @Test

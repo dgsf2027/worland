@@ -81,6 +81,7 @@ public class ContractService {
     private final RentBillMapper rentBillMapper;
 
     private static final String NATURE = "分期收款销售";
+    private static final String NATURE_FINANCE = "设备融资租赁";
     private static final String FORBIDDEN = "融资租赁";
 
     // ============ 列表 ============
@@ -177,11 +178,25 @@ public class ContractService {
         c.setDeposit(deposit);
         c.setEndTransferPrice(req.getEndTransferPrice() != null ? req.getEndTransferPrice() : BigDecimal.ZERO);
         c.setTargetIrr(req.getTargetIrr());
+        c.setLeaseAnnualRate(req.getLeaseAnnualRate());
+        c.setInterestMode(req.getInterestMode());
         c.setTaxRate(req.getTaxRate());
-        c.setNature(NATURE);
+        c.setInvoiceTaxRate(req.getInvoiceTaxRate() != null ? req.getInvoiceTaxRate() : new BigDecimal("0.0300"));
+        c.setInvoiceDeadlineDays(req.getInvoiceDeadlineDays() != null ? req.getInvoiceDeadlineDays() : 10);
+        c.setOverdueDailyRate(req.getOverdueDailyRate() != null ? req.getOverdueDailyRate() : new BigDecimal("0.000500"));
+        c.setBoqDiscountAmount(req.getBoqDiscountAmount() != null ? req.getBoqDiscountAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        if (req.getFinalDealPrice() != null) {
+            BigDecimal deal = req.getFinalDealPrice().setScale(2, RoundingMode.HALF_UP);
+            c.setFinalDealPrice(deal);
+            c.setEquipmentTotal(deal);
+        }
+        String resolvedNature = (req.getNature() == null || req.getNature().trim().isEmpty()) ? NATURE : req.getNature().trim();
+        c.setNature(resolvedNature);
         c.setStatus(activate ? "生效" : "草稿");
         c.setSignDate(signDate);
         c.setStartDate(startDate);
+        c.setPayDayOfMonth(req.getPayDayOfMonth());
+        c.setFirstPayDate(req.getFirstPayDate());
         c.setRemark(req.getRemark());
         contractMapper.insert(c);
 
@@ -195,8 +210,8 @@ public class ContractService {
         }
 
         if (activate) {
-            // 自动生成租金计划 N 期
-            generateSchedule(c.getId(), term, startDate, monthRent);
+            // 自动生成租金计划 N 期(支持报价器逐期本息明细 / 固定每月付款日 / 等额本息自动拆息)
+            generateSchedule(c, req.getScheduleItems());
             // 设备转在租(状态机 owner=AssetService)
             for (Asset a : assets) {
                 assetService.markRented(a.getId(), req.getCustomerId(), c.getId());
@@ -218,17 +233,85 @@ public class ContractService {
         return c.getId();
     }
 
-    /** 生成租金计划 N 期(period 1..N,due=起租日+period 月,均为月租)。 */
-    private void generateSchedule(Long contractId, int term, LocalDate startDate, BigDecimal monthRent) {
+    /** 生成租金计划 N 期:优先采用透传明细;否则按首期付款日/每月固定付款日 + 利率自动拆出本息。 */
+    private void generateSchedule(Contract c, List<ContractSignRequest.ScheduleInput> customItems) {
+        if (customItems != null && !customItems.isEmpty()) {
+            int seq = 1;
+            for (ContractSignRequest.ScheduleInput in : customItems) {
+                int p = in.getPeriodNo() != null ? in.getPeriodNo() : seq;
+                RentSchedule rs = new RentSchedule();
+                rs.setContractId(c.getId());
+                rs.setPeriodNo(p);
+                rs.setDueDate(in.getDueDate() != null ? in.getDueDate() : computePeriodDueDate(c, p));
+                rs.setAmount(in.getAmount() != null ? in.getAmount().setScale(2, RoundingMode.HALF_UP) : c.getMonthRent());
+                rs.setOpeningPrincipal(in.getOpeningPrincipal());
+                rs.setInterestAmount(in.getInterestAmount());
+                rs.setPrincipalAmount(in.getPrincipalAmount());
+                rs.setClosingPrincipal(in.getClosingPrincipal());
+                rs.setPlanStatus("未到期");
+                rentScheduleMapper.insert(rs);
+                seq++;
+            }
+            return;
+        }
+        int term = c.getTermMonths();
+        BigDecimal monthRent = c.getMonthRent();
+        BigDecimal principalBase = c.getFinalDealPrice() != null ? c.getFinalDealPrice() : c.getEquipmentTotal();
+        boolean splitAmort = c.getLeaseAnnualRate() != null && principalBase != null && principalBase.signum() > 0;
+        if (splitAmort && "a".equalsIgnoreCase(c.getInterestMode()) && c.getEndTransferPrice() != null) {
+            principalBase = principalBase.subtract(c.getEndTransferPrice()).max(BigDecimal.ZERO);
+        }
+        BigDecimal balance = splitAmort ? principalBase.setScale(2, RoundingMode.HALF_UP) : null;
+        BigDecimal monthlyRate = splitAmort
+                ? c.getLeaseAnnualRate().divide(BigDecimal.valueOf(1200), 12, RoundingMode.HALF_UP) : null;
+        boolean flatMode = "c".equalsIgnoreCase(c.getInterestMode());
+        BigDecimal flatInterest = splitAmort && flatMode
+                ? principalBase.multiply(c.getLeaseAnnualRate()).divide(BigDecimal.valueOf(1200), 2, RoundingMode.HALF_UP) : null;
+
         for (int p = 1; p <= term; p++) {
             RentSchedule rs = new RentSchedule();
-            rs.setContractId(contractId);
+            rs.setContractId(c.getId());
             rs.setPeriodNo(p);
-            rs.setDueDate(startDate.plusMonths(p));
+            rs.setDueDate(computePeriodDueDate(c, p));
             rs.setAmount(monthRent);
+            if (splitAmort && balance != null) {
+                BigDecimal open = balance;
+                BigDecimal interest;
+                BigDecimal prin;
+                if (p == term) {
+                    prin = open;
+                    interest = monthRent.subtract(prin).setScale(2, RoundingMode.HALF_UP);
+                    balance = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                } else {
+                    interest = flatMode ? flatInterest : open.multiply(monthlyRate).setScale(2, RoundingMode.HALF_UP);
+                    prin = monthRent.subtract(interest).setScale(2, RoundingMode.HALF_UP);
+                    balance = open.subtract(prin).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                }
+                rs.setOpeningPrincipal(open);
+                rs.setInterestAmount(interest);
+                rs.setPrincipalAmount(prin);
+                rs.setClosingPrincipal(balance);
+            }
             rs.setPlanStatus("未到期");
             rentScheduleMapper.insert(rs);
         }
+    }
+
+    private LocalDate computePeriodDueDate(Contract c, int periodNo) {
+        if (c.getFirstPayDate() != null) {
+            LocalDate base = c.getFirstPayDate().plusMonths(periodNo - 1L);
+            if (c.getPayDayOfMonth() != null && c.getPayDayOfMonth() >= 1) {
+                int dom = Math.min(c.getPayDayOfMonth(), base.lengthOfMonth());
+                return base.withDayOfMonth(dom);
+            }
+            return base;
+        }
+        LocalDate base = c.getStartDate().plusMonths(periodNo);
+        if (c.getPayDayOfMonth() != null && c.getPayDayOfMonth() >= 1) {
+            int dom = Math.min(c.getPayDayOfMonth(), base.lengthOfMonth());
+            return base.withDayOfMonth(dom);
+        }
+        return base;
     }
 
     // ============ 详情 ============
@@ -249,10 +332,19 @@ public class ContractService {
         r.setDeposit(c.getDeposit());
         r.setEndTransferPrice(c.getEndTransferPrice());
         r.setTargetIrr(c.getTargetIrr());
+        r.setLeaseAnnualRate(c.getLeaseAnnualRate());
+        r.setInterestMode(c.getInterestMode());
         r.setTaxRate(c.getTaxRate());
+        r.setInvoiceTaxRate(c.getInvoiceTaxRate());
+        r.setInvoiceDeadlineDays(c.getInvoiceDeadlineDays());
+        r.setOverdueDailyRate(c.getOverdueDailyRate());
         r.setEquipmentTotal(seeCost ? c.getEquipmentTotal() : null);
+        r.setBoqDiscountAmount(seeCost ? c.getBoqDiscountAmount() : null);
+        r.setFinalDealPrice(seeCost ? c.getFinalDealPrice() : null);
         r.setSignDate(c.getSignDate());
         r.setStartDate(c.getStartDate());
+        r.setPayDayOfMonth(c.getPayDayOfMonth());
+        r.setFirstPayDate(c.getFirstPayDate());
         r.setRemark(c.getRemark());
         r.setSensitiveMasked(!seeCost);
 
@@ -356,6 +448,10 @@ public class ContractService {
             sl.setPeriodNo(s.getPeriodNo());
             sl.setDueDate(s.getDueDate());
             sl.setAmount(s.getAmount());
+            sl.setOpeningPrincipal(s.getOpeningPrincipal());
+            sl.setInterestAmount(s.getInterestAmount());
+            sl.setPrincipalAmount(s.getPrincipalAmount());
+            sl.setClosingPrincipal(s.getClosingPrincipal());
             sl.setPlanStatus(s.getPlanStatus());
             sl.setRentBillId(s.getRentBillId());
             sl.setDueState(s.getDueDate().isAfter(LocalDate.now()) ? "未到期" : "已到期");
@@ -436,8 +532,9 @@ public class ContractService {
         String nature = req.getNature() == null || req.getNature().trim().isEmpty() ? NATURE : req.getNature().trim();
         validateNature(nature, req.getRemark());
         validateNature(null, req.getDetail());
-        if (!NATURE.equals(nature)) {
-            throw new BizException(400, "合同性质固定为「" + NATURE + "」");
+        if (!NATURE.equals(nature) && !(allowFinanceLease() && NATURE_FINANCE.equals(nature))) {
+            throw new BizException(400, "合同性质仅支持「" + NATURE + "」"
+                    + (allowFinanceLease() ? "或「" + NATURE_FINANCE + "」" : ""));
         }
         Customer cust = customerMapper.selectById(req.getCustomerId());
         if (cust == null || Integer.valueOf(1).equals(cust.getIsDeleted())) {
@@ -506,12 +603,21 @@ public class ContractService {
                 .set(Contract::getCustomerId, req.getCustomerId())
                 .set(Contract::getNature, nature)
                 .set(Contract::getTargetIrr, req.getTargetIrr())
+                .set(req.getLeaseAnnualRate() != null, Contract::getLeaseAnnualRate, req.getLeaseAnnualRate())
+                .set(req.getInterestMode() != null, Contract::getInterestMode, req.getInterestMode())
                 .set(Contract::getTaxRate, req.getTaxRate())
+                .set(req.getInvoiceTaxRate() != null, Contract::getInvoiceTaxRate, req.getInvoiceTaxRate())
+                .set(req.getInvoiceDeadlineDays() != null, Contract::getInvoiceDeadlineDays, req.getInvoiceDeadlineDays())
+                .set(req.getOverdueDailyRate() != null, Contract::getOverdueDailyRate, req.getOverdueDailyRate())
+                .set(req.getBoqDiscountAmount() != null, Contract::getBoqDiscountAmount, req.getBoqDiscountAmount())
+                .set(req.getFinalDealPrice() != null, Contract::getFinalDealPrice, req.getFinalDealPrice())
                 .set(Contract::getTermMonths, req.getTermMonths())
                 .set(Contract::getMonthRent, newRent)
                 .set(Contract::getEndTransferPrice, req.getEndTransferPrice() == null ? BigDecimal.ZERO : req.getEndTransferPrice())
                 .set(Contract::getDeposit, newDeposit)
                 .set(Contract::getStartDate, req.getStartDate())
+                .set(req.getPayDayOfMonth() != null, Contract::getPayDayOfMonth, req.getPayDayOfMonth())
+                .set(req.getFirstPayDate() != null, Contract::getFirstPayDate, req.getFirstPayDate())
                 .set(Contract::getSignDate, req.getSignDate() == null ? c.getSignDate() : req.getSignDate())
                 .set(Contract::getRemark, req.getRemark()));
 
@@ -741,6 +847,10 @@ public class ContractService {
             row.setRatio(t.getRatio());
             row.setTriggerPoint(t.getTriggerPoint());
             row.setDueDays(t.getDueDays());
+            row.setDueRule(t.getDueRule());
+            row.setDueDayOfMonth(t.getDueDayOfMonth());
+            row.setRuleDesc(PaymentDueDateCalculator.describeRule(
+                    t.getTriggerPoint(), t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth()));
             BigDecimal expected = BigDecimal.ZERO;
             for (Asset a : assets) {
                 if (a.getPurchasePrice() != null) {
@@ -799,7 +909,16 @@ public class ContractService {
 
     // ============ 工具 ============
 
+    private boolean allowFinanceLease() {
+        BigDecimal v = safeValue("allow_finance_lease_nature", "");
+        // 默认开启(1);若在 rule_config 显式配为 0 则开启严格合规拦截
+        return v == null || v.signum() != 0;
+    }
+
     private void validateNature(String nature, String freeText) {
+        if (allowFinanceLease()) {
+            return;
+        }
         if (nature != null && nature.contains(FORBIDDEN)) {
             throw new BizException(400, "合同性质禁用「融资租赁」,本平台固定为「分期收款销售」");
         }

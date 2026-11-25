@@ -24,8 +24,11 @@ public class PurchaseIn {
 
     private String no;
 
-    /** 绑定合同(先签约后采购·无合同不允许建单) */
+    /** 绑定租赁合同(允许先采后签,可空) */
     private Long contractId;
+
+    /** 意向承接客户(先采后签时记录) */
+    private Long intendedCustomerId;
 
     private Long supplierId;
 
@@ -49,6 +52,27 @@ public class PurchaseIn {
     private LocalDate expectReceiveDate;
 
     private LocalDate receiveDate;
+
+    /** 验收合格日 */
+    private LocalDate acceptanceDate;
+
+    /** 结算资料审核通过日 */
+    private LocalDate auditPassDate;
+
+    /** 质保年限(年) */
+    private Integer warrantyYears;
+
+    /** 质保到期日 */
+    private LocalDate warrantyEndDate;
+
+    /** 交付/安装地址 */
+    private String deliveryAddress;
+
+    /** 交付联系人及电话 */
+    private String deliveryContact;
+
+    /** 过磅重量(吨) */
+    private BigDecimal weighTons;
 
     private Long projectId;
 

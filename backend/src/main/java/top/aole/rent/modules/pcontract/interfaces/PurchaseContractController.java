@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -48,6 +49,22 @@ public class PurchaseContractController {
     @PostMapping
     public R<Long> create(@RequestBody PcDtos.CreateRequest req) {
         return R.ok(service.create(req));
+    }
+
+    @ApiOperation("补绑/换绑主租赁合同(先采后签场景)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购合同关联主合同", targetType = "purchase_contract")
+    @PutMapping("/{id}/bind-rent-contract")
+    public R<Void> bindRentContract(@PathVariable Long id, @RequestBody PcDtos.BindRentContractRequest req) {
+        service.bindRentContract(id, req == null ? null : req.getRentContractId());
+        return R.ok();
+    }
+
+    @ApiOperation("登记验收/资料审核通过(按月结规则重算各付款节点到期日)")
+    @RequireRole(value = {"老板", "财务", "供应链"}, action = "采购合同验收审核", targetType = "purchase_contract")
+    @PostMapping("/{id}/acceptance")
+    public R<PcDtos.Detail> recordAcceptance(@PathVariable Long id, @RequestBody PcDtos.AcceptanceRequest req) {
+        service.recordAcceptance(id, req);
+        return R.ok(service.detail(id));
     }
 
     @ApiOperation("登记付款(须带回单,可一笔核销多个节点)")

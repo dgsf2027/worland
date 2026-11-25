@@ -5,8 +5,9 @@ import { fetchSupplierPool } from '@/api/supplier'
 import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import {
-  addPcInvoice, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts, fetchRecognizeStatus,
-  linkPcPurchases, payPurchaseContractBatch, unlinkPcPurchase, voidPcInvoice, voidPcPayment,
+  addPcInvoice, bindPcRentContract, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
+  fetchRecognizeStatus, linkPcPurchases, payPurchaseContractBatch, recordPcAcceptance, unlinkPcPurchase,
+  voidPcInvoice, voidPcPayment,
   type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice,
 } from '@/api/purchaseContract'
 import ProofUploader from '@/components/payproof/ProofUploader.vue'
@@ -40,19 +41,43 @@ onMounted(async () => {
 })
 
 // ---- 新建合同 ----
-interface TermRow { stageName: string; ratioPct?: number; amount?: number; manual: boolean; conditionText: string }
+interface TermRow {
+  stageName: string; ratioPct?: number; amount?: number; manual: boolean; conditionText: string
+  triggerPoint?: string; dueRule?: string; dueDays?: number; dueDayOfMonth?: number
+}
 const createDlg = ref(false)
 const creating = ref(false)
 const uploaderKey = ref(0)
 const contractUploader = ref<InstanceType<typeof ProofUploader>>()
 const form = reactive({
   contractNo: '', supplierId: undefined as number | undefined, rentContractId: undefined as number | undefined,
+  detailSubtotal: undefined as number | undefined,
+  discountAmount: 0 as number | undefined,
   totalAmount: undefined as number | undefined,
-  taxPct: 13, signedDate: '', remark: '', proofFileIds: [] as number[],
+  taxPct: 13, signedDate: '', warrantyYears: 5 as number | undefined,
+  deliveryAddress: '', deliveryContact: '',
+  remark: '', proofFileIds: [] as number[],
   terms: [] as TermRow[],
 })
 const round2 = (v: number) => Math.round(v * 100) / 100
-const newTerm = (name = ''): TermRow => ({ stageName: name, ratioPct: undefined, amount: undefined, manual: false, conditionText: '' })
+const newTerm = (name = ''): TermRow => ({
+  stageName: name, ratioPct: undefined, amount: undefined, manual: false, conditionText: '',
+  triggerPoint: '审核通过', dueRule: 'after_days', dueDays: 0, dueDayOfMonth: undefined,
+})
+
+function onSubtotalOrDiscountChange() {
+  if (form.detailSubtotal != null) {
+    form.totalAmount = round2(Math.max(0, form.detailSubtotal - (form.discountAmount || 0)))
+  }
+}
+function applyMonthlyTermPreset() {
+  form.terms = [
+    { stageName: '首笔验收款', ratioPct: 40, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'month_end_days', dueDays: 30, dueDayOfMonth: undefined, conditionText: '验收且资料审核通过后当月月底+30天' },
+    { stageName: '次月进度款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_month_day', dueDays: 0, dueDayOfMonth: 30, conditionText: '次月结清30%' },
+    { stageName: '次次月尾款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_2_month_day', dueDays: 0, dueDayOfMonth: 30, conditionText: '次次月结清尾款30%' },
+  ]
+  form.terms.forEach(recalcTerm)
+}
 
 /** 按比例自动算金额(未手工改过金额的节点) */
 function recalcTerm(t: TermRow) {
@@ -74,9 +99,13 @@ const ratioSum = computed(() => Math.round(form.terms.reduce((s, t) => s + (t.ra
 const termsOk = computed(() => form.totalAmount != null && Math.abs(termSum.value - form.totalAmount) <= 0.01)
 
 function openCreate() {
-  Object.assign(form, { contractNo: '', supplierId: undefined, rentContractId: undefined, totalAmount: undefined,
-    taxPct: 13, signedDate: '', remark: '', proofFileIds: [],
-    terms: [Object.assign(newTerm('首付款'), { ratioPct: 30 }), Object.assign(newTerm('验收款'), { ratioPct: 60 }), Object.assign(newTerm('尾款'), { ratioPct: 10 })] })
+  Object.assign(form, {
+    contractNo: '', supplierId: undefined, rentContractId: undefined,
+    detailSubtotal: undefined, discountAmount: 0, totalAmount: undefined,
+    taxPct: 13, signedDate: '', warrantyYears: 5, deliveryAddress: '', deliveryContact: '',
+    remark: '', proofFileIds: [],
+    terms: [Object.assign(newTerm('首付款'), { ratioPct: 30 }), Object.assign(newTerm('验收款'), { ratioPct: 60 }), Object.assign(newTerm('尾款'), { ratioPct: 10 })],
+  })
   uploaderKey.value++
   createDlg.value = true
 }
@@ -148,12 +177,24 @@ async function submitCreate() {
   creating.value = true
   try {
     const newId = await createPurchaseContract({
-      contractNo: form.contractNo, supplierId: form.supplierId, rentContractId: form.rentContractId, totalAmount: form.totalAmount,
-      taxRate: form.taxPct / 100, signedDate: form.signedDate || undefined, remark: form.remark || undefined,
+      contractNo: form.contractNo, supplierId: form.supplierId, rentContractId: form.rentContractId,
+      detailSubtotal: form.detailSubtotal ?? undefined,
+      discountAmount: form.discountAmount ?? 0,
+      totalAmount: form.totalAmount,
+      taxRate: form.taxPct / 100, signedDate: form.signedDate || undefined,
+      warrantyYears: form.warrantyYears ?? undefined,
+      deliveryAddress: form.deliveryAddress || undefined,
+      deliveryContact: form.deliveryContact || undefined,
+      remark: form.remark || undefined,
       proofFileIds: form.proofFileIds.length ? form.proofFileIds : undefined,
       terms: form.terms.map((t) => ({
         stageName: t.stageName, amount: t.amount,
-        ratio: t.ratioPct != null ? t.ratioPct / 100 : undefined, conditionText: t.conditionText || undefined,
+        ratio: t.ratioPct != null ? t.ratioPct / 100 : undefined,
+        triggerPoint: t.triggerPoint || '审核通过',
+        dueRule: t.dueRule || 'after_days',
+        dueDays: t.dueDays ?? 0,
+        dueDayOfMonth: t.dueDayOfMonth ?? undefined,
+        conditionText: t.conditionText || undefined,
       })),
     })
     if (createLinkIds.value.length) await linkPcPurchases(newId, createLinkIds.value)
@@ -202,6 +243,48 @@ async function undoLink(id: number) {
   await unlinkPcPurchase(detail.value!.contract.id, id)
   ElMessage.success('已解除')
   await reloadDetail()
+}
+
+// ---- 补绑/变更主租赁合同 ----
+const bindRentDlg = ref(false)
+const bindRentSaving = ref(false)
+const bindRentId = ref<number | undefined>(undefined)
+function openBindRent() {
+  bindRentId.value = detail.value?.contract.rentContractId
+  bindRentDlg.value = true
+}
+async function submitBindRent() {
+  if (!detail.value) return
+  bindRentSaving.value = true
+  try {
+    await bindPcRentContract(detail.value.contract.id, bindRentId.value ?? null)
+    bindRentDlg.value = false
+    ElMessage.success('已更新关联的主租赁合同')
+    await reloadDetail()
+  } finally { bindRentSaving.value = false }
+}
+
+// ---- 登记验收与审核通过日（自动推算各付款节点到期日） ----
+const pcAccDlg = ref(false)
+const pcAccSaving = ref(false)
+const pcAccForm = reactive({ acceptanceDate: '', auditPassDate: '' })
+function openPcAcc() {
+  pcAccForm.acceptanceDate = detail.value?.contract.acceptanceDate || new Date().toISOString().slice(0, 10)
+  pcAccForm.auditPassDate = detail.value?.contract.auditPassDate || ''
+  pcAccDlg.value = true
+}
+async function submitPcAcc() {
+  if (!detail.value) return
+  pcAccSaving.value = true
+  try {
+    await recordPcAcceptance(detail.value.contract.id, {
+      acceptanceDate: pcAccForm.acceptanceDate || undefined,
+      auditPassDate: pcAccForm.auditPassDate || undefined,
+    })
+    pcAccDlg.value = false
+    ElMessage.success('已登记验收/审核日期，各节点到期日已按月结规则重算')
+    await reloadDetail()
+  } finally { pcAccSaving.value = false }
 }
 
 // ---- 登记付款 ----
@@ -320,18 +403,32 @@ async function undoInvoice(id: number) {
     <el-drawer v-model="drawer" size="860px" :title="detail ? `${detail.contract.contractNo} · ${detail.contract.supplierName || ''}` : ''">
       <template v-if="detail">
         <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="含税总价">{{ money(detail.contract.totalAmount) }}</el-descriptions-item>
-          <el-descriptions-item label="税率">{{ (detail.contract.taxRate * 100).toFixed(0) }}%</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ detail.contract.status }}</el-descriptions-item>
+          <el-descriptions-item label="最终含税总价">{{ money(detail.contract.totalAmount) }}</el-descriptions-item>
+          <el-descriptions-item label="明细原价 / 优惠">
+            {{ detail.contract.detailSubtotal != null ? money(detail.contract.detailSubtotal) : '—' }}
+            <span v-if="detail.contract.discountAmount">（优惠 {{ money(detail.contract.discountAmount) }}）</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="税率 / 状态">{{ (detail.contract.taxRate * 100).toFixed(0) }}% · {{ detail.contract.status }}</el-descriptions-item>
           <el-descriptions-item label="已付">{{ money(detail.contract.summary.paid) }}</el-descriptions-item>
           <el-descriptions-item label="已收票">{{ money(detail.contract.summary.invoiced) }}</el-descriptions-item>
           <el-descriptions-item label="已付未收票">{{ money(detail.contract.summary.paidNotInvoiced) }}</el-descriptions-item>
+          <el-descriptions-item label="验收 / 审核通过日">
+            {{ detail.contract.acceptanceDate || '—' }} / {{ detail.contract.auditPassDate || '—' }}
+            <el-button link type="primary" size="small" style="margin-left:4px" @click="openPcAcc">登记</el-button>
+          </el-descriptions-item>
+          <el-descriptions-item label="质保年限">{{ detail.contract.warrantyYears ? `${detail.contract.warrantyYears} 年` : '—' }}</el-descriptions-item>
           <el-descriptions-item label="合同原件">
             <el-button link type="primary" size="small" @click="viewContractFiles">查看原件（{{ detail.contractProofCount }}）</el-button>
           </el-descriptions-item>
+          <el-descriptions-item v-if="detail.contract.deliveryAddress || detail.contract.deliveryContact" label="交付地 / 联系人" :span="3">
+            {{ detail.contract.deliveryAddress || '—' }} <span v-if="detail.contract.deliveryContact">（{{ detail.contract.deliveryContact }}）</span>
+          </el-descriptions-item>
         </el-descriptions>
 
-        <h4>主合同（客户租赁合同）</h4>
+        <div class="sec">
+          <h4>主合同（客户租赁合同）</h4>
+          <el-button size="small" @click="openBindRent">{{ detail.contract.rentContractNo ? '变更主合同' : '补绑主合同' }}</el-button>
+        </div>
         <el-descriptions v-if="detail.contract.rentContractNo" :column="3" border size="small">
           <el-descriptions-item label="主合同号">{{ detail.contract.rentContractNo }}</el-descriptions-item>
           <el-descriptions-item label="客户">{{ detail.contract.customerName || '-' }}</el-descriptions-item>
@@ -340,7 +437,7 @@ async function undoInvoice(id: number) {
           <el-descriptions-item label="月租">{{ money(detail.contract.rentMonthRent) }}</el-descriptions-item>
           <el-descriptions-item label="起租日">{{ detail.contract.rentStartDate || '-' }}</el-descriptions-item>
         </el-descriptions>
-        <el-empty v-else :image-size="40" description="未关联主合同（新建采购合同时可选择）" />
+        <el-empty v-else :image-size="40" description="未关联主合同（先采后签，可点右上「补绑主合同」）" />
 
         <div class="sec"><h4>关联采购单</h4><el-button size="small" @click="openLink">关联采购单</el-button></div>
         <el-table :data="detail.purchases" size="small" border empty-text="尚未关联采购入库单">
@@ -353,11 +450,14 @@ async function undoInvoice(id: number) {
 
         <h4>付款节点</h4>
         <el-table :data="detail.terms" size="small" border>
-          <el-table-column prop="stageName" label="节点" width="120" />
-          <el-table-column label="应付" align="right"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
-          <el-table-column label="已核销" align="right"><template #default="{ row }">{{ money(row.paid) }}</template></el-table-column>
-          <el-table-column label="未付" align="right"><template #default="{ row }">{{ money(row.unpaid) }}</template></el-table-column>
-          <el-table-column prop="conditionText" label="触发条件" />
+          <el-table-column prop="stageName" label="节点" width="110" />
+          <el-table-column label="应付" align="right" width="115"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
+          <el-table-column label="已核销" align="right" width="110"><template #default="{ row }">{{ money(row.paid) }}</template></el-table-column>
+          <el-table-column label="未付" align="right" width="110"><template #default="{ row }">{{ money(row.unpaid) }}</template></el-table-column>
+          <el-table-column label="到期日" width="110"><template #default="{ row }">{{ row.dueDate || '待验收/审核' }}</template></el-table-column>
+          <el-table-column label="账期规则 / 条件" min-width="180">
+            <template #default="{ row }">{{ row.ruleDesc || row.conditionText || '—' }}</template>
+          </el-table-column>
         </el-table>
 
         <div class="sec"><h4>付款记录</h4><el-button size="small" type="primary" @click="openPay">登记付款</el-button></div>
@@ -419,20 +519,59 @@ async function undoInvoice(id: number) {
             <el-option v-for="c in rentContracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.termMonths}个月`" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="含税总价" required><el-input-number v-model="form.totalAmount" :min="0" :precision="2" :controls="false" style="width: 200px" /></el-form-item>
-        <el-form-item label="税率(%)"><el-input-number v-model="form.taxPct" :min="0" :max="100" :controls="false" /></el-form-item>
-        <el-form-item label="签订日期"><el-date-picker v-model="form.signedDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="明细原价">
+              <el-input-number v-model="form.detailSubtotal" :min="0" :precision="2" :controls="false" style="width: 100%" placeholder="如 284838" @change="onSubtotalOrDiscountChange" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="整单优惠">
+              <el-input-number v-model="form.discountAmount" :min="0" :precision="2" :controls="false" style="width: 100%" placeholder="如 4838" @change="onSubtotalOrDiscountChange" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="最终总价" required>
+              <el-input-number v-model="form.totalAmount" :min="0" :precision="2" :controls="false" style="width: 100%" placeholder="如 280000" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="8"><el-form-item label="税率(%)"><el-input-number v-model="form.taxPct" :min="0" :max="100" :controls="false" style="width: 100%" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="签订日期"><el-date-picker v-model="form.signedDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="质保(年)"><el-input-number v-model="form.warrantyYears" :min="0" :max="20" :precision="0" :controls="false" style="width: 100%" /></el-form-item></el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="14"><el-form-item label="交付地址"><el-input v-model="form.deliveryAddress" placeholder="如 广州市花都区茶塘园区B区1楼" /></el-form-item></el-col>
+          <el-col :span="10"><el-form-item label="交付联系人"><el-input v-model="form.deliveryContact" placeholder="姓名 + 电话" /></el-form-item></el-col>
+        </el-row>
         <el-form-item label="付款节点" required>
           <div class="terms">
-            <div class="term-row term-head"><span style="width:110px">节点名</span><span style="width:100px">合同比例(%)</span><span style="width:150px">金额(元)</span><span style="width:70px"></span><span>触发条件</span></div>
+            <div class="term-row">
+              <el-button size="small" type="primary" plain @click="applyMonthlyTermPreset">套用：审核月结30天40% + 次月30% + 次次月30%</el-button>
+            </div>
             <div v-for="(t, i) in form.terms" :key="i" class="term-row">
-              <el-input v-model="t.stageName" placeholder="节点名" style="width: 110px" />
-              <el-input-number v-model="t.ratioPct" :min="0" :max="100" :precision="2" :controls="false" placeholder="比例" style="width: 100px" @change="onRatioInput(t)" />
-              <el-input-number v-model="t.amount" :min="0" :precision="2" :controls="false" placeholder="金额" style="width: 150px"
+              <el-input v-model="t.stageName" placeholder="节点名" style="width: 100px" />
+              <el-input-number v-model="t.ratioPct" :min="0" :max="100" :precision="2" :controls="false" placeholder="比例%" style="width: 75px" @change="onRatioInput(t)" />
+              <el-input-number v-model="t.amount" :min="0" :precision="2" :controls="false" placeholder="金额" style="width: 115px"
                 :disabled="!t.manual" @change="onAmountInput(t)" />
-              <el-button size="small" :type="t.manual ? 'warning' : 'default'" style="width: 70px" @click="toggleManual(t)">{{ t.manual ? '按比例' : '改金额' }}</el-button>
-              <el-input v-model="t.conditionText" placeholder="触发条件(可选)" style="width: 150px" />
-              <el-button link type="danger" :disabled="form.terms.length === 1" @click="form.terms.splice(i, 1)">删除</el-button>
+              <el-button size="small" :type="t.manual ? 'warning' : 'default'" style="width: 62px" @click="toggleManual(t)">{{ t.manual ? '按比例' : '改金额' }}</el-button>
+              <el-select v-model="t.triggerPoint" size="small" style="width: 95px">
+                <el-option label="下单" value="下单" />
+                <el-option label="入库" value="入库" />
+                <el-option label="验收合格" value="验收合格" />
+                <el-option label="审核通过" value="审核通过" />
+              </el-select>
+              <el-select v-model="t.dueRule" size="small" style="width: 112px">
+                <el-option label="触发日+N天" value="after_days" />
+                <el-option label="月底+N天" value="month_end_days" />
+                <el-option label="次月固定日" value="next_month_day" />
+                <el-option label="次次月固定日" value="next_2_month_day" />
+              </el-select>
+              <el-input-number v-if="t.dueRule === 'next_month_day' || t.dueRule === 'next_2_month_day'"
+                v-model="t.dueDayOfMonth" size="small" :min="1" :max="31" :precision="0" :controls="false" placeholder="月末" style="width: 58px" />
+              <el-input-number v-else v-model="t.dueDays" size="small" :min="0" :precision="0" :controls="false" placeholder="天数" style="width: 58px" />
+              <el-button link type="danger" :disabled="form.terms.length === 1" @click="form.terms.splice(i, 1)">删</el-button>
             </div>
             <div class="term-row">
               <el-button size="small" @click="form.terms.push(newTerm())">＋ 加节点</el-button>
@@ -507,6 +646,36 @@ async function undoInvoice(id: number) {
       <template #footer>
         <el-button @click="invDlg = false">取消</el-button>
         <el-button type="primary" :loading="invSaving" :disabled="!invForm.invoiceNo || !invForm.issueDate || !invTotal" @click="submitInvoice">确认登记</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="bindRentDlg" title="补绑 / 变更主租赁合同" width="500px">
+      <el-form label-width="100px">
+        <el-form-item label="客户租赁合同">
+          <el-select v-model="bindRentId" filterable clearable style="width: 100%" placeholder="选择客户租赁合同">
+            <el-option v-for="c in rentContracts" :key="c.id" :label="`${c.no} · ${c.customerName || ''} · ${c.termMonths}个月`" :value="c.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bindRentDlg = false">取消</el-button>
+        <el-button type="primary" :loading="bindRentSaving" @click="submitBindRent">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="pcAccDlg" title="登记验收合格 / 审核通过日期" width="480px">
+      <el-form label-width="110px">
+        <el-form-item label="验收合格日">
+          <el-date-picker v-model="pcAccForm.acceptanceDate" type="date" value-format="YYYY-MM-DD" style="width: 200px" />
+        </el-form-item>
+        <el-form-item label="资料审核通过日">
+          <el-date-picker v-model="pcAccForm.auditPassDate" type="date" value-format="YYYY-MM-DD" style="width: 200px" />
+        </el-form-item>
+      </el-form>
+      <div class="sum">登记后，系统按各付款节点的「月底+N天 / 次月 / 次次月」规则自动算出具体到期日。</div>
+      <template #footer>
+        <el-button @click="pcAccDlg = false">取消</el-button>
+        <el-button type="primary" :loading="pcAccSaving" @click="submitPcAcc">保存并计算到期日</el-button>
       </template>
     </el-dialog>
   </div>

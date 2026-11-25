@@ -30,9 +30,11 @@ import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.contract.dto.BoqDtos;
 import top.aole.rent.modules.contract.dto.ContractPaymentDtos;
+import top.aole.rent.modules.contract.dto.ProjectPanoramaDtos;
 import top.aole.rent.modules.contract.service.ContractBoqExcelService;
 import top.aole.rent.modules.contract.service.ContractBoqService;
 import top.aole.rent.modules.contract.service.ContractService;
+import top.aole.rent.modules.contract.service.ProjectPanoramaService;
 
 import javax.validation.Valid;
 
@@ -52,6 +54,7 @@ public class ContractController {
     private final ContractService contractService;
     private final ContractBoqService boqService;
     private final ContractBoqExcelService boqExcelService;
+    private final ProjectPanoramaService projectPanoramaService;
 
     @ApiOperation("合同列表:按状态/客户/编号筛选 + 分页")
     @GetMapping
@@ -74,6 +77,12 @@ public class ContractController {
     @GetMapping("/{id}")
     public R<ContractDetailResponse> detail(@PathVariable Long id) {
         return R.ok(contractService.detail(id));
+    }
+
+    @ApiOperation("项目真实利润全景:采购投入↔租赁产出↔回本期数↔垫资峰值↔逐月现金流(GP/LP 脱敏)")
+    @GetMapping("/{id}/project-panorama")
+    public R<ProjectPanoramaDtos.Panorama> projectPanorama(@PathVariable Long id) {
+        return R.ok(projectPanoramaService.panorama(id));
     }
 
     @ApiOperation("编辑合同要素(敏感·财务+老板·留痕):草稿直接改;生效合同保留已出单期次、其余期次重排、押金差额补收/退回")
@@ -130,11 +139,11 @@ public class ContractController {
         return R.ok(boqService.boq(contractService.requireContract(id)));
     }
 
-    @ApiOperation("保存合同清单(整表;合计回写合同设备总价)")
+    @ApiOperation("保存合同清单(整表;支持整单优惠/抹零,最终成交价回写合同设备总价)")
     @RequireRole(value = {"老板", "财务", "供应链", "业务"}, action = "合同清单保存", targetType = "contract")
     @PutMapping("/{id}/boq")
     public R<BoqDtos.Boq> saveBoq(@PathVariable Long id, @RequestBody BoqDtos.SaveRequest req) {
-        return R.ok(boqService.save(contractService.requireContract(id), req.getLines()));
+        return R.ok(boqService.save(contractService.requireContract(id), req.getLines(), req.getDiscountAmount()));
     }
 
     @ApiOperation("导出合同清单 Excel(《工程量清单计价表》版式;template=true 只导表头模板)")

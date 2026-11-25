@@ -7,6 +7,7 @@ import javax.validation.constraints.DecimalMin;
 import javax.validation.constraints.Size;
 import javax.validation.constraints.NotBlank;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * 新增/编辑设备入参(逐件建档)。
@@ -24,8 +25,15 @@ public class AssetSaveRequest {
     private String model;
     private BigDecimal marketPrice;
     private BigDecimal purchasePrice;
+    private BigDecimal dealPriceOverride;
     private Long supplierId;
     private BigDecimal monthlyLaborValue;
     private BigDecimal replaceHeadcount;
+    private Integer warrantyYears;
+    private LocalDate warrantyStartDate;
+    private LocalDate warrantyEndDate;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private BigDecimal weighTons;
     private String remark;
 }

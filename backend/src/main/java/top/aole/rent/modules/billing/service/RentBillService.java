@@ -203,44 +203,63 @@ public class RentBillService {
         if ("已核销".equals(b.getStatus())) {
             throw new BizException(400, "收租单已核销(幂等拒):" + b.getBillNo());
         }
+        BigDecimal already = b.getReceivedAmount() != null ? b.getReceivedAmount() : BigDecimal.ZERO;
+        BigDecimal remaining = b.getAmount().subtract(already);
         BigDecimal received = req != null && req.getReceivedAmount() != null
-                ? req.getReceivedAmount() : b.getAmount();
-        if (received.compareTo(b.getAmount()) != 0) {
-            throw new BizException(400, "到账金额(" + received + ")与应收(" + b.getAmount()
-                    + ")不一致,需人工处理(部分/超额收款 M3 精确化)");
+                ? req.getReceivedAmount().setScale(2, java.math.RoundingMode.HALF_UP) : remaining;
+        if (received.signum() <= 0) {
+            throw new BizException(400, "本次实收金额须大于 0");
+        }
+        if (received.compareTo(remaining) > 0) {
+            throw new BizException(400, "本次实收(" + received + ")超过剩余应收(" + remaining + ")");
         }
         String period = LocalDate.now().format(YM);
         assertPeriodOpen(period);   // 锁账守卫:收入落当期,期锁则拒
 
-        b.setReceivedAmount(received);
-        b.setStatus("已核销");
+        BigDecimal totalReceived = already.add(received).setScale(2, java.math.RoundingMode.HALF_UP);
+        boolean fullyPaid = totalReceived.compareTo(b.getAmount()) >= 0;
+
+        b.setReceivedAmount(totalReceived);
+        b.setStatus(fullyPaid ? "已核销" : "部分已收");
         b.setMatchedAt(LocalDateTime.now());
         b.setAccountPeriod(period);
         if (req != null && req.getRemark() != null) {
             b.setRemark(appendRemark(b.getRemark(), req.getRemark()));
         }
-        // M3-01:核销即生成收入凭证(税务账+经营账各一·借贷平衡),回填 voucher_id(稽核 matchedNoVoucher 归 0)
-        Long voucherId = voucherService.postRentIncome(id, b.getAmount(), LocalDate.now(),
+        // M3-01:按本次实际收款金额过账收入凭证(支持分笔收款逐步入账)
+        Long voucherId = voucherService.postRentIncome(id, received, LocalDate.now(),
                 contractNo(b.getContractId()), b.getPeriodNo() != null ? b.getPeriodNo() : 0);
         b.setVoucherId(voucherId);
+        // 核销结清后自动生成待开销项发票提醒(合同约定如 10 个工作日内开 3% 专票)
+        if (fullyPaid && "正常".equals(b.getBillKind()) && !"已开票".equals(b.getInvoiceStatus())) {
+            Contract c = b.getContractId() == null ? null : contractMapper.selectById(b.getContractId());
+            int deadlineDays = c != null && c.getInvoiceDeadlineDays() != null ? c.getInvoiceDeadlineDays() : 10;
+            BigDecimal invTax = c != null && c.getInvoiceTaxRate() != null ? c.getInvoiceTaxRate() : new BigDecimal("0.0300");
+            b.setInvoiceStatus("待开票");
+            b.setInvoiceDueDate(top.aole.rent.modules.contract.service.PaymentDueDateCalculator.addBusinessDays(LocalDate.now(), deadlineDays));
+            b.setInvoiceTaxRate(invTax);
+        }
         rentBillMapper.updateById(b);
 
-        // 还款恢复:核销逾期单 → 关闭其开启中的逾期案
-        OverdueCase oc = overdueCaseMapper.selectOne(new LambdaQueryWrapper<OverdueCase>()
-                .eq(OverdueCase::getRentBillId, id).eq(OverdueCase::getStatus, "开启").last("limit 1"));
-        if (oc != null) {
-            oc.setStep("关闭");
-            oc.setStatus("关闭");
-            oc.setClosedAt(LocalDateTime.now());
-            oc.setNextAction(null);
-            oc.setRemark(appendRemark(oc.getRemark(), "还款到账核销·案关闭恢复"));
-            overdueCaseMapper.updateById(oc);
-            log.info("[还款恢复] 核销逾期单 {} 顺带关闭逾期案 #{}", b.getBillNo(), oc.getId());
+        // 还款恢复:全额核销逾期单 → 关闭其开启中的逾期案
+        if (fullyPaid) {
+            OverdueCase oc = overdueCaseMapper.selectOne(new LambdaQueryWrapper<OverdueCase>()
+                    .eq(OverdueCase::getRentBillId, id).eq(OverdueCase::getStatus, "开启").last("limit 1"));
+            if (oc != null) {
+                oc.setStep("关闭");
+                oc.setStatus("关闭");
+                oc.setClosedAt(LocalDateTime.now());
+                oc.setNextAction(null);
+                oc.setRemark(appendRemark(oc.getRemark(), "还款到账核销·案关闭恢复"));
+                overdueCaseMapper.updateById(oc);
+                log.info("[还款恢复] 核销逾期单 {} 顺带关闭逾期案 #{}", b.getBillNo(), oc.getId());
+            }
         }
 
-        auditLogService.record("收租核销", "rent_bill", id, AuditLogService.EXECUTED,
-                "核销 " + b.getBillNo() + " 收 " + received + " 期=" + period);
-        log.info("[核销] {} 收 {} 期 {} by {}", b.getBillNo(), received, period, currentUserId());
+        auditLogService.record(fullyPaid ? "收租核销" : "收租部分核销", "rent_bill", id, AuditLogService.EXECUTED,
+                (fullyPaid ? "核销 " : "部分核销 ") + b.getBillNo() + " 本次收 " + received
+                        + " 累计 " + totalReceived + "/" + b.getAmount() + " 期=" + period);
+        log.info("[核销] {} 本次收 {} 累计 {}/{} 期 {} by {}", b.getBillNo(), received, totalReceived, b.getAmount(), period, currentUserId());
         return toItem(load(id));
     }
 
@@ -354,6 +373,36 @@ public class RentBillService {
         ri.setAccountPeriod(period);
         ri.setItems(impact);
         return ri;
+    }
+
+    // ============ 登记销项发票(V129:收款后按合同约定如 10 工作日开具 3% 专票) ============
+
+    @Transactional
+    public BillDtos.BillItem registerInvoice(Long id, BillDtos.InvoiceRequest req) {
+        RentBill b = load(id);
+        if (!"已核销".equals(b.getStatus()) && !"部分已收".equals(b.getStatus())) {
+            throw new BizException(400, "仅已核销或部分已收单可登记销项发票,当前: " + b.getStatus());
+        }
+        if (req == null || req.getInvoiceNo() == null || req.getInvoiceNo().trim().isEmpty()) {
+            throw new BizException(400, "请填写销项发票号码");
+        }
+        b.setInvoiceStatus("已开票");
+        b.setInvoiceNo(req.getInvoiceNo().trim());
+        b.setInvoiceDate(req.getInvoiceDate() != null ? req.getInvoiceDate() : LocalDate.now());
+        b.setInvoiceAmount(req.getInvoiceAmount() != null ? req.getInvoiceAmount().setScale(2, java.math.RoundingMode.HALF_UP)
+                : (b.getReceivedAmount() != null ? b.getReceivedAmount() : b.getAmount()));
+        if (req.getInvoiceTaxRate() != null) {
+            b.setInvoiceTaxRate(req.getInvoiceTaxRate());
+        } else if (b.getInvoiceTaxRate() == null) {
+            b.setInvoiceTaxRate(new BigDecimal("0.0300"));
+        }
+        if (req.getRemark() != null && !req.getRemark().trim().isEmpty()) {
+            b.setRemark(appendRemark(b.getRemark(), "开票:" + req.getRemark().trim()));
+        }
+        rentBillMapper.updateById(b);
+        auditLogService.record("收租登记销项发票", "rent_bill", id, AuditLogService.EXECUTED,
+                b.getBillNo() + " 发票号 " + b.getInvoiceNo() + " 金额 " + b.getInvoiceAmount());
+        return toItem(load(id));
     }
 
     // ============ 退款(退款单·负额) ============
@@ -484,15 +533,30 @@ public class RentBillService {
             }
         }
 
+        // ⑤ 已核销待开销项发票(V129)
+        List<String> pendingInv = new ArrayList<>();
+        int overdueInv = 0;
+        for (RentBill b : matchedAll) {
+            if ("待开票".equals(b.getInvoiceStatus())) {
+                boolean over = b.getInvoiceDueDate() != null && b.getInvoiceDueDate().isBefore(today);
+                if (over) overdueInv++;
+                pendingInv.add(b.getBillNo() + " 应于 " + (b.getInvoiceDueDate() == null ? "—" : b.getInvoiceDueDate())
+                        + " 前开销项专票" + (over ? "(已超期)" : ""));
+            }
+        }
+
         cc.setBillNotGenerated(notGen.size());
         cc.setReceivedNotMatched(notMatched.size());
         cc.setMatchedNoVoucher(noVoucher.size());
         cc.setMatchedNoProof(noProof.size());
+        cc.setPendingInvoice(pendingInv.size());
+        cc.setOverdueInvoice(overdueInv);
         cc.setBillNotGeneratedDetail(notGen);
         cc.setReceivedNotMatchedDetail(notMatched);
         cc.setMatchedNoVoucherDetail(noVoucher);
         cc.setMatchedNoProofDetail(noProof);
-        cc.setAllClear(notGen.isEmpty() && notMatched.isEmpty() && noVoucher.isEmpty() && noProof.isEmpty());
+        cc.setPendingInvoiceDetail(pendingInv);
+        cc.setAllClear(notGen.isEmpty() && notMatched.isEmpty() && noVoucher.isEmpty() && noProof.isEmpty() && overdueInv == 0);
         return cc;
     }
 
@@ -526,14 +590,25 @@ public class RentBillService {
         it.setDueDate(b.getDueDate());
         it.setAmount(b.getAmount());
         it.setReceivedAmount(b.getReceivedAmount());
+        BigDecimal rem = b.getAmount() == null ? BigDecimal.ZERO
+                : b.getAmount().subtract(b.getReceivedAmount() == null ? BigDecimal.ZERO : b.getReceivedAmount()).max(BigDecimal.ZERO);
+        it.setRemainingAmount(rem);
         it.setStatus(b.getStatus());
         it.setBillKind(b.getBillKind());
         it.setMatchedAt(b.getMatchedAt());
         it.setAccountPeriod(b.getAccountPeriod());
         it.setReversesId(b.getReversesId());
         it.setVoucherId(b.getVoucherId());
+        it.setInvoiceStatus(b.getInvoiceStatus() == null ? "未开票" : b.getInvoiceStatus());
+        it.setInvoiceNo(b.getInvoiceNo());
+        it.setInvoiceDate(b.getInvoiceDate());
+        it.setInvoiceAmount(b.getInvoiceAmount());
+        it.setInvoiceDueDate(b.getInvoiceDueDate());
+        it.setInvoiceTaxRate(b.getInvoiceTaxRate());
+        it.setInvoiceOverdue("待开票".equals(b.getInvoiceStatus()) && b.getInvoiceDueDate() != null
+                && b.getInvoiceDueDate().isBefore(LocalDate.now()));
         it.setRemark(b.getRemark());
-        boolean isOverdue = ("待收".equals(b.getStatus()) || "逾期".equals(b.getStatus()))
+        boolean isOverdue = ("待收".equals(b.getStatus()) || "逾期".equals(b.getStatus()) || "部分已收".equals(b.getStatus()))
                 && b.getDueDate() != null && b.getDueDate().isBefore(LocalDate.now());
         it.setOverdue(isOverdue);
         it.setOverdueDays(isOverdue ? (int) ChronoUnit.DAYS.between(b.getDueDate(), LocalDate.now()) : 0);

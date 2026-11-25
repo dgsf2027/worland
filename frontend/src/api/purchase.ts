@@ -98,6 +98,8 @@ export interface PurchaseDetail {
   pcId?: number
   contractId?: number
   contractNo?: string
+  intendedCustomerId?: number
+  intendedCustomerName?: string
   customerName?: string
   supplierId?: number
   supplierName?: string
@@ -106,6 +108,13 @@ export interface PurchaseDetail {
   receiveDate?: string
   /** 预计入库日（未入库时「入库」阶段应付的到期日基准） */
   expectReceiveDate?: string
+  acceptanceDate?: string
+  auditPassDate?: string
+  warrantyYears?: number
+  warrantyEndDate?: string
+  deliveryAddress?: string
+  deliveryContact?: string
+  weighTons?: number
   /** 继承的合同付款方式摘要 */
   contractPaymentTerms?: string
   remark?: string
@@ -148,4 +157,10 @@ export function payPayable(payableId: number, body: Record<string, any>): Promis
 }
 export function unpayPayable(payableId: number): Promise<void> {
   return request.post(`/rent/purchase/payables/${payableId}/unpay`)
+}
+export function bindPurchaseContract(id: number, contractId: number): Promise<PurchaseDetail> {
+  return request.post(`/rent/purchase/${id}/bind-contract`, { contractId })
+}
+export function recordPurchaseAcceptance(id: number, body: Record<string, any>): Promise<PurchaseDetail> {
+  return request.post(`/rent/purchase/${id}/accept`, body)
 }

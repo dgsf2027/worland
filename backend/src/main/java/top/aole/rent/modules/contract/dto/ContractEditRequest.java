@@ -51,6 +51,16 @@ public class ContractEditRequest {
 
     private LocalDate signDate;
 
+    private BigDecimal leaseAnnualRate;
+    private String interestMode;
+    private Integer payDayOfMonth;
+    private LocalDate firstPayDate;
+    private BigDecimal invoiceTaxRate;
+    private Integer invoiceDeadlineDays;
+    private BigDecimal overdueDailyRate;
+    private BigDecimal boqDiscountAmount;
+    private BigDecimal finalDealPrice;
+
     @Size(max = 255)
     private String remark;
 

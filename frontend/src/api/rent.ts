@@ -19,6 +19,12 @@ export interface BillItem {
   voucherId?: number
   overdue?: boolean
   overdueDays?: number
+  invoiceStatus?: string
+  invoiceNo?: string
+  invoiceDate?: string
+  invoiceAmount?: number
+  invoiceDueDate?: string
+  invoiceTaxRate?: number
   remark?: string
   /** 已挂回单数 */
   proofCount?: number
@@ -56,6 +62,10 @@ export interface CashCheck {
   /** 已核销无回单(10-07 纪要) */
   matchedNoProof: number
   matchedNoProofDetail: string[]
+  pendingInvoice?: number
+  overdueInvoice?: number
+  pendingInvoiceDetail?: string[]
+  overdueInvoiceDetail?: string[]
   allClear: boolean
 }
 
@@ -98,6 +108,9 @@ export function reverseBill(id: number, body: Record<string, any>): Promise<Reve
 }
 export function refundBill(id: number, body: Record<string, any>): Promise<BillItem> {
   return request.post(`/rent/bills/${id}/refund`, body)
+}
+export function issueBillInvoice(id: number, body: Record<string, any>): Promise<BillItem> {
+  return request.post(`/rent/bills/${id}/invoice`, body)
 }
 export function runGen(): Promise<GenResult> {
   return request.post('/rent/bills/gen/run', {})

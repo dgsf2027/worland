@@ -54,9 +54,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AssetPaymentService {
 
-    public static final String TRIGGER_ORDER = "下单";
-    public static final String TRIGGER_RECEIVE = "入库";
-    private static final Set<String> TRIGGERS = new HashSet<>(Arrays.asList(TRIGGER_ORDER, TRIGGER_RECEIVE));
+    public static final String TRIGGER_ORDER = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_ORDER;
+    public static final String TRIGGER_RECEIVE = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_RECEIVE;
+    private static final Set<String> TRIGGERS = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.VALID_TRIGGERS;
     private static final BigDecimal ONE = BigDecimal.ONE;
     private static final BigDecimal TOLERANCE = new BigDecimal("0.0001");
 
@@ -119,15 +119,16 @@ public class AssetPaymentService {
             String trigger = t.getTriggerPoint() == null || t.getTriggerPoint().trim().isEmpty()
                     ? TRIGGER_RECEIVE : t.getTriggerPoint().trim();
             if (!TRIGGERS.contains(trigger)) {
-                throw new BizException(400, "阶段「" + name + "」触发时点应为 下单 或 入库");
+                throw new BizException(400, "阶段「" + name + "」触发时点应为 下单 / 入库 / 验收合格 / 审核通过");
             }
             int days = t.getDueDays() == null ? 0 : t.getDueDays();
             if (days < 0) {
                 throw new BizException(400, "阶段「" + name + "」到期天数不能为负");
             }
+            String rule = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.normalizeRule(t.getDueRule());
             BigDecimal ratio = t.getRatio().setScale(8, RoundingMode.HALF_UP);
             sum = sum.add(ratio);
-            out.add(new PaymentTermDtos.TermInput(name, ratio, trigger, days));
+            out.add(new PaymentTermDtos.TermInput(name, ratio, trigger, days, rule, t.getDueDayOfMonth()));
         }
         if (sum.subtract(ONE).abs().compareTo(TOLERANCE) > 0) {
             throw new BizException(400, "各段付款比例合计须为 100%,当前为 "
@@ -164,11 +165,89 @@ public class AssetPaymentService {
      */
     @Transactional
     public void onOrder(PurchaseIn p, PurchaseItem item, Long assetId, Long contractId) {
-        List<ContractPaymentTerm> terms = contractPaymentService.terms(contractId);
+        List<ContractPaymentTerm> terms = contractId == null ? new ArrayList<>() : contractPaymentService.terms(contractId);
         if (terms.isEmpty()) {
-            throw new BizException(400, "合同还没设置付款方式,请先到合同里设置后再下单");
+            if (contractId == null) {
+                // 先采后签(尚无租赁合同):先按默认三段生成应付,后续关联采购合同或补签租赁合同时可调整
+                terms = toTempTerms(contractPaymentService.defaultTerms(p.getFirstPayRatio(), p.getAccountDays()));
+            } else {
+                throw new BizException(400, "合同还没设置付款方式,请先到合同里设置后再下单");
+            }
         }
         generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), terms, new HashSet<>());
+    }
+
+    /** 按自定义付款条件(例如采购合同付款节点)生成应付。 */
+    @Transactional
+    public void onOrderWithTerms(PurchaseIn p, PurchaseItem item, Long assetId, List<ContractPaymentTerm> terms) {
+        if (terms == null || terms.isEmpty()) {
+            onOrder(p, item, assetId, p.getContractId());
+            return;
+        }
+        generate(p, assetId, item.getId(), item.getSerialNo(), item.getPurchasePrice(), terms, new HashSet<>());
+    }
+
+    /** 验收合格/资料审核通过后兑现对应阶段的预估到期日(含月结/次月/次次月规则)。 */
+    @Transactional
+    public int onAcceptanceUpdated(PurchaseIn p) {
+        List<Payable> payables = payableMapper.selectList(new LambdaQueryWrapper<Payable>()
+                .eq(Payable::getPurchaseInId, p.getId())
+                .eq(Payable::getStatus, "待付"));
+        int fixed = 0;
+        for (Payable pay : payables) {
+            if (!Integer.valueOf(1).equals(pay.getDueProvisional())) {
+                continue;
+            }
+            ContractPaymentTerm t = pay.getTermId() == null ? null : contractTermMapper.selectById(pay.getTermId());
+            if (t == null) {
+                continue;
+            }
+            LocalDate base = resolveActualTriggerDate(p, t.getTriggerPoint());
+            if (base == null) {
+                continue;
+            }
+            LocalDate due = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                    base, t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth());
+            payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
+                    .eq(Payable::getId, pay.getId())
+                    .set(Payable::getDueDate, due)
+                    .set(Payable::getDueProvisional, 0));
+            fixed++;
+        }
+        return fixed;
+    }
+
+    private List<ContractPaymentTerm> toTempTerms(List<PaymentTermDtos.TermInput> inputs) {
+        List<ContractPaymentTerm> out = new ArrayList<>();
+        int seq = 1;
+        for (PaymentTermDtos.TermInput in : inputs) {
+            ContractPaymentTerm t = new ContractPaymentTerm();
+            t.setSeq(seq++);
+            t.setStageName(in.getStageName());
+            t.setRatio(in.getRatio());
+            t.setTriggerPoint(in.getTriggerPoint());
+            t.setDueDays(in.getDueDays());
+            t.setDueRule(in.getDueRule());
+            t.setDueDayOfMonth(in.getDueDayOfMonth());
+            out.add(t);
+        }
+        return out;
+    }
+
+    private LocalDate resolveActualTriggerDate(PurchaseIn p, String trigger) {
+        if (TRIGGER_ORDER.equals(trigger)) {
+            return p.getOrderDate() != null ? p.getOrderDate() : LocalDate.now();
+        }
+        if (TRIGGER_RECEIVE.equals(trigger)) {
+            return p.getReceiveDate();
+        }
+        if (top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_ACCEPT.equals(trigger)) {
+            return p.getAcceptanceDate();
+        }
+        if (top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_AUDIT.equals(trigger)) {
+            return p.getAuditPassDate();
+        }
+        return p.getReceiveDate();
     }
 
     /** 付款条件摘要:首付30%(下单)/验收60%(入库)…(取该设备所属合同的付款方式) */
@@ -212,10 +291,18 @@ public class AssetPaymentService {
             if (!"待付".equals(pay.getStatus()) || !Integer.valueOf(1).equals(pay.getDueProvisional())) {
                 continue;
             }
-            int days = dueDaysOf(pay.getTermId());
+            ContractPaymentTerm t = pay.getTermId() == null ? null : contractTermMapper.selectById(pay.getTermId());
+            if (t != null && !TRIGGER_RECEIVE.equals(t.getTriggerPoint())) {
+                // 验收合格/审核通过触发的阶段,待验收/审核时兑现
+                continue;
+            }
+            LocalDate due = t != null
+                    ? top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                            receiveDate, t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth())
+                    : receiveDate.plusDays(dueDaysOf(pay.getTermId()));
             payableMapper.update(null, new LambdaUpdateWrapper<Payable>()
                     .eq(Payable::getId, pay.getId())
-                    .set(Payable::getDueDate, receiveDate.plusDays(days))
+                    .set(Payable::getDueDate, due)
                     .set(Payable::getDueProvisional, 0));
             fixed++;
         }
@@ -267,6 +354,10 @@ public class AssetPaymentService {
             line.setRatio(t.getRatio());
             line.setTriggerPoint(t.getTriggerPoint());
             line.setDueDays(t.getDueDays());
+            line.setDueRule(t.getDueRule());
+            line.setDueDayOfMonth(t.getDueDayOfMonth());
+            line.setRuleDesc(top.aole.rent.modules.contract.service.PaymentDueDateCalculator.describeRule(
+                    t.getTriggerPoint(), t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth()));
             line.setExpectedAmount(seeCost ? amounts.get(i) : null);
             Payable pay = payableByTerm.get(t.getId());
             if (pay != null) {
@@ -374,30 +465,31 @@ public class AssetPaymentService {
             if (!orderStage && legacyReceive) {
                 continue;
             }
+            LocalDate actualBase = resolveActualTriggerDate(p, t.getTriggerPoint());
             LocalDate base;
             boolean provisional = false;
-            if (orderStage) {
-                base = p.getOrderDate() != null ? p.getOrderDate() : LocalDate.now();
-            } else if (p.getReceiveDate() != null) {
-                base = p.getReceiveDate();
+            if (actualBase != null) {
+                base = actualBase;
             } else {
-                // 未入库:按预计入库日推算,到期日标为预估,入库时兑现
+                // 未入库/未验收/未审核:按预计入库日推算,到期日标为预估,兑现时改写
                 base = p.getExpectReceiveDate() != null ? p.getExpectReceiveDate()
                         : (p.getOrderDate() != null ? p.getOrderDate() : LocalDate.now());
                 provisional = true;
             }
+            LocalDate dueDate = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                    base, t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth());
             Payable pay = new Payable();
             pay.setPurchaseInId(p.getId());
             pay.setAssetId(assetId);
             pay.setPurchaseItemId(purchaseItemId);
             pay.setTermId(t.getId());
             pay.setStage(t.getStageName());
-            pay.setDueDate(base.plusDays(t.getDueDays() == null ? 0 : t.getDueDays()));
+            pay.setDueDate(dueDate);
             pay.setDueProvisional(provisional ? 1 : 0);
             pay.setAmount(amounts.get(i));
             pay.setStatus("待付");
             pay.setRemark(t.getStageName() + " " + pct(t.getRatio()) + " · 设备 " + serialNo
-                    + (provisional ? "(到期日按预计入库日推算)" : ""));
+                    + (provisional ? "(到期日按预计" + t.getTriggerPoint() + "日推算)" : ""));
             payableMapper.insert(pay);
         }
     }
@@ -405,6 +497,19 @@ public class AssetPaymentService {
     /** 某条应付对应合同段的账期天数(供采购模块改预计入库日后重算到期调用)。 */
     public int dueDaysOfTerm(Long termId) {
         return dueDaysOf(termId);
+    }
+
+    /** 按付款条件规则推算预估到期日(支持月结/次月/次次月);段不存在时返回 null 以便回退。 */
+    public LocalDate computeProvisionalDueDate(Long termId, LocalDate baseDate) {
+        if (termId == null || baseDate == null) {
+            return null;
+        }
+        ContractPaymentTerm t = contractTermMapper.selectById(termId);
+        if (t == null) {
+            return null;
+        }
+        return top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                baseDate, t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth());
     }
 
     /** 某条应付对应合同段的账期天数;段已不存在返回 0。 */

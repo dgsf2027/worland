@@ -25,12 +25,22 @@ public class BillDtos {
         private LocalDate dueDate;
         private BigDecimal amount;
         private BigDecimal receivedAmount;
+        /** 剩余未收金额 = amount - receivedAmount */
+        private BigDecimal remainingAmount;
         private String status;
         private String billKind;
         private LocalDateTime matchedAt;
         private String accountPeriod;
         private Long reversesId;
         private Long voucherId;
+        /** 销项发票跟踪(V129) */
+        private String invoiceStatus;
+        private String invoiceNo;
+        private LocalDate invoiceDate;
+        private BigDecimal invoiceAmount;
+        private LocalDate invoiceDueDate;
+        private BigDecimal invoiceTaxRate;
+        private Boolean invoiceOverdue;
         private Boolean overdue;      // 计算:待收且已过到期日
         private Integer overdueDays;  // 逾期天数
         private String remark;
@@ -72,6 +82,16 @@ public class BillDtos {
         private List<Long> proofFileIds;   // 退款回单(必填)
     }
 
+    /** 登记销项发票(V129:收租核销后按合同约定如 10 工作日内开具 3% 专票) */
+    @Data
+    public static class InvoiceRequest {
+        private String invoiceNo;
+        private LocalDate invoiceDate;
+        private BigDecimal invoiceAmount;
+        private BigDecimal invoiceTaxRate;
+        private String remark;
+    }
+
     // ---------- 红冲影响清单(P0-F) ----------
 
     @Data
@@ -102,10 +122,13 @@ public class BillDtos {
         private int receivedNotMatched;  // 已到账未核销
         private int matchedNoVoucher;    // 已核销缺凭证
         private int matchedNoProof;      // 已核销无回单(10-07 纪要)
+        private int pendingInvoice;      // 已核销待开销项发票(V129)
+        private int overdueInvoice;      // 超期未开销项发票(V129)
         private List<String> billNotGeneratedDetail;
         private List<String> receivedNotMatchedDetail;
         private List<String> matchedNoVoucherDetail;
         private List<String> matchedNoProofDetail;
+        private List<String> pendingInvoiceDetail;
         private boolean allClear;
     }
 

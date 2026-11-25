@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import top.aole.rent.common.result.R;
+import top.aole.rent.modules.contract.dto.ProjectPanoramaDtos;
+import top.aole.rent.modules.contract.service.ProjectPanoramaService;
 import top.aole.rent.modules.workbench.dto.WorkbenchDtos;
 import top.aole.rent.modules.workbench.dto.WorkbenchChartsDtos;
 import top.aole.rent.modules.workbench.service.WorkbenchChartsService;
@@ -24,6 +26,7 @@ public class WorkbenchController {
 
     private final WorkbenchService workbenchService;
     private final WorkbenchChartsService workbenchChartsService;
+    private final ProjectPanoramaService projectPanoramaService;
 
     @ApiOperation("工作台:各角色待办 + 亮灯红点 + 驾驶舱 KPI(按角色可见)")
     @GetMapping
@@ -35,5 +38,11 @@ public class WorkbenchController {
     @GetMapping("/charts")
     public R<WorkbenchChartsDtos.Charts> charts(@RequestParam(required = false) Integer months) {
         return R.ok(workbenchChartsService.charts(months));
+    }
+
+    @ApiOperation("工作台·项目真实利润总览：汇总各项目采购投入、已收租金、净现金流、预计毛利/税后净利与回本进度")
+    @GetMapping("/project-panoramas")
+    public R<ProjectPanoramaDtos.Overview> projectPanoramas() {
+        return R.ok(projectPanoramaService.overview());
     }
 }

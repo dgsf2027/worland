@@ -61,6 +61,9 @@ public class AssetBom {
     /** 部件残值率(0-1);空=随品类 */
     private BigDecimal residualRate;
 
+    /** 明细类型:实物配件/安装运输/检测等费用 */
+    private String itemKind;
+
     private String remark;
 
     private LocalDateTime createTime;

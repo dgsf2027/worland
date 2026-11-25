@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
  * 流水号/发票号唯一;收票对账。数据全部虚构。
  */
 @SpringJUnitConfig(PurchaseContractFlowTest.Config.class)
-@Sql({"/pc-flow-schema.sql", "/db/migration/V124__purchase_contract.sql"})
+@Sql({"/pc-flow-schema.sql", "/db/migration/V124__purchase_contract.sql", "/pc-flow-v129.sql"})
 class PurchaseContractFlowTest {
 
     @Configuration

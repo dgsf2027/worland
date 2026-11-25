@@ -39,13 +39,34 @@ public class Contract {
 
     private BigDecimal targetIrr;
 
+    /** 名义年化利率(%,如 20.00) */
+    private BigDecimal leaseAnnualRate;
+
+    /** 计息口径:a/b/c */
+    private String interestMode;
+
     /** 合同税率(0-1);合同清单金额为含税价 */
     private BigDecimal taxRate;
 
-    /** 设备总价(含税)= 合同清单合计 */
+    /** 销项专票税率(0-1,默认 0.03) */
+    private BigDecimal invoiceTaxRate;
+
+    /** 收款后开票期限(工作日,默认 10) */
+    private Integer invoiceDeadlineDays;
+
+    /** 逾期日违约金率(默认 0.0005) */
+    private BigDecimal overdueDailyRate;
+
+    /** 设备总价(含税)= 合同清单原价合计扣除整单优惠后的最终成交价 */
     private BigDecimal equipmentTotal;
 
-    /** 合同性质(固定分期收款销售) */
+    /** 清单整单优惠/抹零金额(元) */
+    private BigDecimal boqDiscountAmount;
+
+    /** 最终成交价(含税·元) */
+    private BigDecimal finalDealPrice;
+
+    /** 合同性质(分期收款销售 / 设备融资租赁) */
     private String nature;
 
     /** 状态:草稿/生效/到期转让/关闭/已作废 */
@@ -55,6 +76,12 @@ public class Contract {
 
     /** 起租日(=租金计划首期起算) */
     private LocalDate startDate;
+
+    /** 每月固定付款日(1-31,如 15) */
+    private Integer payDayOfMonth;
+
+    /** 首期付款日(如 2026-11-15) */
+    private LocalDate firstPayDate;
 
     private Long projectId;
 

@@ -126,8 +126,17 @@ public class PurchaseContractService {
         c.setSupplierId(req.getSupplierId());
         c.setRentContractId(req.getRentContractId());
         c.setTotalAmount(total);
+        c.setDetailSubtotal(req.getDetailSubtotal() == null ? null : money(req.getDetailSubtotal()));
+        BigDecimal disc = req.getDiscountAmount() != null ? money(req.getDiscountAmount())
+                : (req.getDetailSubtotal() != null ? money(req.getDetailSubtotal()).subtract(total).max(BigDecimal.ZERO) : BigDecimal.ZERO);
+        c.setDiscountAmount(disc);
         c.setTaxRate(req.getTaxRate() == null ? new BigDecimal("0.13") : req.getTaxRate());
         c.setSignedDate(req.getSignedDate());
+        c.setWarrantyYears(req.getWarrantyYears());
+        c.setDeliveryAddress(req.getDeliveryAddress());
+        c.setDeliveryContact(req.getDeliveryContact());
+        c.setAcceptanceDate(req.getAcceptanceDate());
+        c.setAuditPassDate(req.getAuditPassDate());
         c.setStatus("执行中");
         c.setRemark(req.getRemark());
         c.setCreateByName(u.getUserName());
@@ -140,6 +149,14 @@ public class PurchaseContractService {
             term.setStageName(t.getStageName().trim());
             term.setRatio(t.getRatio());
             term.setAmount(amounts.get(i - 1));
+            term.setTriggerPoint(t.getTriggerPoint());
+            term.setDueRule(top.aole.rent.modules.contract.service.PaymentDueDateCalculator.normalizeRule(t.getDueRule()));
+            term.setDueDays(t.getDueDays() == null ? 0 : t.getDueDays());
+            term.setDueDayOfMonth(t.getDueDayOfMonth());
+            LocalDate base = resolveTermBaseDate(c, t.getTriggerPoint());
+            term.setDueDate(t.getDueDate() != null ? t.getDueDate()
+                    : top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                            base, term.getDueRule(), term.getDueDays(), term.getDueDayOfMonth()));
             term.setConditionText(t.getConditionText());
             termMapper.insert(term);
             i++;
@@ -178,6 +195,14 @@ public class PurchaseContractService {
             BigDecimal paid = paidByTerm.getOrDefault(t.getId(), BigDecimal.ZERO);
             v.setPaid(paid);
             v.setUnpaid(t.getAmount().subtract(paid));
+            v.setTriggerPoint(t.getTriggerPoint());
+            v.setDueRule(t.getDueRule());
+            v.setDueDays(t.getDueDays());
+            v.setDueDayOfMonth(t.getDueDayOfMonth());
+            v.setDueDate(t.getDueDate());
+            v.setRuleDesc(t.getTriggerPoint() == null ? null
+                    : top.aole.rent.modules.contract.service.PaymentDueDateCalculator.describeRule(
+                            t.getTriggerPoint(), t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth()));
             v.setConditionText(t.getConditionText());
             tvs.add(v);
         }
@@ -218,6 +243,71 @@ public class PurchaseContractService {
         d.setInvoiceProofCounts(payProofService.countMap(INVOICE_BIZ,
                 d.getInvoices().stream().map(PurchaseInvoice::getId).collect(Collectors.toList())));
         return d;
+    }
+
+    /** 补绑/换绑主租赁合同(先采后签场景:采购合同 8 月签、租赁合同 11 月补签后关联)。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void bindRentContract(Long pcId, Long rentContractId) {
+        PurchaseContract c = requireActive(pcId);
+        if (rentContractId != null) {
+            Contract rc = rentContractMapper.selectById(rentContractId);
+            if (rc == null || Integer.valueOf(1).equals(rc.getIsDeleted())) {
+                throw new BizException(404, "租赁合同不存在: id=" + rentContractId);
+            }
+        }
+        contractMapper.update(null, new LambdaUpdateWrapper<PurchaseContract>()
+                .eq(PurchaseContract::getId, pcId).set(PurchaseContract::getRentContractId, rentContractId));
+        // 同步回填已关联但尚未绑定主合同的采购入库单
+        if (rentContractId != null) {
+            purchaseInMapper.update(null, new LambdaUpdateWrapper<PurchaseIn>()
+                    .eq(PurchaseIn::getPcId, pcId)
+                    .isNull(PurchaseIn::getContractId)
+                    .set(PurchaseIn::getContractId, rentContractId));
+        }
+        auditLogService.record("采购合同关联主合同", "purchase_contract", pcId, AuditLogService.EXECUTED,
+                c.getContractNo() + " → 主租赁合同#" + rentContractId);
+    }
+
+    /** 登记采购合同验收/资料审核通过日,自动按月结/次月/次次月规则重算各付款节点到期日。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void recordAcceptance(Long pcId, PcDtos.AcceptanceRequest req) {
+        PurchaseContract c = requireActive(pcId);
+        if (req.getAcceptanceDate() != null) c.setAcceptanceDate(req.getAcceptanceDate());
+        if (req.getAuditPassDate() != null) c.setAuditPassDate(req.getAuditPassDate());
+        if (req.getWarrantyYears() != null) c.setWarrantyYears(req.getWarrantyYears());
+        if (req.getDeliveryAddress() != null) c.setDeliveryAddress(req.getDeliveryAddress());
+        if (req.getDeliveryContact() != null) c.setDeliveryContact(req.getDeliveryContact());
+        contractMapper.updateById(c);
+
+        for (PurchaseContractTerm t : terms(pcId)) {
+            LocalDate base = resolveTermBaseDate(c, t.getTriggerPoint());
+            if (base != null) {
+                LocalDate due = top.aole.rent.modules.contract.service.PaymentDueDateCalculator.computeDueDate(
+                        base, t.getDueRule(), t.getDueDays(), t.getDueDayOfMonth());
+                if (due != null) {
+                    t.setDueDate(due);
+                    termMapper.updateById(t);
+                }
+            }
+        }
+        auditLogService.record("采购合同验收审核", "purchase_contract", pcId, AuditLogService.EXECUTED,
+                c.getContractNo() + " 验收日=" + c.getAcceptanceDate() + " 审核日=" + c.getAuditPassDate());
+    }
+
+    private LocalDate resolveTermBaseDate(PurchaseContract c, String triggerPoint) {
+        if (triggerPoint == null) {
+            return null;
+        }
+        if (top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_AUDIT.equals(triggerPoint)) {
+            return c.getAuditPassDate() != null ? c.getAuditPassDate() : c.getAcceptanceDate();
+        }
+        if (top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_ACCEPT.equals(triggerPoint)) {
+            return c.getAcceptanceDate();
+        }
+        if (top.aole.rent.modules.contract.service.PaymentDueDateCalculator.TRIGGER_ORDER.equals(triggerPoint)) {
+            return c.getSignedDate();
+        }
+        return c.getAcceptanceDate();
     }
 
     // ---------------- 付款 ----------------
@@ -629,8 +719,15 @@ public class PurchaseContractService {
             }
         }
         v.setTotalAmount(c.getTotalAmount());
+        v.setDetailSubtotal(c.getDetailSubtotal());
+        v.setDiscountAmount(c.getDiscountAmount());
         v.setTaxRate(c.getTaxRate());
         v.setSignedDate(c.getSignedDate());
+        v.setWarrantyYears(c.getWarrantyYears());
+        v.setDeliveryAddress(c.getDeliveryAddress());
+        v.setDeliveryContact(c.getDeliveryContact());
+        v.setAcceptanceDate(c.getAcceptanceDate());
+        v.setAuditPassDate(c.getAuditPassDate());
         v.setStatus(c.getStatus());
         v.setRemark(c.getRemark());
         PcDtos.Summary sm = new PcDtos.Summary();

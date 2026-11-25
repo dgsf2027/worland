@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /** 采购合同付款节点。 */
 @Data
@@ -18,5 +19,10 @@ public class PurchaseContractTerm {
     private String stageName;
     private BigDecimal ratio;
     private BigDecimal amount;
+    private String triggerPoint;
+    private String dueRule;
+    private Integer dueDays;
+    private Integer dueDayOfMonth;
+    private LocalDate dueDate;
     private String conditionText;
 }

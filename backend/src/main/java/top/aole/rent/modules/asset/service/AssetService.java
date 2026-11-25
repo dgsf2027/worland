@@ -206,6 +206,13 @@ public class AssetService {
         r.setIntendedCustomerName(a.getIntendedCustomerId() == null ? null : customerName(a.getIntendedCustomerId()));
         r.setContractId(a.getContractId());
         r.setContractNo(contractNo(a.getContractId()));
+        r.setDealPriceOverride(seeCost ? a.getDealPriceOverride() : null);
+        r.setWarrantyYears(a.getWarrantyYears());
+        r.setWarrantyStartDate(a.getWarrantyStartDate());
+        r.setWarrantyEndDate(a.getWarrantyEndDate());
+        r.setDeliveryAddress(a.getDeliveryAddress());
+        r.setDeliveryContact(a.getDeliveryContact());
+        r.setWeighTons(a.getWeighTons());
         r.setRemark(a.getRemark());
         r.setSensitiveMasked(!seeCost);
         r.setBookValue(seeCost ? bookValue(a) : null);
@@ -303,10 +310,20 @@ public class AssetService {
         a.setCategory(req.getCategory().trim());
         a.setModel(req.getModel());
         a.setMarketPrice(req.getMarketPrice());
-        a.setPurchasePrice(req.getPurchasePrice());
+        BigDecimal effectivePrice = req.getDealPriceOverride() != null ? req.getDealPriceOverride() : req.getPurchasePrice();
+        a.setPurchasePrice(effectivePrice);
+        a.setDealPriceOverride(req.getDealPriceOverride());
         a.setSupplierId(req.getSupplierId());
         a.setMonthlyLaborValue(req.getMonthlyLaborValue());
         a.setReplaceHeadcount(req.getReplaceHeadcount());
+        a.setWarrantyYears(req.getWarrantyYears());
+        a.setWarrantyStartDate(req.getWarrantyStartDate());
+        a.setWarrantyEndDate(req.getWarrantyEndDate() != null ? req.getWarrantyEndDate()
+                : (req.getWarrantyStartDate() != null && req.getWarrantyYears() != null && req.getWarrantyYears() > 0
+                        ? req.getWarrantyStartDate().plusYears(req.getWarrantyYears()) : null));
+        a.setDeliveryAddress(req.getDeliveryAddress());
+        a.setDeliveryContact(req.getDeliveryContact());
+        a.setWeighTons(req.getWeighTons());
         a.setRemark(req.getRemark());
     }
 

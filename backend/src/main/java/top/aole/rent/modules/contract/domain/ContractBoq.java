@@ -46,6 +46,9 @@ public class ContractBoq {
     /** 生成设备时的品类;空=本行不生成设备(运费/安装费/优惠等) */
     private String assetCategory;
 
+    /** 明细类型:实物配件/安装运输/检测等费用 */
+    private String itemKind;
+
     /** 已按本行生成的设备台数 */
     private Integer generatedCount;
 

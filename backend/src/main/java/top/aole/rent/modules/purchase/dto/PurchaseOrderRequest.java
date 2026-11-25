@@ -23,10 +23,21 @@ public class PurchaseOrderRequest {
     @NotBlank(message = "采购单号必填")
     private String no;
 
-    @NotNull(message = "合同必填(先签约后采购)")
+    /** 绑定租赁合同(允许先采后签,可空;后续可补绑) */
     private Long contractId;
 
+    /** 意向承接客户(先采后签时记录) */
+    private Long intendedCustomerId;
+
+    /** 关联采购合同(可选;关联后优先按采购合同付款节点生成应付) */
+    private Long pcId;
+
     private Long supplierId;
+
+    private Integer warrantyYears;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private BigDecimal weighTons;
 
     /** 首付比例:仅当合同还没设付款方式、需要写入默认三段时生效(空=取 rule 默认 30%) */
     private BigDecimal firstPayRatio;

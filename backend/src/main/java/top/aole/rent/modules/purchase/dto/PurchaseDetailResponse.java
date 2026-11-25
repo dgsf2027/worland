@@ -41,6 +41,16 @@ public class PurchaseDetailResponse {
     /** 预计入库日(未入库时「入库」阶段应付的到期日基准) */
     private LocalDate expectReceiveDate;
 
+    private Long intendedCustomerId;
+    private String intendedCustomerName;
+    private LocalDate acceptanceDate;
+    private LocalDate auditPassDate;
+    private Integer warrantyYears;
+    private LocalDate warrantyEndDate;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private BigDecimal weighTons;
+
     /** 继承的合同付款方式摘要:首付30%(下单) / 验收66%(入库)… */
     private String contractPaymentTerms;
 

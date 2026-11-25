@@ -35,6 +35,10 @@ export interface ScheduleLine {
   periodNo: number
   dueDate: string
   amount: number
+  openingPrincipal?: number
+  interestAmount?: number
+  principalAmount?: number
+  closingPrincipal?: number
   planStatus: string
   rentBillId?: number
   dueState: string
@@ -74,6 +78,8 @@ export interface BoqLine {
   amountManual?: boolean
   /** 生成设备的品类;空=本行不生成设备 */
   assetCategory?: string | null
+  /** 费用分类:实物配件/安装运输/检测等费用 */
+  itemKind?: string | null
   /** 已生成设备台数(只读) */
   generatedCount?: number
   /** 还可生成台数(只读) */
@@ -83,6 +89,11 @@ export interface BoqLine {
 
 export interface Boq {
   lines: BoqLine[]
+  detailSubtotal?: number
+  discountAmount?: number
+  finalDealPrice?: number
+  physicalSubtotal?: number
+  serviceSubtotal?: number
   totalWithTax?: number
   totalWithoutTax?: number
   taxAmount?: number
@@ -121,12 +132,21 @@ export interface ContractDetail {
   deposit: number
   endTransferPrice: number
   targetIrr?: number
+  leaseAnnualRate?: number
+  interestMode?: string
   /** 合同税率(0-1) */
   taxRate?: number
+  invoiceTaxRate?: number
+  invoiceDeadlineDays?: number
+  overdueDailyRate?: number
   /** 设备总价(含税)= 合同清单合计 */
   equipmentTotal?: number
+  boqDiscountAmount?: number
+  finalDealPrice?: number
   signDate?: string
   startDate?: string
+  payDayOfMonth?: number
+  firstPayDate?: string
   remark?: string
   sensitiveMasked?: boolean
   assets: { assetId: number; serialNo?: string; category?: string; model?: string; assetStatus?: string; allocRent: number }[]
@@ -141,9 +161,9 @@ export interface ContractDetail {
   boq: Boq
 }
 
-/** 保存合同清单(整表;合计回写设备总价) */
-export function saveContractBoq(id: number, lines: BoqLine[]): Promise<Boq> {
-  return request.put(`/rent/contracts/${id}/boq`, { lines })
+/** 保存合同清单(整表;支持整单优惠/抹零,最终成交价回写设备总价) */
+export function saveContractBoq(id: number, lines: BoqLine[], discountAmount?: number | null): Promise<Boq> {
+  return request.put(`/rent/contracts/${id}/boq`, { lines, discountAmount: discountAmount ?? 0 })
 }
 /** 导入合同清单(《工程量清单计价表》.xls/.xlsx,整表替换) */
 export function importContractBoq(id: number, file: File): Promise<BoqImportResult> {
@@ -232,6 +252,9 @@ export interface ContractTermRow {
   ratio: number
   triggerPoint: string
   dueDays: number
+  dueRule?: string
+  dueDayOfMonth?: number | null
+  ruleDesc?: string
   /** 该段在本合同下的预计付款合计 = Σ(设备合同价 × 比例) */
   expectedTotal?: number
   payableTotal?: number
@@ -268,4 +291,135 @@ export function fetchContractPaymentTerms(id: number): Promise<ContractPaymentTe
 }
 export function saveContractPaymentTerms(id: number, terms: Record<string, any>[]): Promise<ContractPaymentTermView> {
   return request.put(`/rent/contracts/${id}/payment-terms`, { terms })
+}
+
+// ---- 项目真实利润全景（采购投入 ↔ 租赁产出 ↔ 资金峰值 ↔ 税后净利） ----
+
+export interface ProjectLinkedPurchase {
+  kind: string
+  id: number
+  no: string
+  supplierName?: string
+  totalAmount?: number
+  paidAmount?: number
+  unpaidAmount?: number
+  status?: string
+  acceptanceDate?: string
+  warrantyEndDate?: string
+}
+
+export interface ProjectMonthCashflow {
+  month: string
+  rentInflow: number
+  purchaseOutflow: number
+  netFlow: number
+  cumulativeNet: number
+}
+
+export interface ProjectPanorama {
+  contractId: number
+  contractNo: string
+  customerId?: number
+  customerName?: string
+  nature?: string
+  status?: string
+  signDate?: string
+  startDate?: string
+  endDate?: string
+  termMonths?: number
+  monthRent?: number
+  leaseAnnualRate?: number
+  endTransferPrice?: number
+  deposit?: number
+  depositHeld?: number
+  invoiceTaxRate?: number
+  invoiceDeadlineDays?: number
+  costVisible: boolean
+
+  plannedTotalRent?: number
+  plannedCustomerTotal?: number
+  receivedRent?: number
+  receivablePending?: number
+  overdueAmount?: number
+  remainingPrincipal?: number
+  totalPeriods: number
+  settledPeriods: number
+  pendingInvoiceCount: number
+  overdueInvoiceCount: number
+  invoicedRentAmount?: number
+
+  purchaseTotal?: number
+  purchasePaid?: number
+  purchaseUnpaid?: number
+  inputInvoiceTotal?: number
+  inputInvoiceTax?: number
+  nextPayableDate?: string
+  nextPayableAmount?: number
+  nextPayableStage?: string
+  warrantyEndDate?: string
+  warrantyDaysLeft?: number
+
+  expectedGrossProfit?: number
+  expectedGrossMargin?: number
+  estimatedOutputVat?: number
+  estimatedInputVat?: number
+  estimatedTaxCost?: number
+  estimatedAfterTaxProfit?: number
+  actualNetCashflow?: number
+  paybackProgress?: number
+  paybackPeriodNo?: number
+  peakCapitalOutlay?: number
+  peakOutlayMonth?: string
+
+  linkedPurchases: ProjectLinkedPurchase[]
+  monthlyCashflows: ProjectMonthCashflow[]
+}
+
+export interface ProjectPanoramaBrief {
+  contractId: number
+  contractNo: string
+  customerId?: number
+  customerName?: string
+  nature?: string
+  status?: string
+  termMonths?: number
+  monthRent?: number
+  plannedCustomerTotal?: number
+  receivedRent?: number
+  overdueAmount?: number
+  pendingInvoiceCount: number
+  overdueInvoiceCount: number
+  purchaseTotal?: number
+  purchasePaid?: number
+  purchaseUnpaid?: number
+  expectedGrossProfit?: number
+  estimatedAfterTaxProfit?: number
+  actualNetCashflow?: number
+  paybackProgress?: number
+  paybackPeriodNo?: number
+  peakCapitalOutlay?: number
+  nextPayableDate?: string
+  nextPayableAmount?: number
+  warrantyEndDate?: string
+}
+
+export interface ProjectPanoramaOverview {
+  costVisible: boolean
+  projectCount: number
+  totalPlannedCustomer?: number
+  totalReceivedRent?: number
+  totalPurchase?: number
+  totalPurchasePaid?: number
+  totalPurchaseUnpaid?: number
+  totalExpectedGrossProfit?: number
+  totalEstimatedAfterTaxProfit?: number
+  totalActualNetCashflow?: number
+  items: ProjectPanoramaBrief[]
+}
+
+export function fetchProjectPanorama(id: number): Promise<ProjectPanorama> {
+  return request.get(`/rent/contracts/${id}/project-panorama`)
+}
+export function fetchWorkbenchProjectPanoramas(): Promise<ProjectPanoramaOverview> {
+  return request.get('/rent/workbench/project-panoramas')
 }

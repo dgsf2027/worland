@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  fetchBills, matchBill, batchMatch, reverseBill, refundBill, runGen, fetchCashCheck,
+  fetchBills, matchBill, batchMatch, reverseBill, refundBill, issueBillInvoice, runGen, fetchCashCheck,
   fetchOverdue, overdueExtend, overduePenalty, overdueLock, overdueRepossess, overdueRepay, runScan,
   type BillItem, type CashCheck, type OverdueItem,
 } from '@/api/rent'
@@ -16,9 +16,14 @@ function money(v?: number | null) {
   if (v === null || v === undefined) return '—'
   return v >= 10000 || v <= -10000 ? (v / 10000).toFixed(2) + '万' : '¥' + v.toLocaleString()
 }
-const statusType: Record<string, string> = { 待收: 'info', 已核销: 'success', 逾期: 'danger', 红冲: 'warning' }
+const statusType: Record<string, string> = { 待收: 'info', 部分已收: 'warning', 已核销: 'success', 逾期: 'danger', 红冲: 'warning' }
 const kindType: Record<string, string> = { 正常: '', 红冲: 'warning', 退款: 'info', 罚息: 'danger' }
 const stepType: Record<string, string> = { 延期: 'info', 罚息: 'warning', 锁机: 'danger', 收回: 'danger', 关闭: 'success' }
+const invoiceStatusType: Record<string, string> = { 未开票: 'info', 待开票: 'warning', 已开票: 'success', 免开: 'info' }
+function isInvoiceOverdue(row: BillItem) {
+  if (row.invoiceStatus !== '待开票' || !row.invoiceDueDate) return false
+  return row.invoiceDueDate < new Date().toISOString().slice(0, 10)
+}
 
 // ---- 收租单列表 ----
 const filters = reactive<{ status: string; billKind: string; contractId?: number; customerId?: number }>({ status: '', billKind: '' })
@@ -40,7 +45,7 @@ function clearContract() {
   router.replace({ path: '/rent' })
   loadBills()
 }
-const statuses = ['待收', '已核销', '逾期', '红冲']
+const statuses = ['待收', '部分已收', '已核销', '逾期', '红冲']
 const kinds = ['正常', '红冲', '退款', '罚息']
 const bills = ref<BillItem[]>([])
 const total = ref(0)
@@ -62,9 +67,10 @@ async function loadBills() {
   }
 }
 function onSelect(rows: BillItem[]) { selected.value = rows }
-const selectableCount = computed(() => selected.value.filter((b) => b.status === '待收' || b.status === '逾期').length)
+const isMatchable = (b: BillItem) => b.status === '待收' || b.status === '部分已收' || b.status === '逾期'
+const selectableCount = computed(() => selected.value.filter(isMatchable).length)
 const selectedSum = computed(() =>
-  selected.value.filter((b) => b.status === '待收' || b.status === '逾期').reduce((s, b) => s + (b.amount || 0), 0))
+  selected.value.filter(isMatchable).reduce((s, b) => s + Math.max(0, (b.amount || 0) - (b.receivedAmount || 0)), 0))
 
 // ---- 生成收租单 ----
 async function doGen() {
@@ -91,8 +97,10 @@ async function submitCash() {
   cash.saving = true
   try {
     if (cash.mode === 'match') {
-      await matchBill(cash.bill!.id, { proofFileIds: cash.proofFileIds })
-      ElMessage.success('已核销')
+      const res = await matchBill(cash.bill!.id, { receivedAmount: cash.amount, proofFileIds: cash.proofFileIds })
+      ElMessage.success(res.status === '部分已收'
+        ? `已登记部分收款 ${money(cash.amount)}（累计已收 ${money(res.receivedAmount)}）`
+        : '已全额核销，销项发票已进入「待开票」队列')
     } else if (cash.mode === 'batch') {
       await batchMatch(cash.ids, cash.proofFileIds)
       ElMessage.success(`已批量核销 ${cash.ids.length} 张`)
@@ -113,14 +121,55 @@ async function submitCash() {
 const billProof = reactive<{ show: boolean; id: number; title: string }>({ show: false, id: 0, title: '' })
 function openBillProof(row: BillItem) { Object.assign(billProof, { show: true, id: row.id, title: '回单 · ' + row.billNo }) }
 
-// ---- 核销 ----
+// ---- 核销（支持分次部分收款） ----
 function doMatch(row: BillItem) {
-  openCash('match', { bill: row, title: '到账核销', summary: `${row.billNo} · 应收 ${money(row.amount)}` })
+  const already = Number(row.receivedAmount || 0)
+  const remaining = Math.max(0.01, Math.round((Number(row.amount || 0) - already) * 100) / 100)
+  openCash('match', {
+    bill: row,
+    title: '到账核销（支持部分收款）',
+    summary: `${row.billNo} · 应收 ${money(row.amount)} · 已收 ${money(already)} · 剩余 ${money(remaining)}`,
+    amount: remaining,
+  })
 }
 function doBatchMatch() {
-  const targets = selected.value.filter((b) => b.status === '待收' || b.status === '逾期')
-  if (!targets.length) { ElMessage.warning('请勾选待收/逾期收租单'); return }
-  openCash('batch', { ids: targets.map((b) => b.id), title: '批量核销', summary: `${targets.length} 张 · 合计 ${money(selectedSum.value)}（按各单应收全额）` })
+  const targets = selected.value.filter(isMatchable)
+  if (!targets.length) { ElMessage.warning('请勾选待收/部分已收/逾期收租单'); return }
+  openCash('batch', { ids: targets.map((b) => b.id), title: '批量核销', summary: `${targets.length} 张 · 合计 ${money(selectedSum.value)}（按各单剩余应收全额）` })
+}
+
+// ---- 销项发票登记 ----
+const invDlg = ref(false)
+const invSaving = ref(false)
+const invForm = reactive<{ bill?: BillItem; invoiceNo: string; invoiceDate: string; invoiceAmount: number; invoiceTaxPct: number }>({
+  bill: undefined, invoiceNo: '', invoiceDate: '', invoiceAmount: 0, invoiceTaxPct: 3,
+})
+function openInvoiceDlg(row: BillItem) {
+  Object.assign(invForm, {
+    bill: row,
+    invoiceNo: row.invoiceNo || '',
+    invoiceDate: row.invoiceDate || new Date().toISOString().slice(0, 10),
+    invoiceAmount: Number(row.invoiceAmount ?? row.receivedAmount ?? row.amount ?? 0),
+    invoiceTaxPct: row.invoiceTaxRate != null ? Math.round(row.invoiceTaxRate * 10000) / 100 : 3,
+  })
+  invDlg.value = true
+}
+async function submitBillInvoice() {
+  if (!invForm.bill || !invForm.invoiceNo.trim()) { ElMessage.warning('发票号码必填'); return }
+  invSaving.value = true
+  try {
+    await issueBillInvoice(invForm.bill.id, {
+      invoiceNo: invForm.invoiceNo.trim(),
+      invoiceDate: invForm.invoiceDate || undefined,
+      invoiceAmount: invForm.invoiceAmount,
+      invoiceTaxRate: Math.round(invForm.invoiceTaxPct * 10000) / 1000000,
+    })
+    invDlg.value = false
+    ElMessage.success('销项发票已登记')
+    loadBills(); loadCashCheck()
+  } finally {
+    invSaving.value = false
+  }
 }
 
 // ---- 红冲 / 退款 ----
@@ -212,14 +261,18 @@ onMounted(() => {
       <el-tag :type="cashCheck.receivedNotMatched ? 'danger' : 'success'" size="small">已到账未核销 {{ cashCheck.receivedNotMatched }}</el-tag>
       <el-tag :type="cashCheck.matchedNoVoucher ? 'warning' : 'success'" size="small">已核销缺凭证 {{ cashCheck.matchedNoVoucher }}</el-tag>
       <el-tag :type="cashCheck.matchedNoProof ? 'warning' : 'success'" size="small">已核销无回单 {{ cashCheck.matchedNoProof }}</el-tag>
+      <el-tag :type="cashCheck.pendingInvoice ? 'warning' : 'success'" size="small">待开销项票 {{ cashCheck.pendingInvoice ?? 0 }}</el-tag>
+      <el-tag v-if="cashCheck.overdueInvoice" type="danger" size="small">超期未开票 {{ cashCheck.overdueInvoice }}</el-tag>
       <el-tag :type="cashCheck.allClear ? 'success' : 'info'" size="small">{{ cashCheck.allClear ? '✓ 全清' : '有待办' }}</el-tag>
-      <el-popover v-if="!cashCheck.allClear" trigger="hover" width="420" placement="bottom">
+      <el-popover v-if="!cashCheck.allClear" trigger="hover" width="440" placement="bottom">
         <template #reference><el-button link type="primary" size="small">明细</el-button></template>
         <div class="audit-detail">
           <div v-if="cashCheck.billNotGeneratedDetail.length"><b>到期未生成单</b><div v-for="(d,i) in cashCheck.billNotGeneratedDetail" :key="'a'+i">· {{ d }}</div></div>
           <div v-if="cashCheck.receivedNotMatchedDetail.length"><b>已到账未核销</b><div v-for="(d,i) in cashCheck.receivedNotMatchedDetail" :key="'b'+i">· {{ d }}</div></div>
           <div v-if="cashCheck.matchedNoVoucherDetail.length"><b>已核销缺凭证(待 M3)</b><div v-for="(d,i) in cashCheck.matchedNoVoucherDetail.slice(0,8)" :key="'c'+i">· {{ d }}</div></div>
           <div v-if="cashCheck.matchedNoProofDetail?.length"><b>已核销无回单(可补传)</b><div v-for="(d,i) in cashCheck.matchedNoProofDetail.slice(0,8)" :key="'d'+i">· {{ d }}</div></div>
+          <div v-if="cashCheck.overdueInvoiceDetail?.length"><b style="color:#f56c6c">超期未开销项票</b><div v-for="(d,i) in cashCheck.overdueInvoiceDetail.slice(0,8)" :key="'e'+i">· {{ d }}</div></div>
+          <div v-if="cashCheck.pendingInvoiceDetail?.length"><b>待开销项票</b><div v-for="(d,i) in cashCheck.pendingInvoiceDetail.slice(0,8)" :key="'f'+i">· {{ d }}</div></div>
         </div>
       </el-popover>
     </el-card>
@@ -245,30 +298,37 @@ onMounted(() => {
         </div>
 
         <el-table :data="bills" v-loading="loading" size="small" border @selection-change="onSelect">
-          <el-table-column type="selection" width="42" :selectable="(r:any) => r.status === '待收' || r.status === '逾期'" />
-          <el-table-column prop="billNo" label="收租单号" min-width="180" show-overflow-tooltip />
+          <el-table-column type="selection" width="42" :selectable="isMatchable" />
+          <el-table-column prop="billNo" label="收租单号" min-width="175" show-overflow-tooltip />
           <el-table-column prop="contractNo" label="合同" width="140" show-overflow-tooltip />
           <el-table-column prop="customerName" label="客户" width="110" show-overflow-tooltip />
-          <el-table-column prop="periodNo" label="期" width="55" />
-          <el-table-column prop="dueDate" label="到期日" width="110" />
-          <el-table-column label="应收" width="100"><template #default="{ row }"><span :class="{ neg: row.amount < 0 }">{{ money(row.amount) }}</span></template></el-table-column>
+          <el-table-column prop="periodNo" label="期" width="52" />
+          <el-table-column prop="dueDate" label="到期日" width="105" />
+          <el-table-column label="应收" width="95"><template #default="{ row }"><span :class="{ neg: row.amount < 0 }">{{ money(row.amount) }}</span></template></el-table-column>
           <el-table-column label="已收" width="90"><template #default="{ row }">{{ money(row.receivedAmount) }}</template></el-table-column>
-          <el-table-column label="状态" width="82"><template #default="{ row }">
+          <el-table-column label="状态" width="95"><template #default="{ row }">
             <el-tag :type="statusType[row.status] || 'info'" size="small">{{ row.status }}</el-tag>
             <el-tag v-if="row.overdue" type="danger" size="small" effect="plain" style="margin-left:2px">逾{{ row.overdueDays }}d</el-tag>
           </template></el-table-column>
-          <el-table-column label="性质" width="70"><template #default="{ row }"><el-tag :type="kindType[row.billKind]" size="small" effect="plain">{{ row.billKind }}</el-tag></template></el-table-column>
-          <el-table-column label="凭证" width="60"><template #default="{ row }">
-            <el-tag v-if="row.status === '已核销' && !row.voucherId" type="warning" size="small" effect="plain">缺</el-tag>
-            <span v-else>—</span>
+          <el-table-column label="销项发票" width="135"><template #default="{ row }">
+            <template v-if="row.billKind === '正常' && row.status !== '红冲'">
+              <el-tag :type="isInvoiceOverdue(row) ? 'danger' : (invoiceStatusType[row.invoiceStatus || '未开票'] || 'info')" size="small" effect="plain">
+                {{ isInvoiceOverdue(row) ? '超期未开票' : (row.invoiceStatus || '未开票') }}
+              </el-tag>
+              <div v-if="row.invoiceNo" class="muted">{{ row.invoiceNo }}</div>
+              <div v-else-if="row.invoiceStatus === '待开票' && row.invoiceDueDate" class="muted">限 {{ row.invoiceDueDate }}</div>
+            </template>
+            <span v-else class="muted">—</span>
           </template></el-table-column>
-          <el-table-column label="回单" width="80"><template #default="{ row }">
+          <el-table-column label="性质" width="65"><template #default="{ row }"><el-tag :type="kindType[row.billKind]" size="small" effect="plain">{{ row.billKind }}</el-tag></template></el-table-column>
+          <el-table-column label="回单" width="75"><template #default="{ row }">
             <el-link v-if="row.proofCount" type="primary" @click="openBillProof(row)">📎 {{ row.proofCount }}</el-link>
             <el-tag v-else-if="row.status === '已核销' && (row.billKind === '正常' || row.billKind === '罚息')" type="warning" size="small" effect="plain" style="cursor:pointer" @click="openBillProof(row)">无回单</el-tag>
             <span v-else>—</span>
           </template></el-table-column>
-          <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }">
-            <el-button v-if="canFinance && (row.status === '待收' || row.status === '逾期')" link type="success" size="small" @click="doMatch(row)">核销</el-button>
+          <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }">
+            <el-button v-if="canFinance && isMatchable(row)" link type="success" size="small" @click="doMatch(row)">{{ row.status === '部分已收' ? '续核销' : '核销' }}</el-button>
+            <el-button v-if="canFinance && row.billKind === '正常' && (row.status === '已核销' || row.status === '部分已收') && row.invoiceStatus !== '已开票'" link type="primary" size="small" @click="openInvoiceDlg(row)">登记开票</el-button>
             <el-button v-if="row.status !== '红冲' && row.billKind !== '红冲' && row.billKind !== '退款'" link type="warning" size="small" @click="doReverse(row)">红冲</el-button>
             <el-button v-if="canFinance && row.status === '已核销' && row.billKind === '正常'" link type="info" size="small" @click="doRefund(row)">退款</el-button>
           </template></el-table-column>
@@ -311,9 +371,13 @@ onMounted(() => {
     </el-tabs>
 
     <!-- 收付款登记:先传回单 -->
-    <el-dialog v-model="cash.show" :title="cash.title" width="480px" destroy-on-close>
-      <el-form label-width="90px">
+    <el-dialog v-model="cash.show" :title="cash.title" width="500px" destroy-on-close>
+      <el-form label-width="100px">
         <el-form-item label="单据">{{ cash.summary }}</el-form-item>
+        <el-form-item v-if="cash.mode === 'match'" label="本次实收(元)">
+          <el-input-number v-model="cash.amount" :min="0.01" :precision="2" controls-position="right" style="width:200px" />
+          <span class="muted" style="margin-left:8px">少于剩余应收将记「部分已收」</span>
+        </el-form-item>
         <el-form-item v-if="cash.mode === 'refund'" label="退款金额">
           <el-input-number v-model="cash.amount" :min="0.01" :precision="2" controls-position="right" style="width:180px" />
         </el-form-item>
@@ -324,6 +388,21 @@ onMounted(() => {
       <template #footer>
         <el-button @click="cash.show = false">取消</el-button>
         <el-button type="primary" :disabled="!cash.proofFileIds.length" :loading="cash.saving" @click="submitCash">确认</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 销项发票登记 -->
+    <el-dialog v-model="invDlg" title="登记销项发票（开给客户的租金专票）" width="480px">
+      <el-form label-width="100px">
+        <el-form-item label="收租单">{{ invForm.bill?.billNo }}</el-form-item>
+        <el-form-item label="发票号码" required><el-input v-model="invForm.invoiceNo" placeholder="20位电子专票号码" /></el-form-item>
+        <el-form-item label="开票日期"><el-date-picker v-model="invForm.invoiceDate" type="date" value-format="YYYY-MM-DD" style="width:180px" /></el-form-item>
+        <el-form-item label="开票金额(元)"><el-input-number v-model="invForm.invoiceAmount" :min="0.01" :precision="2" controls-position="right" style="width:180px" /></el-form-item>
+        <el-form-item label="税率(%)"><el-input-number v-model="invForm.invoiceTaxPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:140px" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="invDlg = false">取消</el-button>
+        <el-button type="primary" :loading="invSaving" @click="submitBillInvoice">确认登记</el-button>
       </template>
     </el-dialog>
     <ProofViewer v-model="billProof.show" biz-type="rent_bill" :biz-id="billProof.id" :title="billProof.title"

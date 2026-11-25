@@ -59,4 +59,24 @@ describe('提取的设备租赁面板计算逻辑', () => {
     expect(validateLeaseInput(q)).not.toBe('')
     expect(() => calculateLease(q)).toThrow()
   })
+  it('真实合同测算：云山快仓28万/20%/60期/0押金/1元固定留购价/每月15日', () => {
+    const r = calculateLease({
+      contractPrice: 280000, purchasePrice: 280000, depositPercent: 0,
+      residualPercent: 0, residualMode: 'amount', residualAmount: 1,
+      annualRatePercent: 20, years: 5, frequency: 12, mode: 'b', refundDeposit: true,
+      startDate: '2026-10-01', firstPayDate: '2026-11-15', payDayOfMonth: 15,
+    })
+    expect(r.periods).toBe(60)
+    expect(r.rent).toBe(7418.29)
+    expect(r.residual).toBe(1)
+    expect(r.totalRent).toBe(445097.4)
+    expect(r.totalPrincipal).toBe(280000)
+    expect(r.totalInterest).toBe(165097.4)
+    expect(r.profit).toBe(165098.4)
+    expect(r.rows[0].dueDate).toBe('2026-11-15')
+    expect(r.rows[0].interest).toBe(4666.67)
+    expect(r.rows[0].principal).toBe(2751.62)
+    expect(r.rows[59].dueDate).toBe('2031-10-15')
+    expect(r.rows[59].closingBalance).toBe(0)
+  })
 })

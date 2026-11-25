@@ -1,28 +1,41 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { calculateLease, validateLeaseInput, INTEREST_MODES, PAYMENT_FREQUENCIES, type LeaseInput } from '@/utils/leaseCalculator'
 
+const router = useRouter()
+
 const defaults = () => ({
-  contractPrice: undefined as number | undefined, purchasePrice: undefined as number | undefined,
-  depositPercent: 10, residualPercent: 10, annualRatePercent: 25, years: 5,
-  frequency: 12 as LeaseInput['frequency'], mode: 'a' as LeaseInput['mode'], refundDeposit: true,
+  contractPrice: undefined as number | undefined,
+  purchasePrice: undefined as number | undefined,
+  depositPercent: 10,
+  residualMode: 'percent' as 'percent' | 'amount',
+  residualPercent: 10,
+  residualAmount: 1,
+  annualRatePercent: 25,
+  years: 5,
+  frequency: 12 as LeaseInput['frequency'],
+  mode: 'a' as LeaseInput['mode'],
+  refundDeposit: true,
+  startDate: '',
+  firstPayDate: '',
+  payDayOfMonth: 15 as number | undefined,
 })
 const form = reactive(defaults())
-const input = computed<LeaseInput>(() => ({ ...form, contractPrice: form.contractPrice ?? NaN, purchasePrice: form.purchasePrice ?? NaN }))
+const input = computed<LeaseInput>(() => ({
+  ...form,
+  contractPrice: form.contractPrice ?? NaN,
+  purchasePrice: form.purchasePrice ?? NaN,
+}))
 const error = computed(() => validateLeaseInput(input.value))
 const result = computed(() => error.value ? null : calculateLease(input.value))
 const activeMode = computed(() => INTEREST_MODES.find(m => m.value === form.mode)!)
 const periodUnit = computed(() => PAYMENT_FREQUENCIES.find(f => f.value === form.frequency)!.unit)
+const hasDueDate = computed(() => Boolean(result.value?.rows[0]?.dueDate))
 const money = (v: number) => '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const percent = (v: number | null) => v === null ? '—' : (v * 100).toFixed(2) + '%'
-const fields = [
-  { key: 'contractPrice', label: '合同总价（元）', max: 1e12, precision: 2 },
-  { key: 'purchasePrice', label: '实际采购价（元）', max: 1e12, precision: 2 },
-  { key: 'depositPercent', label: '押金比例（%）', max: 100, precision: 2 },
-  { key: 'residualPercent', label: '残值比例（%）', max: 100, precision: 2 },
-  { key: 'annualRatePercent', label: '名义年化利率（%）', max: 1000, precision: 4 },
-  { key: 'years', label: '租期（年）', max: 1200, precision: 4 },
-] as const
+
 const columns = [
   { key: 'openingBalance', label: '期初本金' }, { key: 'rent', label: '租金' },
   { key: 'interest', label: '利息' }, { key: 'principal', label: '归还本金' },
@@ -40,19 +53,131 @@ const metrics = computed(() => result.value ? [
   { label: '总回报率', value: percent(result.value.returnOnEquity), note: '全期净收益 ÷ 自有资金占用' },
   { label: '承租方实际承担年化', value: percent(result.value.customerAnnualIrr), note: '以合同总价作为融资额，按有效年化计算' },
 ] : [])
+
 function reset() { Object.assign(form, defaults()) }
+
+function applyYunshanPreset() {
+  Object.assign(form, {
+    contractPrice: 280000,
+    purchasePrice: 280000,
+    depositPercent: 0,
+    residualMode: 'amount',
+    residualPercent: 0,
+    residualAmount: 1,
+    annualRatePercent: 20,
+    years: 5,
+    frequency: 12,
+    mode: 'b',
+    refundDeposit: true,
+    startDate: '2026-10-01',
+    firstPayDate: '2026-11-15',
+    payDayOfMonth: 15,
+  })
+}
+
+function createContractFromQuote() {
+  if (!result.value) return
+  if (form.frequency !== 12) {
+    ElMessage.warning('当前合同租金计划按月期生成，建议切换为「月付」后再一键创建合同')
+  }
+  const r = result.value
+  const draft = {
+    nature: '设备融资租赁',
+    equipmentTotal: form.contractPrice,
+    finalDealPrice: form.contractPrice,
+    termMonths: r.periods,
+    monthRent: r.rent,
+    deposit: Math.round(r.deposit * 100) / 100,
+    endTransferPrice: Math.round(r.residual * 100) / 100,
+    leaseAnnualRate: form.annualRatePercent,
+    interestMode: form.mode,
+    targetIrr: r.effectiveAnnualIrr ? Math.round(r.effectiveAnnualIrr * 10000) / 10000 : undefined,
+    startDate: form.startDate || undefined,
+    firstPayDate: form.firstPayDate || undefined,
+    payDayOfMonth: form.payDayOfMonth || undefined,
+    scheduleItems: r.rows.map(row => ({
+      periodNo: row.period,
+      dueDate: row.dueDate || undefined,
+      amount: row.rent,
+      openingPrincipal: row.openingBalance,
+      interestAmount: row.interest,
+      principalAmount: row.principal,
+      closingPrincipal: row.closingBalance,
+    })),
+  }
+  sessionStorage.setItem('worland_quote_draft', JSON.stringify(draft))
+  ElMessage.success('已带入测算方案（含本息摊还计划），请补充客户与设备后签约')
+  router.push({ path: '/contract', query: { fromQuote: '1' } })
+}
 </script>
 
 <template>
   <div class="lease-calculator">
     <el-card class="input-panel">
-      <template #header><div class="panel-header"><strong>设备租赁收益率测算</strong><el-button text @click="reset">重置</el-button></div></template>
+      <template #header>
+        <div class="panel-header">
+          <strong>设备租赁收益率测算</strong>
+          <div>
+            <el-button text type="primary" size="small" @click="applyYunshanPreset">等额本息1元留购模板</el-button>
+            <el-button text @click="reset">重置</el-button>
+          </div>
+        </div>
+      </template>
       <el-form :model="form" label-position="top">
         <div class="input-grid">
-          <el-form-item v-for="field in fields" :key="field.key" :label="field.label">
-            <el-input-number v-model="form[field.key]" :aria-label="field.label" :min="0" :max="field.max" :precision="field.precision" :controls="false" placeholder="请填写" />
+          <el-form-item label="合同总价（元）">
+            <el-input-number v-model="form.contractPrice" aria-label="合同总价（元）" :min="0" :max="1e12" :precision="2" :controls="false" placeholder="请填写" />
+          </el-form-item>
+          <el-form-item label="实际采购价（元）">
+            <el-input-number v-model="form.purchasePrice" aria-label="实际采购价（元）" :min="0" :max="1e12" :precision="2" :controls="false" placeholder="请填写" />
+          </el-form-item>
+          <el-form-item label="押金比例（%）">
+            <el-input-number v-model="form.depositPercent" aria-label="押金比例（%）" :min="0" :max="100" :precision="2" :controls="false" placeholder="0 表示免押金" />
+          </el-form-item>
+          <el-form-item label="名义年化利率（%）">
+            <el-input-number v-model="form.annualRatePercent" aria-label="名义年化利率（%）" :min="0" :max="1000" :precision="4" :controls="false" placeholder="如 20" />
+          </el-form-item>
+          <el-form-item label="租期（年）">
+            <el-input-number v-model="form.years" aria-label="租期（年）" :min="0" :max="1200" :precision="4" :controls="false" placeholder="如 5" />
+          </el-form-item>
+          <el-form-item label="每月固定付款日">
+            <el-input-number v-model="form.payDayOfMonth" aria-label="每月固定付款日" :min="1" :max="31" :precision="0" :controls="false" placeholder="如 15" />
           </el-form-item>
         </div>
+
+        <el-form-item label="期末留购价方式">
+          <div class="residual-row">
+            <el-radio-group v-model="form.residualMode" size="small">
+              <el-radio-button value="percent">按残值比例 (%)</el-radio-button>
+              <el-radio-button value="amount">固定金额 (元)</el-radio-button>
+            </el-radio-group>
+            <el-input-number
+              v-if="form.residualMode === 'percent'"
+              v-model="form.residualPercent"
+              aria-label="残值比例（%）"
+              :min="0" :max="100" :precision="2" :controls="false"
+              style="width: 120px"
+            />
+            <el-input-number
+              v-else
+              v-model="form.residualAmount"
+              aria-label="固定留购价（元）"
+              :min="0" :max="1e12" :precision="2" :controls="false"
+              placeholder="如 1.00"
+              style="width: 120px"
+            />
+          </div>
+        </el-form-item>
+
+        <div class="input-grid">
+          <el-form-item label="起租日（可选）">
+            <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD" placeholder="选择起租日" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="首期付款日（可选）">
+            <el-date-picker v-model="form.firstPayDate" type="date" value-format="YYYY-MM-DD" placeholder="如 2026-11-15" style="width: 100%" />
+          </el-form-item>
+        </div>
+
         <el-form-item label="付款频率">
           <el-radio-group v-model="form.frequency">
             <el-radio-button v-for="f in PAYMENT_FREQUENCIES" :key="f.value" :value="f.value">{{ f.label }}</el-radio-button>
@@ -70,7 +195,13 @@ function reset() { Object.assign(form, defaults()) }
           </el-radio-group>
         </el-form-item>
       </el-form>
-      <p class="muted">修改参数后即时重算。结果仅用于报价测算，不生成合同、付款或发票。</p>
+
+      <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px">
+        <el-button type="primary" :disabled="!result" style="width: 100%" @click="createContractFromQuote">
+          以此方案创建租赁合同（带入 {{ result ? result.periods : 0 }} 期本息计划）
+        </el-button>
+        <p class="muted" style="margin: 0">修改参数后即时重算。点击上方按钮可将方案一键带入合同签约弹窗。</p>
+      </div>
     </el-card>
 
     <div class="results-panel" aria-live="polite">
@@ -94,6 +225,7 @@ function reset() { Object.assign(form, defaults()) }
           <p class="formula">起租日：采购支出 {{ money(result.input.purchasePrice) }}，收取押金 {{ money(result.deposit) }}，净现金流 {{ money(result.cashFlows[0]) }}。</p>
           <el-table :data="result.rows" border stripe max-height="480" style="width:100%">
             <el-table-column prop="period" label="期数" width="65" fixed />
+            <el-table-column v-if="hasDueDate" prop="dueDate" label="付款日期" width="115" fixed />
             <el-table-column v-for="col in columns" :key="col.key" :label="col.label" min-width="130" align="right">
               <template #default="{ row }">{{ money(row[col.key]) }}</template>
             </el-table-column>
@@ -106,11 +238,12 @@ function reset() { Object.assign(form, defaults()) }
 </template>
 
 <style scoped>
-.lease-calculator { display:grid; grid-template-columns:minmax(300px,370px) minmax(0,1fr); gap:20px; align-items:start; }
+.lease-calculator { display:grid; grid-template-columns:minmax(320px,400px) minmax(0,1fr); gap:20px; align-items:start; }
 .input-panel,.results-panel { min-width:0; }
 .panel-header { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .input-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; }
 .input-grid :deep(.el-input-number) { width:100%; }
+.residual-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .interest-modes { display:flex; flex-direction:column; align-items:flex-start; }
 .interest-modes :deep(.el-radio) { margin-right:0; }
 .mode-note { line-height:1.6; margin:8px 0 0; }

@@ -18,6 +18,13 @@ public final class PcDtos {
         private BigDecimal ratio;
         /** 金额(可空;空则按 ratio×合同总价) */
         private BigDecimal amount;
+        /** 触发时点:下单/入库/验收合格/审核通过 */
+        private String triggerPoint;
+        /** 到期规则:after_days/month_end_days/next_month_day/next_2_month_day */
+        private String dueRule;
+        private Integer dueDays;
+        private Integer dueDayOfMonth;
+        private LocalDate dueDate;
         private String conditionText;
     }
 
@@ -27,13 +34,36 @@ public final class PcDtos {
         private Long supplierId;
         private Long rentContractId;
         private BigDecimal totalAmount;
+        /** 明细报价原价合计(如 284838) */
+        private BigDecimal detailSubtotal;
+        /** 整单优惠/抹零(如 4838) */
+        private BigDecimal discountAmount;
         /** 税率,如 0.13;缺省 0.13 */
         private BigDecimal taxRate;
         private LocalDate signedDate;
+        private Integer warrantyYears;
+        private String deliveryAddress;
+        private String deliveryContact;
+        private LocalDate acceptanceDate;
+        private LocalDate auditPassDate;
         private String remark;
         private List<TermInput> terms;
         /** 合同原件(照片/PDF)的文件 id,可选;经回单上传接口先上传 */
         private List<Long> proofFileIds;
+    }
+
+    @Data
+    public static class BindRentContractRequest {
+        private Long rentContractId;
+    }
+
+    @Data
+    public static class AcceptanceRequest {
+        private LocalDate acceptanceDate;
+        private LocalDate auditPassDate;
+        private Integer warrantyYears;
+        private String deliveryAddress;
+        private String deliveryContact;
     }
 
     @Data
@@ -89,6 +119,12 @@ public final class PcDtos {
         private BigDecimal amount;
         private BigDecimal paid;
         private BigDecimal unpaid;
+        private String triggerPoint;
+        private String dueRule;
+        private Integer dueDays;
+        private Integer dueDayOfMonth;
+        private LocalDate dueDate;
+        private String ruleDesc;
         private String conditionText;
     }
 
@@ -119,8 +155,15 @@ public final class PcDtos {
         private LocalDate rentStartDate;
         private String rentStatus;
         private BigDecimal totalAmount;
+        private BigDecimal detailSubtotal;
+        private BigDecimal discountAmount;
         private BigDecimal taxRate;
         private LocalDate signedDate;
+        private Integer warrantyYears;
+        private String deliveryAddress;
+        private String deliveryContact;
+        private LocalDate acceptanceDate;
+        private LocalDate auditPassDate;
         private String status;
         private String remark;
         private Summary summary;

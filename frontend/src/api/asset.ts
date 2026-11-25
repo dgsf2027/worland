@@ -81,20 +81,28 @@ export interface SignedUrl {
 }
 
 export interface CostItem { name: string; amount: number; ratio: number }
+export type PaymentTriggerPoint = '下单' | '入库' | '验收合格' | '审核通过'
+export type PaymentDueRule = 'after_days' | 'month_end_days' | 'next_month_day' | 'next_2_month_day'
+
 export interface PaymentTermInput {
   stageName: string
   /** 0-1 */
   ratio: number
-  triggerPoint: '下单' | '入库'
+  triggerPoint: PaymentTriggerPoint
   dueDays: number
+  dueRule?: PaymentDueRule
+  dueDayOfMonth?: number | null
 }
 export interface PaymentTermLine {
   id: number
   seq: number
   stageName: string
   ratio: number
-  triggerPoint: '下单' | '入库'
+  triggerPoint: PaymentTriggerPoint
   dueDays: number
+  dueRule?: PaymentDueRule
+  dueDayOfMonth?: number | null
+  ruleDesc?: string
   expectedAmount?: number
   payableId?: number
   payableAmount?: number
@@ -153,8 +161,15 @@ export interface AssetDetail {
   status: string
   marketPrice?: number
   purchasePrice?: number
+  dealPriceOverride?: number
   monthlyLaborValue?: number
   replaceHeadcount?: number
+  warrantyYears?: number
+  warrantyStartDate?: string
+  warrantyEndDate?: string
+  deliveryAddress?: string
+  deliveryContact?: string
+  weighTons?: number
   supplierId?: number
   supplierName?: string
   currentHolderCustomerId?: number
@@ -222,8 +237,10 @@ export function updatePaymentTerms(id: number, terms: PaymentTermInput[]): Promi
 export interface TermRow {
   stageName: string
   ratioPct: number | null
-  triggerPoint: '下单' | '入库'
+  triggerPoint: PaymentTriggerPoint
   dueDays: number | null
+  dueRule?: PaymentDueRule
+  dueDayOfMonth?: number | null
 }
 /** 编辑器行 → 接口入参(比例转 0-1) */
 export function toTermInputs(rows: TermRow[]): PaymentTermInput[] {
@@ -232,14 +249,21 @@ export function toTermInputs(rows: TermRow[]): PaymentTermInput[] {
     ratio: Math.round(Number(r.ratioPct || 0) * 1000000) / 100000000,
     triggerPoint: r.triggerPoint,
     dueDays: Number(r.dueDays || 0),
+    dueRule: r.dueRule || 'after_days',
+    dueDayOfMonth: r.dueDayOfMonth ?? null,
   }))
 }
-export function toTermRows(terms: { stageName: string; ratio: number; triggerPoint: string; dueDays?: number | null }[]): TermRow[] {
+const VALID_TRIGGERS: PaymentTriggerPoint[] = ['下单', '入库', '验收合格', '审核通过']
+export function toTermRows(
+  terms: { stageName: string; ratio: number; triggerPoint: string; dueDays?: number | null; dueRule?: string | null; dueDayOfMonth?: number | null }[],
+): TermRow[] {
   return terms.map((t) => ({
     stageName: t.stageName,
     ratioPct: Math.round(t.ratio * 1000000) / 10000,
-    triggerPoint: (t.triggerPoint === '下单' ? '下单' : '入库'),
+    triggerPoint: (VALID_TRIGGERS.includes(t.triggerPoint as PaymentTriggerPoint) ? t.triggerPoint : '入库') as PaymentTriggerPoint,
     dueDays: t.dueDays ?? 0,
+    dueRule: (t.dueRule as PaymentDueRule) || 'after_days',
+    dueDayOfMonth: t.dueDayOfMonth ?? null,
   }))
 }
 /** 校验编辑器行:返回错误文案或 null */

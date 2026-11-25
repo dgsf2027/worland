@@ -20,8 +20,17 @@ public class PurchaseContract {
     private Long supplierId;
     private Long rentContractId;
     private BigDecimal totalAmount;
+    /** 明细报价原价合计(元) */
+    private BigDecimal detailSubtotal;
+    /** 整单优惠/抹零金额(元) */
+    private BigDecimal discountAmount;
     private BigDecimal taxRate;
     private LocalDate signedDate;
+    private Integer warrantyYears;
+    private String deliveryAddress;
+    private String deliveryContact;
+    private LocalDate acceptanceDate;
+    private LocalDate auditPassDate;
     /** 执行中/已结清/作废 */
     private String status;
     private String remark;

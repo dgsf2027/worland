@@ -82,4 +82,23 @@ public final class PurchaseEditDtos {
         @ApiModelProperty("付款回单文件 id(先用 bizType=pay_proof 上传);必填")
         private List<Long> proofFileIds;
     }
+
+    /** 补绑租赁合同(先采后签用) */
+    @Data
+    public static class BindContractRequest {
+        @NotNull(message = "请选择要绑定的租赁合同")
+        private Long contractId;
+    }
+
+    /** 登记验收合格 / 资料审核通过 / 过磅与质保(自动兑现应付到期日与质保到期日) */
+    @Data
+    public static class AcceptanceRequest {
+        private LocalDate acceptanceDate;
+        private LocalDate auditPassDate;
+        private Integer warrantyYears;
+        private String deliveryAddress;
+        private String deliveryContact;
+        private BigDecimal weighTons;
+        private String remark;
+    }
 }

@@ -31,6 +31,8 @@ public final class BoqDtos {
         private Boolean amountManual;
         /** 生成设备的品类(播种墙/货架/阁楼/配件);空=本行不生成设备 */
         private String assetCategory;
+        /** 明细类型:实物配件/安装运输/检测等费用 */
+        private String itemKind;
         /** 已生成设备台数(只读) */
         private Integer generatedCount;
         /** 还可生成的台数 = 数量 - 已生成(只读) */
@@ -42,12 +44,24 @@ public final class BoqDtos {
     @Data
     public static class SaveRequest {
         private List<Line> lines = new ArrayList<>();
+        /** 整单优惠/抹零金额(如 4838.00);空则沿用合同原值 */
+        private BigDecimal discountAmount;
     }
 
     @Data
     public static class Boq {
         private List<Line> lines = new ArrayList<>();
-        /** 合计(含税) = Σ 金额 = 合同设备总价 */
+        /** 明细原价合计(含税,折让前,如 284,838) */
+        private BigDecimal detailSubtotal;
+        /** 整单优惠/抹零金额(如 4,838) */
+        private BigDecimal discountAmount;
+        /** 最终成交价(含税 = detailSubtotal - discountAmount,如 280,000) */
+        private BigDecimal finalDealPrice;
+        /** 其中:实物配件合计 */
+        private BigDecimal physicalSubtotal;
+        /** 其中:安装运输+检测等费用合计 */
+        private BigDecimal serviceSubtotal;
+        /** 合计(含税) = 最终成交价 = 合同设备总价 */
         private BigDecimal totalWithTax;
         /** 不含税金额 = 含税合计 / (1 + 税率) */
         private BigDecimal totalWithoutTax;

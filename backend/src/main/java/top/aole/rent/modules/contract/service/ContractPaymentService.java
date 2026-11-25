@@ -42,9 +42,11 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ContractPaymentService {
 
-    public static final String TRIGGER_ORDER = "下单";
-    public static final String TRIGGER_RECEIVE = "入库";
-    private static final Set<String> TRIGGERS = new HashSet<>(Arrays.asList(TRIGGER_ORDER, TRIGGER_RECEIVE));
+    public static final String TRIGGER_ORDER = PaymentDueDateCalculator.TRIGGER_ORDER;
+    public static final String TRIGGER_RECEIVE = PaymentDueDateCalculator.TRIGGER_RECEIVE;
+    public static final String TRIGGER_ACCEPT = PaymentDueDateCalculator.TRIGGER_ACCEPT;
+    public static final String TRIGGER_AUDIT = PaymentDueDateCalculator.TRIGGER_AUDIT;
+    private static final Set<String> TRIGGERS = PaymentDueDateCalculator.VALID_TRIGGERS;
     private static final BigDecimal ONE = BigDecimal.ONE;
     private static final BigDecimal TOLERANCE = new BigDecimal("0.0001");
 
@@ -71,7 +73,7 @@ public class ContractPaymentService {
         List<PaymentTermDtos.TermInput> out = new ArrayList<>();
         for (ContractPaymentTerm t : terms(contractId)) {
             out.add(new PaymentTermDtos.TermInput(t.getStageName(), t.getRatio(),
-                    t.getTriggerPoint(), t.getDueDays()));
+                    t.getTriggerPoint(), t.getDueDays(), t.getDueRule(), t.getDueDayOfMonth()));
         }
         return out;
     }
@@ -84,8 +86,9 @@ public class ContractPaymentService {
         }
         List<String> parts = new ArrayList<>();
         for (ContractPaymentTerm t : ts) {
-            parts.add(t.getStageName() + percent(t.getRatio()) + "(" + t.getTriggerPoint()
-                    + (t.getDueDays() != null && t.getDueDays() > 0 ? "+" + t.getDueDays() + "天" : "") + ")");
+            parts.add(t.getStageName() + percent(t.getRatio()) + "("
+                    + PaymentDueDateCalculator.describeRule(t.getTriggerPoint(), t.getDueRule(),
+                            t.getDueDays(), t.getDueDayOfMonth()) + ")");
         }
         return String.join(" / ", parts);
     }
@@ -120,15 +123,20 @@ public class ContractPaymentService {
             String trigger = t.getTriggerPoint() == null || t.getTriggerPoint().trim().isEmpty()
                     ? TRIGGER_RECEIVE : t.getTriggerPoint().trim();
             if (!TRIGGERS.contains(trigger)) {
-                throw new BizException(400, "阶段「" + name + "」触发时点应为 下单 或 入库");
+                throw new BizException(400, "阶段「" + name + "」触发时点应为 下单 / 入库 / 验收合格 / 审核通过");
             }
             int days = t.getDueDays() == null ? 0 : t.getDueDays();
             if (days < 0) {
                 throw new BizException(400, "阶段「" + name + "」到期天数不能为负");
             }
+            String rule = PaymentDueDateCalculator.normalizeRule(t.getDueRule());
+            Integer dom = t.getDueDayOfMonth();
+            if (dom != null && (dom < 1 || dom > 31)) {
+                throw new BizException(400, "阶段「" + name + "」指定自然月日须在 1-31 之间");
+            }
             BigDecimal ratio = t.getRatio().setScale(8, RoundingMode.HALF_UP);
             sum = sum.add(ratio);
-            out.add(new PaymentTermDtos.TermInput(name, ratio, trigger, days));
+            out.add(new PaymentTermDtos.TermInput(name, ratio, trigger, days, rule, dom));
         }
         if (sum.subtract(ONE).abs().compareTo(TOLERANCE) > 0) {
             throw new BizException(400, "各段付款比例合计须为 100%,当前为 "
@@ -220,6 +228,8 @@ public class ContractPaymentService {
             t.setRatio(in.getRatio());
             t.setTriggerPoint(in.getTriggerPoint());
             t.setDueDays(in.getDueDays() == null ? 0 : in.getDueDays());
+            t.setDueRule(PaymentDueDateCalculator.normalizeRule(in.getDueRule()));
+            t.setDueDayOfMonth(in.getDueDayOfMonth());
             termMapper.insert(t);
             out.add(t);
         }

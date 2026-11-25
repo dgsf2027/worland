@@ -52,8 +52,16 @@ public class RentBill {
     /** 退款指向的原核销单 id */
     private Long refBillId;
 
-    /** 【M3 钩子·预留】收入凭证 id(M2 恒 NULL) */
+    /** 收入凭证 id */
     private Long voucherId;
+
+    /** 销项发票状态:未开票/待开票/已开票/免开 */
+    private String invoiceStatus;
+    private String invoiceNo;
+    private LocalDate invoiceDate;
+    private BigDecimal invoiceAmount;
+    private LocalDate invoiceDueDate;
+    private BigDecimal invoiceTaxRate;
 
     private Long operatorId;
 

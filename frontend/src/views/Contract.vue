@@ -14,6 +14,7 @@ import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchAssets, checkUploadFile, saveFile, toTermRows, toTermInputs, checkTermRows,
   type AssetListItem, type TermRow } from '@/api/asset'
 import PaymentTermsEditor from '@/components/PaymentTermsEditor.vue'
+import ProjectPanoramaDrawer from '@/components/ProjectPanoramaDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +96,12 @@ function money(v?: number | null) {
 // ---- 详情 ----
 const detail = ref<ContractDetail | null>(null)
 const drawer = ref(false)
+const panoramaDrawer = ref(false)
+const panoramaContractId = ref<number | null>(null)
+function openPanorama(id: number) {
+  panoramaContractId.value = id
+  panoramaDrawer.value = true
+}
 async function openDetail(id: number) {
   detail.value = await fetchContractDetail(id)
   drawer.value = true
@@ -106,16 +113,38 @@ async function openDetail(id: number) {
 const signVisible = ref(false)
 const signSaving = ref(false)
 const signForm = reactive<Record<string, any>>({})
+const signScheduleItems = ref<any[]>([])
 function resetSign() {
   Object.keys(signForm).forEach((k) => delete signForm[k])
+  signScheduleItems.value = []
   Object.assign(signForm, {
-    no: '', customerId: filters.customerId, termMonths: undefined, monthRent: undefined, deposit: undefined,
-    endTransferPrice: undefined, targetIrrPct: undefined, signDate: '', startDate: '', remark: '',
+    no: '', customerId: filters.customerId, nature: '设备融资租赁',
+    termMonths: undefined, monthRent: undefined, deposit: 0,
+    endTransferPrice: 1, targetIrrPct: undefined, leaseAnnualRate: undefined,
+    interestMode: 'b', finalDealPrice: undefined,
+    signDate: '', startDate: '', firstPayDate: '', payDayOfMonth: 15,
+    invoiceTaxPct: 3, invoiceDeadlineDays: 10, overdueDailyPct: 0.05,
+    remark: '',
     assets: [{ assetId: undefined, allocRent: undefined }],
   })
 }
-async function openSign() {
+async function openSign(quoteDraft?: any) {
   resetSign()
+  if (quoteDraft) {
+    signForm.nature = quoteDraft.nature || '设备融资租赁'
+    signForm.termMonths = quoteDraft.termMonths
+    signForm.monthRent = quoteDraft.monthRent
+    signForm.deposit = quoteDraft.deposit ?? 0
+    signForm.endTransferPrice = quoteDraft.endTransferPrice ?? 1
+    signForm.leaseAnnualRate = quoteDraft.leaseAnnualRate
+    signForm.interestMode = quoteDraft.interestMode || 'b'
+    signForm.finalDealPrice = quoteDraft.finalDealPrice ?? quoteDraft.equipmentTotal
+    if (quoteDraft.targetIrr != null) signForm.targetIrrPct = Math.round(quoteDraft.targetIrr * 10000) / 100
+    signForm.startDate = quoteDraft.startDate || ''
+    signForm.firstPayDate = quoteDraft.firstPayDate || ''
+    signForm.payDayOfMonth = quoteDraft.payDayOfMonth ?? 15
+    signScheduleItems.value = Array.isArray(quoteDraft.scheduleItems) ? quoteDraft.scheduleItems : []
+  }
   signVisible.value = true
   await Promise.all([customers.value.length ? null : loadCustomers(), loadAssets()])
 }
@@ -134,10 +163,15 @@ async function submitSign() {
     ElMessage.warning('同一台设备不能重复挂载'); return
   }
   const body: Record<string, any> = { no: signForm.no, customerId: signForm.customerId, assets }
-  for (const k of ['termMonths', 'monthRent', 'deposit', 'endTransferPrice', 'signDate', 'startDate', 'remark']) {
+  for (const k of ['nature', 'termMonths', 'monthRent', 'deposit', 'endTransferPrice', 'leaseAnnualRate',
+    'interestMode', 'finalDealPrice', 'signDate', 'startDate', 'firstPayDate', 'payDayOfMonth',
+    'invoiceDeadlineDays', 'remark']) {
     if (signForm[k] !== undefined && signForm[k] !== '' && signForm[k] !== null) body[k] = signForm[k]
   }
   if (signForm.targetIrrPct != null) body.targetIrr = Math.round(Number(signForm.targetIrrPct) * 100) / 10000
+  if (signForm.invoiceTaxPct != null) body.invoiceTaxRate = Math.round(Number(signForm.invoiceTaxPct) * 10000) / 1000000
+  if (signForm.overdueDailyPct != null) body.overdueDailyRate = Math.round(Number(signForm.overdueDailyPct) * 10000) / 1000000
+  if (signScheduleItems.value.length) body.scheduleItems = signScheduleItems.value
   signSaving.value = true
   try {
     const id = await signContract(body)
@@ -195,6 +229,8 @@ async function submitPaymentTerms() {
 
 // ---- 合同清单(《工程量清单计价表》;合计 = 设备总价) ----
 const boqRows = ref<BoqLine[]>([])
+const boqDiscountAmount = ref<number>(0)
+const BOQ_ITEM_KINDS = ['实物配件', '安装运输', '检测等费用']
 const boqEditing = ref(false)
 const boqSaving = ref(false)
 const boqImporting = ref(false)
@@ -208,13 +244,15 @@ function rowAmount(r: BoqLine): number | null {
   if (r.qty == null || r.unitPrice == null) return null
   return Math.round(Number(r.qty) * Number(r.unitPrice) * 100) / 100
 }
-const boqTotal = computed(() => boqRows.value.reduce((sum, r) => sum + Number(rowAmount(r) ?? 0), 0))
+const boqDetailSubtotal = computed(() => Math.round(boqRows.value.reduce((sum, r) => sum + Number(rowAmount(r) ?? 0), 0) * 100) / 100)
+const boqTotal = computed(() => Math.max(0, Math.round((boqDetailSubtotal.value - Number(boqDiscountAmount.value || 0)) * 100) / 100))
 const boqTaxRate = computed(() => Number(detail.value?.taxRate ?? 0))
 const boqWithoutTax = computed(() => (boqTaxRate.value > 0 ? Math.round((boqTotal.value / (1 + boqTaxRate.value)) * 100) / 100 : null))
 const boqTaxAmount = computed(() => (boqWithoutTax.value == null ? null : Math.round((boqTotal.value - boqWithoutTax.value) * 100) / 100))
 
 function startBoqEdit() {
-  boqRows.value = (detail.value?.boq?.lines || []).map((l) => ({ ...l }))
+  boqRows.value = (detail.value?.boq?.lines || []).map((l) => ({ ...l, itemKind: l.itemKind || '实物配件' }))
+  boqDiscountAmount.value = Number(detail.value?.boq?.discountAmount ?? detail.value?.boqDiscountAmount ?? 0)
   if (!boqRows.value.length) addBoqRow()
   boqEditing.value = true
 }
@@ -223,7 +261,7 @@ function cancelBoqEdit() {
   boqRows.value = []
 }
 function addBoqRow() {
-  boqRows.value.push({ name: '', model: null, spec: null, unit: '台', qty: 1, unitPrice: null, amount: null, amountManual: false, assetCategory: null, remark: null })
+  boqRows.value.push({ name: '', model: null, spec: null, unit: '台', qty: 1, unitPrice: null, amount: null, amountManual: false, assetCategory: null, itemKind: '实物配件', remark: null })
 }
 function removeBoqRow(i: number) {
   const row = boqRows.value[i]
@@ -242,8 +280,8 @@ async function submitBoq() {
   }
   boqSaving.value = true
   try {
-    await saveContractBoq(d.id, boqRows.value)
-    ElMessage.success('合同清单已保存，设备总价已同步为含税合计')
+    await saveContractBoq(d.id, boqRows.value, boqDiscountAmount.value || 0)
+    ElMessage.success('合同清单已保存，最终成交价已同步为设备总价')
     boqEditing.value = false
     await openDetail(d.id)
     loadList()
@@ -337,7 +375,13 @@ async function openEdit() {
     customerId: d.customerId,
     nature: d.nature || '分期收款销售',
     targetIrrPct: d.targetIrr == null ? null : Math.round(d.targetIrr * 10000) / 100,
+    leaseAnnualRate: d.leaseAnnualRate ?? null,
+    interestMode: d.interestMode || 'b',
     taxRatePct: d.taxRate == null ? null : Math.round(d.taxRate * 1000000) / 10000,
+    invoiceTaxPct: d.invoiceTaxRate == null ? 3 : Math.round(d.invoiceTaxRate * 10000) / 100,
+    invoiceDeadlineDays: d.invoiceDeadlineDays ?? 10,
+    payDayOfMonth: d.payDayOfMonth ?? null,
+    firstPayDate: d.firstPayDate || '',
     termMonths: d.termMonths,
     monthRent: d.monthRent,
     endTransferPrice: d.endTransferPrice,
@@ -373,7 +417,13 @@ async function submitEdit() {
       customerId: editForm.customerId,
       nature: editForm.nature,
       targetIrr: editForm.targetIrrPct == null ? null : Math.round(Number(editForm.targetIrrPct) * 100) / 10000,
+      leaseAnnualRate: editForm.leaseAnnualRate ?? null,
+      interestMode: editForm.interestMode || null,
       taxRate: editForm.taxRatePct == null ? null : Math.round(Number(editForm.taxRatePct) * 1000000) / 100000000,
+      invoiceTaxRate: editForm.invoiceTaxPct == null ? null : Math.round(Number(editForm.invoiceTaxPct) * 10000) / 1000000,
+      invoiceDeadlineDays: editForm.invoiceDeadlineDays ?? null,
+      payDayOfMonth: editForm.payDayOfMonth ?? null,
+      firstPayDate: editForm.firstPayDate || null,
       termMonths: editForm.termMonths,
       monthRent: editForm.monthRent,
       endTransferPrice: editForm.endTransferPrice ?? null,
@@ -467,7 +517,7 @@ function clearCustomerFilter() {
   loadList()
 }
 
-// 从客户详情跳转过来:?id= 打开合同详情;?customerId= 只看该客户的合同
+// 从客户详情跳转过来:?id= 打开合同详情;?customerId= 只看该客户的合同;?fromQuote=1 从报价测算一键创建合同
 onMounted(() => {
   const cid = Number(route.query.customerId)
   if (cid) filters.customerId = cid
@@ -475,6 +525,18 @@ onMounted(() => {
   loadCustomers()
   const id = Number(route.query.id)
   if (id) openDetail(id)
+  if (route.query.fromQuote === '1') {
+    const raw = sessionStorage.getItem('worland_quote_draft')
+    if (raw) {
+      sessionStorage.removeItem('worland_quote_draft')
+      try {
+        openSign(JSON.parse(raw))
+      } catch {
+        openSign()
+      }
+    }
+    router.replace({ path: '/contract' })
+  }
 })
 </script>
 
@@ -516,16 +578,22 @@ onMounted(() => {
         <el-progress v-if="row.repaymentRatio != null" :percentage="Math.round(row.repaymentRatio * 100)" :stroke-width="12" />
         <span v-else>暂无实收数据</span>
       </template></el-table-column>
+      <el-table-column label="利润全景" width="110" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click.stop="openPanorama(row.id)">📊 项目全景</el-button>
+        </template>
+      </el-table-column>
     </el-table>
 
     <!-- 详情抽屉 -->
-    <el-drawer v-model="drawer" :title="detail ? `合同 ${detail.no} · ${detail.status}` : '合同详情'" size="62%">
+    <el-drawer v-model="drawer" :title="detail ? `合同 ${detail.no} · ${detail.status}` : '合同详情'" size="66%">
       <div v-if="detail" class="detail">
         <el-alert v-if="detail.sensitiveMasked" type="info" :closable="false" show-icon
           title="投资人视角:单笔P&L/每期构成/集采成本已打码 🔒(勾稽与客户总付仍可见)" style="margin-bottom:12px" />
 
         <!-- 操作 -->
         <div style="margin-bottom:12px">
+          <el-button size="small" type="success" @click="openPanorama(detail.id)">📊 项目真实利润全景</el-button>
           <el-button size="small" type="primary" :disabled="!canEdit" @click="openEdit">编辑合同</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doRenew">续租</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doChange">提前结清</el-button>
@@ -536,14 +604,23 @@ onMounted(() => {
         <el-descriptions :column="3" border size="small">
           <el-descriptions-item label="客户"><a class="lnk" @click="goCustomer(detail.customerId)">{{ detail.customerName }}</a></el-descriptions-item>
           <el-descriptions-item label="性质">{{ detail.nature }}</el-descriptions-item>
-          <el-descriptions-item label="目标IRR">{{ detail.targetIrr != null ? (detail.targetIrr * 100).toFixed(2).replace(/\.?0+$/, '') + '%' : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="名义年利率 / 目标IRR">
+            {{ detail.leaseAnnualRate != null ? detail.leaseAnnualRate + '%' : '—' }}
+            <span v-if="detail.targetIrr != null" class="mini-note">IRR {{ (detail.targetIrr * 100).toFixed(2).replace(/\.?0+$/, '') }}%</span>
+          </el-descriptions-item>
           <el-descriptions-item label="租期">{{ detail.termMonths }} 月</el-descriptions-item>
           <el-descriptions-item label="月租">{{ money(detail.monthRent) }}</el-descriptions-item>
-          <el-descriptions-item label="期末转让价">{{ money(detail.endTransferPrice) }}</el-descriptions-item>
+          <el-descriptions-item label="期末留购/转让价">{{ money(detail.endTransferPrice) }}</el-descriptions-item>
           <el-descriptions-item label="押金">{{ money(detail.deposit) }}</el-descriptions-item>
           <el-descriptions-item label="设备总价(含税)">{{ detail.equipmentTotal == null ? '—' : money(detail.equipmentTotal) }}</el-descriptions-item>
-          <el-descriptions-item label="合同税率">{{ detail.taxRate == null ? '—' : (detail.taxRate * 100).toFixed(2).replace(/\.?0+$/, '') + '%' }}</el-descriptions-item>
+          <el-descriptions-item label="销项票率 / 期限">
+            {{ detail.invoiceTaxRate != null ? (detail.invoiceTaxRate * 100).toFixed(1).replace(/\.0$/, '') + '%' : '3%' }}
+            · 收款后 {{ detail.invoiceDeadlineDays ?? 10 }} 工作日
+          </el-descriptions-item>
           <el-descriptions-item label="起租日">{{ detail.startDate || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="首期/固定付款日">
+            {{ detail.firstPayDate || '—' }}<span v-if="detail.payDayOfMonth">（每月 {{ detail.payDayOfMonth }} 日）</span>
+          </el-descriptions-item>
           <el-descriptions-item label="签约日">{{ detail.signDate || '—' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.remark" label="备注" :span="3">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
@@ -640,8 +717,8 @@ onMounted(() => {
             <el-table-column label="比例" width="80" align="right">
               <template #default="{ row }">{{ pctText(row.ratio) }}</template>
             </el-table-column>
-            <el-table-column label="触发 / 到期" width="140">
-              <template #default="{ row }">{{ row.triggerPoint }} + {{ row.dueDays }} 天</template>
+            <el-table-column label="触发 / 到期规则" min-width="170">
+              <template #default="{ row }">{{ row.ruleDesc || `${row.triggerPoint} + ${row.dueDays} 天` }}</template>
             </el-table-column>
             <el-table-column label="预计付款合计" width="140" align="right">
               <template #default="{ row }">{{ money(row.expectedTotal) }}</template>
@@ -688,9 +765,12 @@ onMounted(() => {
         <div v-if="detail.sensitiveMasked" class="sub">当前角色不可查看清单金额 🔒</div>
         <template v-else>
           <el-table v-if="!boqEditing" :data="detail.boq?.lines || []" size="small" border>
-            <el-table-column label="序号" width="60" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
-            <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
-            <el-table-column prop="model" label="型号" min-width="110" show-overflow-tooltip />
+            <el-table-column label="序号" width="55" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
+            <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
+            <el-table-column label="分类" width="95">
+              <template #default="{ row }"><el-tag size="small" :type="row.itemKind && row.itemKind !== '实物配件' ? 'warning' : 'info'" effect="plain">{{ row.itemKind || '实物配件' }}</el-tag></template>
+            </el-table-column>
+            <el-table-column prop="model" label="型号" min-width="100" show-overflow-tooltip />
             <el-table-column prop="spec" label="规格" min-width="150" show-overflow-tooltip />
             <el-table-column prop="unit" label="单位" width="60" align="center" />
             <el-table-column prop="qty" label="数量" width="80" align="right" />
@@ -708,9 +788,16 @@ onMounted(() => {
             </el-table-column>
           </el-table>
           <el-table v-else :data="boqRows" size="small" border>
-            <el-table-column label="序号" width="55" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
-            <el-table-column label="名称" min-width="130"><template #default="{ row }"><el-input v-model="row.name" size="small" maxlength="128" /></template></el-table-column>
-            <el-table-column label="型号" min-width="100"><template #default="{ row }"><el-input v-model="row.model" size="small" maxlength="128" /></template></el-table-column>
+            <el-table-column label="序号" width="50" align="center"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
+            <el-table-column label="名称" min-width="120"><template #default="{ row }"><el-input v-model="row.name" size="small" maxlength="128" /></template></el-table-column>
+            <el-table-column label="分类" width="115">
+              <template #default="{ row }">
+                <el-select v-model="row.itemKind" size="small" placeholder="实物配件">
+                  <el-option v-for="k in BOQ_ITEM_KINDS" :key="k" :label="k" :value="k" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="型号" min-width="95"><template #default="{ row }"><el-input v-model="row.model" size="small" maxlength="128" /></template></el-table-column>
             <el-table-column label="规格" min-width="120"><template #default="{ row }"><el-input v-model="row.spec" size="small" maxlength="255" /></template></el-table-column>
             <el-table-column label="单位" width="70"><template #default="{ row }"><el-input v-model="row.unit" size="small" maxlength="16" /></template></el-table-column>
             <el-table-column label="数量" width="95"><template #default="{ row }"><el-input-number v-model="row.qty" size="small" :min="0" :precision="2" :controls="false" style="width:100%" /></template></el-table-column>
@@ -737,11 +824,16 @@ onMounted(() => {
           </el-table>
           <div class="boq-total">
             <template v-if="boqEditing">
-              合计(含税) <b>{{ money(boqTotal) }}</b>
+              明细原价 <b>{{ money(boqDetailSubtotal) }}</b>
+              <span>− 整单优惠/抹零</span>
+              <el-input-number v-model="boqDiscountAmount" size="small" :min="0" :precision="2" :controls="false" style="width:110px" />
+              <span>= 最终成交价(含税) <b>{{ money(boqTotal) }}</b></span>
               <span v-if="boqWithoutTax != null" class="sub">不含税 {{ money(boqWithoutTax) }} · 税额 {{ money(boqTaxAmount) }}</span>
             </template>
             <template v-else-if="detail.boq?.linked">
-              设备总价(含税) <b>{{ money(detail.boq.totalWithTax) }}</b>
+              <span v-if="detail.boq.discountAmount">明细原价 {{ money(detail.boq.detailSubtotal) }} − 优惠 {{ money(detail.boq.discountAmount) }} = </span>
+              最终成交价(含税) <b>{{ money(detail.boq.finalDealPrice ?? detail.boq.totalWithTax) }}</b>
+              <span v-if="detail.boq.serviceSubtotal" class="sub">（实物 {{ money(detail.boq.physicalSubtotal) }} + 安装/检测等 {{ money(detail.boq.serviceSubtotal) }}）</span>
               <span v-if="detail.boq.totalWithoutTax != null" class="sub">不含税 {{ money(detail.boq.totalWithoutTax) }} · 税额 {{ money(detail.boq.taxAmount) }}（税率 {{ ((detail.boq.taxRate || 0) * 100).toFixed(2).replace(/\.?0+$/, '') }}%）</span>
               <span v-else class="sub">在「修改合同」里填合同税率后可拆出不含税金额与税额</span>
               <span v-if="detail.boq.generatedAssets" class="sub">已按清单生成 {{ detail.boq.generatedAssets }} 台设备 · <a class="lnk" @click="goAssetsOfContract">查看</a></span>
@@ -764,13 +856,16 @@ onMounted(() => {
         </el-table>
 
         <!-- 租金计划逐期 -->
-        <div class="block-title">租金计划表(逐期)</div>
+        <div class="block-title">租金计划表(逐期 · 含本息拆分)</div>
         <el-table :data="detail.schedule" size="small" border max-height="280">
-          <el-table-column prop="periodNo" label="期次" width="70" />
-          <el-table-column prop="dueDate" label="到期日" width="120" />
-          <el-table-column label="应收"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
-          <el-table-column label="计划态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.planStatus === '已生成单' ? 'success' : 'info'">{{ row.planStatus }}</el-tag></template></el-table-column>
-          <el-table-column label="到期" width="90"><template #default="{ row }"><el-tag size="small" :type="row.dueState === '已到期' ? 'warning' : 'info'">{{ row.dueState }}</el-tag></template></el-table-column>
+          <el-table-column prop="periodNo" label="期次" width="60" />
+          <el-table-column prop="dueDate" label="到期日" width="110" />
+          <el-table-column label="应收租金" width="110" align="right"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
+          <el-table-column label="归还本金" width="105" align="right"><template #default="{ row }">{{ row.principalAmount == null ? '—' : money(row.principalAmount) }}</template></el-table-column>
+          <el-table-column label="当期利息" width="105" align="right"><template #default="{ row }">{{ row.interestAmount == null ? '—' : money(row.interestAmount) }}</template></el-table-column>
+          <el-table-column label="期末本金余额" width="120" align="right"><template #default="{ row }">{{ row.closingPrincipal == null ? '—' : money(row.closingPrincipal) }}</template></el-table-column>
+          <el-table-column label="计划态" width="90"><template #default="{ row }"><el-tag size="small" :type="row.planStatus === '已生成单' ? 'success' : 'info'">{{ row.planStatus }}</el-tag></template></el-table-column>
+          <el-table-column label="到期" width="80"><template #default="{ row }"><el-tag size="small" :type="row.dueState === '已到期' ? 'warning' : 'info'">{{ row.dueState }}</el-tag></template></el-table-column>
         </el-table>
 
         <!-- 押金台账 + 变更留痕 -->
@@ -804,15 +899,28 @@ onMounted(() => {
             <el-option v-for="c in customers" :key="c.id" :label="c.name + (c.contact ? ' · ' + c.contact : '')" :value="c.id" />
           </el-select>
         </el-form-item>
+        <el-alert v-if="signScheduleItems.length" type="success" :closable="false" show-icon style="margin-bottom:10px"
+          :title="`已从报价测算带入 ${signScheduleItems.length} 期本息摊还计划（本金/利息/固定付款日将原样写入租金计划表）`" />
         <el-row :gutter="12">
-          <el-col :span="12"><el-form-item label="租期(月)"><el-input-number v-model="signForm.termMonths" :min="1" placeholder="缺省按品类" controls-position="right" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="月租合计(元)"><el-input-number v-model="signForm.monthRent" :min="0" :step="500" placeholder="缺省=Σ单台分摊" controls-position="right" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="期末转让价(元)"><el-input-number v-model="signForm.endTransferPrice" :min="0" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="押金(元)"><el-input-number v-model="signForm.deposit" :min="0" :step="1000" placeholder="缺省按押金月数" controls-position="right" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="目标IRR(%)"><el-input-number v-model="signForm.targetIrrPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12">
+            <el-form-item label="合同性质">
+              <el-select v-model="signForm.nature" style="width:100%">
+                <el-option label="设备融资租赁" value="设备融资租赁" />
+                <el-option label="分期收款销售" value="分期收款销售" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12"><el-form-item label="租期(月)"><el-input-number v-model="signForm.termMonths" :min="1" placeholder="如 60" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="月租合计(元)"><el-input-number v-model="signForm.monthRent" :min="0" :precision="2" :step="500" placeholder="缺省=Σ单台分摊" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="期末留购/转让价"><el-input-number v-model="signForm.endTransferPrice" :min="0" :precision="2" :step="100" placeholder="如 1.00" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="押金(元)"><el-input-number v-model="signForm.deposit" :min="0" :precision="2" :step="1000" placeholder="0 表示免押金" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="名义年化利率(%)"><el-input-number v-model="signForm.leaseAnnualRate" :min="0" :max="100" :precision="2" placeholder="如 20" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="签约日"><el-date-picker v-model="signForm.signDate" type="date" value-format="YYYY-MM-DD" placeholder="缺省今天" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="起租日"><el-date-picker v-model="signForm.startDate" type="date" value-format="YYYY-MM-DD" placeholder="缺省签约日" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="性质"><el-input model-value="分期收款销售" disabled /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="首期付款日"><el-date-picker v-model="signForm.firstPayDate" type="date" value-format="YYYY-MM-DD" placeholder="如 2026-11-15" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="每月固定付款日"><el-input-number v-model="signForm.payDayOfMonth" :min="1" :max="31" :precision="0" placeholder="如 15" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="销项票税率(%)"><el-input-number v-model="signForm.invoiceTaxPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="收款后开票(工作日)"><el-input-number v-model="signForm.invoiceDeadlineDays" :min="1" :max="60" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
         </el-row>
         <el-form-item label="挂载设备" required>
           <div style="width:100%">
@@ -860,16 +968,24 @@ onMounted(() => {
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="性质">
-              <el-select v-model="editForm.nature" style="width:100%"><el-option label="分期收款销售" value="分期收款销售" /></el-select>
+              <el-select v-model="editForm.nature" style="width:100%">
+                <el-option label="分期收款销售" value="分期收款销售" />
+                <el-option label="设备融资租赁" value="设备融资租赁" />
+              </el-select>
             </el-form-item>
           </el-col>
+          <el-col :span="12"><el-form-item label="名义年利率(%)"><el-input-number v-model="editForm.leaseAnnualRate" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="目标IRR(%)"><el-input-number v-model="editForm.targetIrrPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="合同税率(%)"><el-input-number v-model="editForm.taxRatePct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" placeholder="如 13" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="销项票率(%)"><el-input-number v-model="editForm.invoiceTaxPct" :min="0" :max="100" :precision="2" controls-position="right" style="width:100%" placeholder="如 3" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="开票期限(工作日)"><el-input-number v-model="editForm.invoiceDeadlineDays" :min="1" :max="60" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="租期(月)" required><el-input-number v-model="editForm.termMonths" :min="Math.max(1, billedPeriods)" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="月租(元)" required><el-input-number v-model="editForm.monthRent" :min="0" :precision="2" :step="500" controls-position="right" style="width:100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="期末转让价(元)"><el-input-number v-model="editForm.endTransferPrice" :min="0" :precision="2" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="期末留购/转让价"><el-input-number v-model="editForm.endTransferPrice" :min="0" :precision="2" :step="100" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="押金(元)"><el-input-number v-model="editForm.deposit" :min="0" :precision="2" :step="1000" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="起租日" required><el-date-picker v-model="editForm.startDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="首期付款日"><el-date-picker v-model="editForm.firstPayDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="每月固定付款日"><el-input-number v-model="editForm.payDayOfMonth" :min="1" :max="31" :precision="0" controls-position="right" style="width:100%" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="签约日"><el-date-picker v-model="editForm.signDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item></el-col>
         </el-row>
         <el-form-item label="备注"><el-input v-model="editForm.remark" maxlength="255" /></el-form-item>
@@ -878,6 +994,8 @@ onMounted(() => {
       </el-form>
       <template #footer><el-button :disabled="editSaving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="editSaving" @click="submitEdit">保存</el-button></template>
     </el-dialog>
+
+    <ProjectPanoramaDrawer v-model="panoramaDrawer" :contract-id="panoramaContractId" />
   </div>
 </template>
 

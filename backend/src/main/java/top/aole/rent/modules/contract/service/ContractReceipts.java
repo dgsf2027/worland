@@ -17,7 +17,8 @@ public final class ContractReceipts {
             }
         }
         for (RentBill bill : bills) {
-            if (Integer.valueOf(1).equals(bill.getIsDeleted()) || !"已核销".equals(bill.getStatus())) continue;
+            if (Integer.valueOf(1).equals(bill.getIsDeleted())) continue;
+            if (!"已核销".equals(bill.getStatus()) && !"部分已收".equals(bill.getStatus())) continue;
             boolean rental = "正常".equals(bill.getBillKind());
             RentBill original = originals.get(bill.getRefBillId());
             boolean refund = "退款".equals(bill.getBillKind()) && original != null

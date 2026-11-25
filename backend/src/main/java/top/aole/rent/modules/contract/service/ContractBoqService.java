@@ -67,6 +67,7 @@ public class ContractBoqService {
             l.setAmount(r.getAmount());
             l.setAmountManual(Integer.valueOf(1).equals(r.getAmountManual()));
             l.setAssetCategory(r.getAssetCategory());
+            l.setItemKind(r.getItemKind() == null || r.getItemKind().trim().isEmpty() ? "实物配件" : r.getItemKind());
             l.setGeneratedCount(nz(r.getGeneratedCount()));
             l.setPendingCount(pendingCount(r));
             l.setRemark(r.getRemark());
@@ -74,18 +75,37 @@ public class ContractBoqService {
             generated += nz(r.getGeneratedCount());
             pending += pendingCount(r);
         }
-        BigDecimal total = total(rows);
+        BigDecimal detailSubtotal = total(rows);
+        BigDecimal physical = BigDecimal.ZERO;
+        BigDecimal service = BigDecimal.ZERO;
+        for (ContractBoq r : rows) {
+            BigDecimal amt = amountOf(r);
+            String kind = r.getItemKind() == null || r.getItemKind().trim().isEmpty() ? "实物配件" : r.getItemKind();
+            if ("实物配件".equals(kind)) {
+                physical = physical.add(amt);
+            } else {
+                service = service.add(amt);
+            }
+        }
+        BigDecimal discount = contract.getBoqDiscountAmount() == null ? BigDecimal.ZERO
+                : contract.getBoqDiscountAmount().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal finalDeal = detailSubtotal.subtract(discount).setScale(2, RoundingMode.HALF_UP);
         out.setTaxRate(contract.getTaxRate());
         out.setLinked(!rows.isEmpty());
         out.setGeneratedAssets(generated);
         out.setPendingAssets(pending);
+        out.setDiscountAmount(discount);
         if (!rows.isEmpty()) {
-            out.setTotalWithTax(total);
-            out.setTotalUpper(upperAmount(total));
+            out.setDetailSubtotal(detailSubtotal);
+            out.setFinalDealPrice(finalDeal);
+            out.setPhysicalSubtotal(physical.setScale(2, RoundingMode.HALF_UP));
+            out.setServiceSubtotal(service.setScale(2, RoundingMode.HALF_UP));
+            out.setTotalWithTax(finalDeal);
+            out.setTotalUpper(upperAmount(finalDeal));
             if (contract.getTaxRate() != null && contract.getTaxRate().signum() > 0) {
-                BigDecimal without = total.divide(BigDecimal.ONE.add(contract.getTaxRate()), 2, RoundingMode.HALF_UP);
+                BigDecimal without = finalDeal.divide(BigDecimal.ONE.add(contract.getTaxRate()), 2, RoundingMode.HALF_UP);
                 out.setTotalWithoutTax(without);
-                out.setTaxAmount(total.subtract(without));
+                out.setTaxAmount(finalDeal.subtract(without));
             }
         }
         return out;
@@ -137,6 +157,12 @@ public class ContractBoqService {
     /** 整表保存:带 id 的更新,不带 id 的新增,表里没有的删除;保存后回写设备总价。 */
     @Transactional
     public BoqDtos.Boq save(Contract contract, List<BoqDtos.Line> lines) {
+        return save(contract, lines, null);
+    }
+
+    /** 整表保存(支持整单优惠/抹零金额与实物/服务费分类)。 */
+    @Transactional
+    public BoqDtos.Boq save(Contract contract, List<BoqDtos.Line> lines, BigDecimal discountAmount) {
         requireCostRole("维护合同清单");
         List<BoqDtos.Line> list = lines == null ? new ArrayList<>() : lines;
         Map<Long, ContractBoq> existing = load(contract.getId()).stream()
@@ -172,6 +198,8 @@ public class ContractBoqService {
             row.setQty(l.getQty());
             row.setUnitPrice(l.getUnitPrice());
             row.setAssetCategory(category);
+            String kind = trimToNull(l.getItemKind());
+            row.setItemKind(kind == null ? "实物配件" : kind);
             boolean manual = Boolean.TRUE.equals(l.getAmountManual());
             row.setAmountManual(manual ? 1 : 0);
             row.setAmount(manual ? l.getAmount()
@@ -191,10 +219,19 @@ public class ContractBoqService {
                 boqMapper.deleteById(e.getKey());
             }
         }
+        if (discountAmount != null) {
+            if (discountAmount.signum() < 0) {
+                throw new BizException(400, "整单优惠/抹零金额不能为负");
+            }
+            contractMapper.update(null, new LambdaUpdateWrapper<Contract>()
+                    .eq(Contract::getId, contract.getId())
+                    .set(Contract::getBoqDiscountAmount, discountAmount.setScale(2, RoundingMode.HALF_UP)));
+        }
         syncEquipmentTotal(contract.getId());
+        Contract updated = reload(contract.getId());
         auditLogService.record("合同清单保存", "contract", contract.getId(), AuditLogService.EXECUTED,
-                "共 " + list.size() + " 行,设备总价(含税)=" + totalIfAny(contract.getId()));
-        return boq(reload(contract.getId()));
+                "共 " + list.size() + " 行,最终成交价(含税)=" + updated.getEquipmentTotal());
+        return boq(updated);
     }
 
     /** 导入落库:整表替换(已生成设备的行不允许被覆盖掉)。 */
@@ -256,18 +293,22 @@ public class ContractBoqService {
                 .set(ContractBoq::getAmount, row.getAmount())
                 .set(ContractBoq::getAmountManual, row.getAmountManual())
                 .set(ContractBoq::getAssetCategory, row.getAssetCategory())
+                .set(ContractBoq::getItemKind, row.getItemKind())
                 .set(ContractBoq::getRemark, row.getRemark()));
     }
 
     /**
-     * 设备总价 ← 合同清单含税合计(清单为空则置空)。设备总价供租金/IRR 与单笔 P&L 参考,
-     * 不改动已生成的租金计划。
+     * 设备总价 ← 合同清单含税合计扣除整单优惠(清单为空则置空)。
      */
     public void syncEquipmentTotal(Long contractId) {
-        BigDecimal total = totalIfAny(contractId);
+        BigDecimal rawTotal = totalIfAny(contractId);
+        Contract c = contractMapper.selectById(contractId);
+        BigDecimal discount = c != null && c.getBoqDiscountAmount() != null ? c.getBoqDiscountAmount() : BigDecimal.ZERO;
+        BigDecimal finalDeal = rawTotal == null ? null : rawTotal.subtract(discount).setScale(2, RoundingMode.HALF_UP);
         contractMapper.update(null, new LambdaUpdateWrapper<Contract>()
                 .eq(Contract::getId, contractId)
-                .set(Contract::getEquipmentTotal, total));
+                .set(Contract::getEquipmentTotal, finalDeal)
+                .set(Contract::getFinalDealPrice, finalDeal));
     }
 
     // ============================== 按清单生成设备 ==============================

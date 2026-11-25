@@ -34,11 +34,17 @@ public final class PaymentTermDtos {
         @DecimalMax(value = "1", message = "比例不能超过 100%")
         private BigDecimal ratio;
 
-        /** 触发时点:下单/入库 */
+        /** 触发时点:下单/入库/验收合格/审核通过 */
         private String triggerPoint;
 
         @Min(0)
         private Integer dueDays;
+
+        /** 到期规则:after_days/month_end_days/next_month_day/next_2_month_day */
+        private String dueRule;
+
+        /** 指定自然月日(1-31,空=月末) */
+        private Integer dueDayOfMonth;
 
         public TermInput() {
         }
@@ -48,6 +54,17 @@ public final class PaymentTermDtos {
             this.ratio = ratio;
             this.triggerPoint = triggerPoint;
             this.dueDays = dueDays;
+            this.dueRule = "after_days";
+        }
+
+        public TermInput(String stageName, BigDecimal ratio, String triggerPoint, Integer dueDays,
+                         String dueRule, Integer dueDayOfMonth) {
+            this.stageName = stageName;
+            this.ratio = ratio;
+            this.triggerPoint = triggerPoint;
+            this.dueDays = dueDays;
+            this.dueRule = dueRule;
+            this.dueDayOfMonth = dueDayOfMonth;
         }
     }
 
@@ -94,6 +111,9 @@ public final class PaymentTermDtos {
         private BigDecimal ratio;
         private String triggerPoint;
         private Integer dueDays;
+        private String dueRule;
+        private Integer dueDayOfMonth;
+        private String ruleDesc;
         /** 预计付款金额 = 集采价 × 比例(末段补差;敏感) */
         private BigDecimal expectedAmount;
         /** 对应应付(未生成为 null) */

@@ -3,9 +3,18 @@
 export interface LeaseInput {
   contractPrice: number; purchasePrice: number; depositPercent: number; residualPercent: number
   annualRatePercent: number; years: number; frequency: 12 | 4 | 2 | 1; mode: 'a' | 'b' | 'c'; refundDeposit: boolean
+  /** 留购价输入模式：percent=按残值比例%(默认)，amount=按固定金额(如1.00元名义留购) */
+  residualMode?: 'percent' | 'amount'
+  residualAmount?: number
+  /** 起租日 (YYYY-MM-DD, 可选) */
+  startDate?: string
+  /** 首期付款日 (YYYY-MM-DD, 可选，优先用于推算逐期到期日) */
+  firstPayDate?: string
+  /** 每月固定付款日 (1-31, 可选) */
+  payDayOfMonth?: number
 }
 export interface LeasePeriod {
-  period: number; openingBalance: number; rent: number; interest: number; principal: number
+  period: number; dueDate?: string; openingBalance: number; rent: number; interest: number; principal: number
   closingBalance: number; residual: number; depositRefund: number; cashFlow: number; cumulativeCashFlow: number
 }
 export const INTEREST_MODES = [
@@ -20,11 +29,52 @@ export const PAYMENT_FREQUENCIES = [
 const roundMoney = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 const finiteOrNull = (v: number) => Number.isFinite(v) ? v : null
 
+function parseIsoDate(s?: string): { y: number; m: number; d: number } | null {
+  if (!s) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim())
+  if (!m) return null
+  return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) }
+}
+
+function addMonthsClamped(base: { y: number; m: number; d: number }, addMonths: number, fixedDay?: number): string {
+  const totalMonths = (base.y * 12 + (base.m - 1)) + addMonths
+  const y = Math.floor(totalMonths / 12)
+  const m = (totalMonths % 12) + 1
+  const maxDay = new Date(y, m, 0).getDate()
+  const targetDay = fixedDay && fixedDay >= 1 ? Math.min(fixedDay, maxDay) : Math.min(base.d, maxDay)
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`
+}
+
+function computeDueDate(q: LeaseInput, periodIndex: number): string | undefined {
+  const stepMonths = Math.round(12 / q.frequency)
+  const first = parseIsoDate(q.firstPayDate)
+  if (first) {
+    const day = q.payDayOfMonth && q.payDayOfMonth >= 1 ? q.payDayOfMonth : first.d
+    return addMonthsClamped(first, (periodIndex - 1) * stepMonths, day)
+  }
+  const start = parseIsoDate(q.startDate)
+  if (start) {
+    const day = q.payDayOfMonth && q.payDayOfMonth >= 1 ? q.payDayOfMonth : start.d
+    return addMonthsClamped(start, periodIndex * stepMonths, day)
+  }
+  return undefined
+}
+
 export function validateLeaseInput(q: LeaseInput): string {
-  if (![q.contractPrice, q.purchasePrice, q.depositPercent, q.residualPercent, q.annualRatePercent, q.years, q.frequency].every(Number.isFinite)) return '请完整填写合同、成本、利率和期限。'
+  const useFixedResidual = q.residualMode === 'amount'
+  const baseNums = useFixedResidual
+    ? [q.contractPrice, q.purchasePrice, q.depositPercent, q.residualAmount ?? NaN, q.annualRatePercent, q.years, q.frequency]
+    : [q.contractPrice, q.purchasePrice, q.depositPercent, q.residualPercent, q.annualRatePercent, q.years, q.frequency]
+  if (!baseNums.every(Number.isFinite)) return '请完整填写合同、成本、利率和期限。'
   if (q.contractPrice <= 0 || q.purchasePrice <= 0) return '合同总价和实际采购价须大于 0。'
   if (q.contractPrice > 1e12 || q.purchasePrice > 1e12) return '金额不得超过一万亿元。'
-  if (q.depositPercent < 0 || q.depositPercent > 100 || q.residualPercent < 0 || q.residualPercent > 100) return '押金比例和残值比例须在 0% 至 100% 之间。'
+  if (q.depositPercent < 0 || q.depositPercent > 100) return '押金比例须在 0% 至 100% 之间。'
+  if (useFixedResidual) {
+    const rAmt = q.residualAmount ?? 0
+    if (rAmt < 0 || rAmt > q.contractPrice) return '固定留购价须在 0 至合同总价之间。'
+  } else if (q.residualPercent < 0 || q.residualPercent > 100) {
+    return '押金比例和残值比例须在 0% 至 100% 之间。'
+  }
   if (q.annualRatePercent < 0 || q.annualRatePercent > 1000) return '名义年化利率须在 0% 至 1000% 之间。'
   if (!PAYMENT_FREQUENCIES.some(f => f.value === q.frequency)) return '请选择有效的付款频率。'
   if (!INTEREST_MODES.some(m => m.value === q.mode)) return '请选择有效的计息口径。'
@@ -66,7 +116,10 @@ export function calculateLease(input: LeaseInput) {
   const error = validateLeaseInput(input)
   if (error) throw new Error(error)
   const q = { ...input }, periods = Math.round(q.years * q.frequency)
-  const deposit = q.contractPrice * q.depositPercent / 100, residual = q.contractPrice * q.residualPercent / 100
+  const deposit = q.contractPrice * q.depositPercent / 100
+  const residual = q.residualMode === 'amount'
+    ? roundMoney(q.residualAmount ?? 0)
+    : q.contractPrice * q.residualPercent / 100
   const annualRate = q.annualRatePercent / 100, periodRate = annualRate / q.frequency
   const base = q.mode === 'a' ? q.contractPrice - residual : q.contractPrice
   const exactRent = q.mode === 'c' ? q.contractPrice * (1 + annualRate * q.years) / periods
@@ -85,9 +138,13 @@ export function calculateLease(input: LeaseInput) {
     if (t === periods) { principal = roundMoney(balance); interest = roundMoney(rent - principal); balance = 0 }
     else { principal = roundMoney(rent - interest); balance = Math.max(0, roundMoney(balance - principal)) }
     cumulative += cashFlows[t]
-    rows.push({ period: t, openingBalance, rent, interest, principal, closingBalance: balance,
+    rows.push({
+      period: t,
+      dueDate: computeDueDate(q, t),
+      openingBalance, rent, interest, principal, closingBalance: balance,
       residual: t === periods ? residual : 0, depositRefund: t === periods && q.refundDeposit ? deposit : 0,
-      cashFlow: cashFlows[t], cumulativeCashFlow: roundMoney(cumulative) })
+      cashFlow: cashFlows[t], cumulativeCashFlow: roundMoney(cumulative),
+    })
     sumInterest += interest; sumPrincipal += principal
   }
   const periodIrr = leaseIrr(cashFlows), customerPeriodIrr = leaseIrr(customerCashFlows)

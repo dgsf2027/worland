@@ -72,6 +72,14 @@ public class RentBillController {
         return R.ok(rentBillService.reverse(id, req));
     }
 
+    @ApiOperation("登记销项发票(收款后按合同约定如 10 工作日开具 3% 专票)")
+    @RequireRole(value = {"财务", "老板"}, action = "收租登记销项发票", targetType = "rent_bill")
+    @PostMapping("/bills/{id}/invoice")
+    public R<BillDtos.BillItem> registerInvoice(@PathVariable Long id,
+                                                @RequestBody BillDtos.InvoiceRequest req) {
+        return R.ok(rentBillService.registerInvoice(id, req));
+    }
+
     @ApiOperation("退款(敏感·财务+老板·对已核销单退回款项·负额退款单)")
     @RequireRole(value = {"财务", "老板"}, action = "收租退款", targetType = "rent_bill")
     @PostMapping("/bills/{id}/refund")

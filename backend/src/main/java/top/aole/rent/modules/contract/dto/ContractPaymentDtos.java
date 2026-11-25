@@ -43,6 +43,9 @@ public final class ContractPaymentDtos {
         private BigDecimal ratio;
         private String triggerPoint;
         private Integer dueDays;
+        private String dueRule;
+        private Integer dueDayOfMonth;
+        private String ruleDesc;
         /** 该段在本合同下的预计付款合计 = Σ(各设备合同价 × 本段比例)(敏感) */
         private BigDecimal expectedTotal;
         /** 该段已生成应付合计 / 其中已付 / 其中待付(敏感) */
