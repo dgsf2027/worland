@@ -358,9 +358,15 @@ public class AssetService {
         if (paidCount > 0) {
             throw new BizException(400, "设备 " + a.getSerialNo() + " 已有已付采购应付款，请先撤销付款再删除");
         }
+        String origSerial = a.getSerialNo();
+        if (origSerial != null) {
+            String freedSerial = (origSerial.length() > 45 ? origSerial.substring(0, 45) : origSerial) + "#DEL" + id;
+            a.setSerialNo(freedSerial);
+            assetMapper.updateById(a);
+        }
         assetMapper.deleteById(id);
         auditLogService.record("删除设备资产", "asset", id, AuditLogService.EXECUTED,
-                "删除设备 " + a.getSerialNo() + "（" + a.getCategory() + "）");
+                "删除设备 " + origSerial + "（" + a.getCategory() + "）");
     }
 
     /**

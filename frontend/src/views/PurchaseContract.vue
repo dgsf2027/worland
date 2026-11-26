@@ -79,9 +79,9 @@ function onSubtotalOrDiscountChange() {
 }
 function applyMonthlyTermPreset() {
   form.terms = [
-    { stageName: '首笔验收款', ratioPct: 40, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'month_end_days', dueDays: 30, dueDayOfMonth: undefined, conditionText: '验收且资料审核通过后当月月底+30天' },
-    { stageName: '次月进度款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_month_day', dueDays: 0, dueDayOfMonth: 30, conditionText: '次月结清30%' },
-    { stageName: '次次月尾款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_2_month_day', dueDays: 0, dueDayOfMonth: 30, conditionText: '次次月结清尾款30%' },
+    { stageName: '首笔验收款', ratioPct: 40, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'month_end_days', dueDays: 30, dueDayOfMonth: undefined, conditionText: '验收且资料审核通过后当月月结30天付40%' },
+    { stageName: '次月进度款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_month_day', dueDays: 30, dueDayOfMonth: undefined, conditionText: '次月月结30天付30%' },
+    { stageName: '次次月尾款', ratioPct: 30, amount: undefined, manual: false, triggerPoint: '审核通过', dueRule: 'next_2_month_day', dueDays: 30, dueDayOfMonth: undefined, conditionText: '次次月月结30天付尾款30%' },
   ]
   form.terms.forEach(recalcTerm)
 }

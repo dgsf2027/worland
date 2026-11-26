@@ -148,9 +148,13 @@ public class ProjectService {
     @Transactional
     public void delete(Long id) {
         Project p = load(id);
+        String origNo = p.getProjectNo();
+        String freedNo = (origNo.length() > 45 ? origNo.substring(0, 45) : origNo) + "#DEL" + id;
+        p.setProjectNo(freedNo);
+        projectMapper.updateById(p);
         projectMapper.deleteById(id);
         auditLogService.record("删除租赁项目", "project", id, AuditLogService.EXECUTED,
-                "删除项目 " + p.getProjectNo() + " · " + p.getName());
+                "删除项目 " + origNo + " · " + p.getName());
     }
 
     /**

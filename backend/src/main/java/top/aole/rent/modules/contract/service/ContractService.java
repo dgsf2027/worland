@@ -835,9 +835,13 @@ public class ContractService {
                     .set(Asset::getCurrentHolderCustomerId, null));
             contractAssetMapper.deleteById(ca.getId());
         }
+        String origNo = c.getNo();
+        String freedNo = (origNo.length() > 45 ? origNo.substring(0, 45) : origNo) + "#DEL" + id;
+        c.setNo(freedNo);
+        contractMapper.updateById(c);
         contractMapper.deleteById(id);
         auditLogService.record("删除租赁合同", "contract", id, AuditLogService.EXECUTED,
-                "安全删除租赁合同 " + c.getNo() + "，释放 " + links.size() + " 套/台设备");
+                "安全删除租赁合同 " + origNo + "，释放 " + links.size() + " 套/台设备");
     }
 
     // ============ 合同付款方式(V118) ============

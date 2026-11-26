@@ -321,9 +321,14 @@ public class PurchaseContractService {
                 .set(PurchaseIn::getPcId, null));
         termMapper.delete(new LambdaQueryWrapper<PurchaseContractTerm>()
                 .eq(PurchaseContractTerm::getPcId, pcId));
+        // 释放 contract_no 唯一键，允许删除后用原合同号重新录入
+        String origNo = c.getContractNo();
+        String freedNo = (origNo.length() > 45 ? origNo.substring(0, 45) : origNo) + "#DEL" + pcId;
+        c.setContractNo(freedNo);
+        contractMapper.updateById(c);
         contractMapper.deleteById(pcId);
         auditLogService.record("删除采购合同", "purchase_contract", pcId, AuditLogService.EXECUTED,
-                "删除采购合同 " + c.getContractNo());
+                "删除采购合同 " + origNo);
     }
 
     private LocalDate resolveTermBaseDate(PurchaseContract c, String triggerPoint) {
