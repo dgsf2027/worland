@@ -80,6 +80,10 @@ public class ContractService {
     private final AuditLogService auditLogService;
     private final RentBillMapper rentBillMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private top.aole.rent.modules.automation.service.AutomationEventService automationEventService;
+
     private static final String NATURE = "分期收款销售";
     private static final String NATURE_FINANCE = "设备融资租赁";
     private static final String FORBIDDEN = "融资租赁";
@@ -230,6 +234,9 @@ public class ContractService {
         }
         log.info("签约: no={}, id={}, term={}, monthRent={}, assets={}, activate={}",
                 c.getNo(), c.getId(), term, monthRent, assets.size(), activate);
+        if (activate && automationEventService != null) {
+            automationEventService.onContractSigned(c);
+        }
         return c.getId();
     }
 

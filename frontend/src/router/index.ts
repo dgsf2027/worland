@@ -35,6 +35,7 @@ const router = createRouter({
     { path: '/cashflow', name: 'cashflow', meta: { title: '现金流/分配驾驶舱 · 兑付缺口/回报四源' }, component: () => import('@/views/Cashflow.vue') },
     { path: '/monthly', name: 'monthly', meta: { title: '月度报表 · 六件套/七节报告/财务日历' }, component: () => import('@/views/Monthly.vue') },
     { path: '/bi-pdca', name: 'bi-pdca', meta: { title: 'BI 多维矩阵 · PDCA 改进循环' }, component: () => import('@/views/BiPdca.vue') },
+    { path: '/automation', name: 'automation', meta: { title: '自动化中心 · 总控台 / 推送 / 银行流水核销' }, component: () => import('@/views/Automation.vue') },
     { path: '/import', name: 'import', meta: { title: '导入中心 · 映射/预览/去重' }, component: () => import('@/views/ImportCenter.vue') },
   ],
 })

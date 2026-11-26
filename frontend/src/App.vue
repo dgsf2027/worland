@@ -21,7 +21,7 @@ const defaultOpenedMenus = computed(() => {
   const p = route.path
   if (['/asset', '/supplier', '/supplier-inspection', '/inventory', '/service'].includes(p)) open.add('supply')
   if (['/cashflow', '/voucher', '/monthly'].includes(p)) open.add('finance')
-  if (['/task', '/roster', '/bi-pdca', '/import'].includes(p)) open.add('admin')
+  if (['/task', '/roster', '/bi-pdca', '/automation', '/import'].includes(p)) open.add('admin')
   return Array.from(open)
 })
 
@@ -105,6 +105,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
 
           <el-sub-menu index="admin">
             <template #title><span>⚙️ 运营与管理</span></template>
+            <el-menu-item index="/automation">⚡ 自动化与对账中心</el-menu-item>
             <el-menu-item index="/task">✅ 任务与审批</el-menu-item>
             <el-menu-item index="/roster">🧑‍💼 花名册与提成</el-menu-item>
             <el-menu-item index="/bi-pdca">📊 BI 分析与 PDCA</el-menu-item>

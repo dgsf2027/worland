@@ -62,6 +62,10 @@ public class RentBillService {
     private final VoucherService voucherService;
     private final PayProofService payProofService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private top.aole.rent.modules.automation.service.AutomationEventService automationEventService;
+
     private static final DateTimeFormatter YM = DateTimeFormatter.ofPattern("yyyy-MM");
     /** 收入记账账套(分期收款销售);锁账守卫按此账套判期。 */
     private static final String BOOK = "tax";
@@ -201,6 +205,16 @@ public class RentBillService {
         return matchCore(id, req);
     }
 
+    /** 银行流水自动核销入口（V132）：以银行流水号为收款凭据，直接走统一核销+记账凭证+开票倒计时+满期自动留购检查。 */
+    @Transactional
+    public BillDtos.BillItem matchFromBankStatement(Long id, BigDecimal receivedAmount, String bankSerial, String remark) {
+        BillDtos.MatchRequest req = new BillDtos.MatchRequest();
+        req.setReceivedAmount(receivedAmount);
+        req.setRemark((remark == null ? "银行流水自动核销" : remark)
+                + (bankSerial != null && !bankSerial.trim().isEmpty() ? " [流水:" + bankSerial.trim() + "]" : ""));
+        return matchCore(id, req);
+    }
+
     private BillDtos.BillItem matchCore(Long id, BillDtos.MatchRequest req) {
         RentBill b = load(id);
         if ("红冲".equals(b.getStatus())) {
@@ -259,6 +273,9 @@ public class RentBillService {
                 oc.setRemark(appendRemark(oc.getRemark(), "还款到账核销·案关闭恢复"));
                 overdueCaseMapper.updateById(oc);
                 log.info("[还款恢复] 核销逾期单 {} 顺带关闭逾期案 #{}", b.getBillNo(), oc.getId());
+            }
+            if (automationEventService != null) {
+                automationEventService.onRentBillFullyPaid(b);
             }
         }
 

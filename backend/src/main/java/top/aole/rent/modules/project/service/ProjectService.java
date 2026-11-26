@@ -67,6 +67,10 @@ public class ProjectService {
     private final ProjectPanoramaService panoramaService;
     private final AuditLogService auditLogService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private top.aole.rent.modules.automation.service.AutomationEventService automationEventService;
+
     public List<ProjectDtos.ListItem> list(String stage, String keyword) {
         String role = UserContext.getRole();
         boolean seeCost = DataScope.canSeeCost(role);
@@ -238,6 +242,9 @@ public class ProjectService {
         auditLogService.record("登记项目交付与验收", "project", p.getId(), AuditLogService.EXECUTED,
                 p.getProjectNo() + " 过磅=" + p.getActualWeighTons() + "t 验收=" + p.getAcceptanceDate()
                         + " 审核=" + p.getAuditPassDate() + " 质保至=" + p.getWarrantyEndDate());
+        if (automationEventService != null) {
+            automationEventService.onProjectAccepted(p);
+        }
         return detail(id);
     }
 
