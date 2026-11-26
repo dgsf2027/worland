@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchProjectPanorama, type ProjectPanorama } from '@/api/contract'
 
+const router = useRouter()
 const props = defineProps<{
   modelValue: boolean
   contractId: number | null
@@ -18,6 +20,17 @@ function money(v?: number | null) {
 function pct(v?: number | null) {
   if (v === null || v === undefined) return '—'
   return (v * 100).toFixed(2) + '%'
+}
+function goPage(path: string, query: Record<string, string>) {
+  emit('update:modelValue', false)
+  router.push({ path, query })
+}
+function goLinkedPurchase(row: { kind: string; id: number }) {
+  if (row.kind === '采购合同') {
+    goPage('/purchase-contract', { id: String(row.id) })
+  } else {
+    goPage('/purchase', { id: String(row.id) })
+  }
 }
 
 async function load() {
@@ -50,6 +63,13 @@ watch(() => [props.modelValue, props.contractId], load, { immediate: true })
           title="当前为投资人视角：采购投入、毛利/税后净利及资金峰值已脱敏 🔒，仅展示租赁回款侧指标。"
           style="margin-bottom: 12px"
         />
+
+        <!-- 快捷穿透栏 -->
+        <div class="quick-nav">
+          <el-button size="small" plain type="primary" @click="goPage('/contract', { id: String(data.contractId) })">📄 查看租赁合同 →</el-button>
+          <el-button size="small" plain type="success" @click="goPage('/rent', { contractId: String(data.contractId), contractNo: data.contractNo })">🧾 查看该合同收租单 →</el-button>
+          <el-button v-if="data.customerId" size="small" plain @click="goPage('/customer', { id: String(data.customerId) })">🤝 查看承租客户 →</el-button>
+        </div>
 
         <!-- 老板核心 4 卡 -->
         <el-row v-if="data.costVisible" :gutter="12" class="kpi-row">
@@ -171,7 +191,11 @@ watch(() => [props.modelValue, props.contractId], load, { immediate: true })
           <div class="sec-title">关联采购合同 / 采购单</div>
           <el-table :data="data.linkedPurchases" size="small" border>
             <el-table-column prop="kind" label="单据类型" width="90" />
-            <el-table-column prop="no" label="编号" min-width="150" />
+            <el-table-column label="编号" min-width="150">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="goLinkedPurchase(row)">{{ row.no }} →</el-button>
+              </template>
+            </el-table-column>
             <el-table-column prop="supplierName" label="供应商" min-width="140" />
             <el-table-column label="合同/采购总额" align="right" width="130">
               <template #default="{ row }">{{ money(row.totalAmount) }}</template>
@@ -221,6 +245,7 @@ watch(() => [props.modelValue, props.contractId], load, { immediate: true })
 
 <style scoped>
 .pano { padding: 4px; }
+.quick-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .kpi-card :deep(.el-card__body) { padding: 12px 14px; }
 .k-title { font-size: 12px; color: #909399; }
 .k-val { font-size: 20px; font-weight: 700; margin: 6px 0; }

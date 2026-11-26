@@ -125,6 +125,11 @@ public class RentBillService {
     // ============ 列表 / 详情 ============
 
     public PageResult<BillDtos.BillItem> list(String status, Long contractId, Long customerId, String billKind, int page, int size) {
+        return list(status, contractId, customerId, billKind, null, page, size);
+    }
+
+    public PageResult<BillDtos.BillItem> list(String status, Long contractId, Long customerId, String billKind,
+                                              String invoiceStatus, int page, int size) {
         java.util.Set<Long> customerContractIds = null;
         if (customerId != null) {
             customerContractIds = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
@@ -139,6 +144,7 @@ public class RentBillService {
                 .eq(contractId != null, RentBill::getContractId, contractId)
                 .in(customerContractIds != null, RentBill::getContractId, customerContractIds)
                 .eq(billKind != null && !billKind.isEmpty(), RentBill::getBillKind, billKind)
+                .eq(invoiceStatus != null && !invoiceStatus.isEmpty(), RentBill::getInvoiceStatus, invoiceStatus)
                 .orderByDesc(RentBill::getId);
         List<RentBill> all = rentBillMapper.selectList(qw);
         List<BillDtos.BillItem> items = new ArrayList<>();

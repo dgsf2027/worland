@@ -31,16 +31,17 @@ public class RentBillController {
     private final RentBillService rentBillService;
     private final RentBillGenScheduler rentBillGenScheduler;
 
-    @ApiOperation("收租单列表:按状态/合同/性质筛选 + 分页")
+    @ApiOperation("收租单列表:按状态/合同/客户/性质/销项发票状态筛选 + 分页")
     @GetMapping("/bills")
     public R<PageResult<BillDtos.BillItem>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long contractId,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) String billKind,
+            @RequestParam(required = false) String invoiceStatus,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return R.ok(rentBillService.list(status, contractId, customerId, billKind, page, size));
+        return R.ok(rentBillService.list(status, contractId, customerId, billKind, invoiceStatus, page, size));
     }
 
     @ApiOperation("收租单详情:主单 + 红冲/退款关联单 + 逾期案")

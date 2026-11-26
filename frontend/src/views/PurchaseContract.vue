@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchSupplierPool } from '@/api/supplier'
 import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
@@ -33,11 +34,14 @@ async function load() {
   loading.value = true
   try { list.value = await fetchPurchaseContracts() } finally { loading.value = false }
 }
+const route = useRoute()
 onMounted(async () => {
   await load()
   suppliers.value = (await fetchSupplierPool({ page: 1, size: 500 })).records.map((x) => ({ id: x.id, name: x.name }))
   rentContracts.value = (await fetchContracts({ page: 1, size: 500 })).records
   fetchRecognizeStatus().then((r) => { recognizeOk.value = r.configured }).catch(() => { recognizeOk.value = null })
+  const id = Number(route.query.id)
+  if (id) openDetail(id)
 })
 
 // ---- 新建合同 ----

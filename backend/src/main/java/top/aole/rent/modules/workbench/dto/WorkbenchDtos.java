@@ -39,11 +39,12 @@ public class WorkbenchDtos {
     /** 亮灯红点。 */
     @Data
     public static class RedPoint {
-        private String key;    // overdue/idle/coverage_gap/tax/contract_expiry
+        private String key;      // overdue/pending_invoice/payable_due_30d/warranty_expiring/idle/coverage_gap/tax/contract_expiry
         private String label;
         private int count;
-        private String level;  // 正常/预警/超限/红灯
-        private String link;   // 前端路由
+        private String level;    // 正常/预警/超限/红灯
+        private String link;     // 前端路由(支持带查询参数精准筛选)
+        private String subtitle; // 补充金额或说明(如「合计 ¥2.4万」)
     }
 
     /** 待办摘要。 */

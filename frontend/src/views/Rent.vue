@@ -26,7 +26,9 @@ function isInvoiceOverdue(row: BillItem) {
 }
 
 // ---- 收租单列表 ----
-const filters = reactive<{ status: string; billKind: string; contractId?: number; customerId?: number }>({ status: '', billKind: '' })
+const filters = reactive<{ status: string; billKind: string; invoiceStatus: string; contractId?: number; customerId?: number }>({
+  status: '', billKind: '', invoiceStatus: '',
+})
 // 从客户详情「查看收租」跳转过来(?customerId=):只看该客户合同下的收租单
 // 从采购应付「查看收租单」跳转过来(?contractId=):只看该合同的收租单
 const route = useRoute()
@@ -57,6 +59,7 @@ async function loadBills() {
     const params: Record<string, any> = { page: 1, size: 100 }
     if (filters.status) params.status = filters.status
     if (filters.billKind) params.billKind = filters.billKind
+    if (filters.invoiceStatus) params.invoiceStatus = filters.invoiceStatus
     if (filters.contractId) params.contractId = filters.contractId
     if (filters.customerId) params.customerId = filters.customerId
     const res = await fetchBills(params)
@@ -238,6 +241,12 @@ function stepRepay(c: OverdueItem) {
 }
 
 onMounted(() => {
+  if (typeof route.query.status === 'string' && route.query.status) {
+    filters.status = route.query.status
+  }
+  if (typeof route.query.invoiceStatus === 'string' && route.query.invoiceStatus) {
+    filters.invoiceStatus = route.query.invoiceStatus
+  }
   const cid = Number(route.query.customerId)
   if (cid) {
     filters.customerId = cid
@@ -284,8 +293,13 @@ onMounted(() => {
           <el-select v-model="filters.status" placeholder="状态" clearable size="small" style="width:110px" @change="loadBills">
             <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
           </el-select>
-          <el-select v-model="filters.billKind" placeholder="性质" clearable size="small" style="width:110px" @change="loadBills">
+          <el-select v-model="filters.billKind" placeholder="性质" clearable size="small" style="width:105px" @change="loadBills">
             <el-option v-for="k in kinds" :key="k" :label="k" :value="k" />
+          </el-select>
+          <el-select v-model="filters.invoiceStatus" placeholder="销项票态" clearable size="small" style="width:110px" @change="loadBills">
+            <el-option label="待开票" value="待开票" />
+            <el-option label="已开票" value="已开票" />
+            <el-option label="未开票" value="未开票" />
           </el-select>
           <el-button size="small" @click="loadBills">查询</el-button>
           <el-tag v-if="filters.customerId" size="small" closable @close="clearCustomer">只看客户：{{ customerName }}</el-tag>

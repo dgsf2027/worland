@@ -1,55 +1,56 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import BrandLockup from '@/components/BrandLockup.vue'
 import OperationsDashboard from '@/components/OperationsDashboard.vue'
 import ProjectPanoramaDrawer from '@/components/ProjectPanoramaDrawer.vue'
 import { useDashboardData } from '@/api/dashboard'
-import { fetchWorkbench, type Workbench } from '@/api/workbench'
+import {
+  cleanStaleTasks, fetchCashWaterline, fetchDataHealth, fetchWorkbench, saveCashBalance,
+  type CashWaterline, type DataHealth, type Workbench,
+} from '@/api/workbench'
 import { fetchWorkbenchProjectPanoramas, type ProjectPanoramaOverview } from '@/api/contract'
+import { sessionRole } from '@/utils/session'
 
-/**
- * 企业文化文案（《标志标准规范 V1.0》里的 slogan + 愿景 / 使命）。
- * 要改只改这里一处，页面自动跟着变。
- */
+const router = useRouter()
 const SLOGAN = '淬炼于火 · 锋利如曜'
-const MISSION = [
-  { k: '愿景', v: '科技赋能云仓' },
-  { k: '使命', v: '为云仓提效降本' },
-]
 
 const wb = ref<Workbench | null>(null)
 const panoramas = ref<ProjectPanoramaOverview | null>(null)
+const waterline = ref<CashWaterline | null>(null)
 const panoramaDrawer = ref(false)
 const panoramaContractId = ref<number | null>(null)
 const loading = ref(false)
 const chartsLoading = ref(false)
+const waterlineLoading = ref(false)
 const failed = ref(false)
 const updatedAt = ref('')
 const months = ref(6)
 const dashboard = useDashboardData()
 const charts = dashboard.charts
 
+const canManageFinance = computed(() => ['老板', '财务'].includes(sessionRole.value || localStorage.getItem('rent_user_role') || ''))
+
 const now = () => new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-function money(v?: number | null) {
-  if (v === null || v === undefined) return '🔒'
-  return '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 function openPanorama(contractId: number) {
   panoramaContractId.value = contractId
   panoramaDrawer.value = true
 }
 
-/** 工作台、图表与项目利润总览并行取数；任一失败不拖垮另一块。 */
+/** 并行加载工作台、图表、项目全景与资金水位线，任一源失败互不拖垮。 */
 async function load() {
   if (loading.value) return
   loading.value = true
   chartsLoading.value = true
+  waterlineLoading.value = true
   failed.value = false
-  const [result, , panoRes] = await Promise.allSettled([
+  const [result, , panoRes, wlRes] = await Promise.allSettled([
     fetchWorkbench(),
     dashboard.load(months.value),
     fetchWorkbenchProjectPanoramas(),
+    fetchCashWaterline(months.value),
   ])
   if (result.status === 'fulfilled') {
     wb.value = result.value
@@ -58,149 +59,200 @@ async function load() {
     wb.value = null
     failed.value = true
   }
-  if (panoRes.status === 'fulfilled') {
-    panoramas.value = panoRes.value
-  }
+  if (panoRes.status === 'fulfilled') panoramas.value = panoRes.value
+  if (wlRes.status === 'fulfilled') waterline.value = wlRes.value
   loading.value = false
   chartsLoading.value = false
+  waterlineLoading.value = false
 }
-/** 切换月份只重取图表 */
+
 async function changeMonths(value: number) {
   if (chartsLoading.value) return
   months.value = value
   chartsLoading.value = true
-  await dashboard.load(value)
+  waterlineLoading.value = true
+  const [, wlRes] = await Promise.allSettled([
+    dashboard.load(value),
+    fetchCashWaterline(value),
+  ])
+  if (wlRes.status === 'fulfilled') waterline.value = wlRes.value
   chartsLoading.value = false
+  waterlineLoading.value = false
 }
+
+async function onSimulateBalance(balance: number | null) {
+  waterlineLoading.value = true
+  try {
+    waterline.value = await fetchCashWaterline(months.value, balance)
+    ElMessage.success('已按试算余额重算资金水位线')
+  } finally {
+    waterlineLoading.value = false
+  }
+}
+
+async function onSaveBalance(balance: number) {
+  waterlineLoading.value = true
+  try {
+    await saveCashBalance(balance, '驾驶舱更新银行可用余额')
+    waterline.value = await fetchCashWaterline(months.value)
+    ElMessage.success('银行可用余额已保存，水位线已更新')
+  } finally {
+    waterlineLoading.value = false
+  }
+}
+
+// ---- 数据体检 & 孤儿系统任务一键清理 ----
+const healthDlg = ref(false)
+const healthLoading = ref(false)
+const healthCleaning = ref(false)
+const healthData = ref<DataHealth | null>(null)
+
+async function openHealth() {
+  healthDlg.value = true
+  healthLoading.value = true
+  try {
+    healthData.value = await fetchDataHealth()
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+async function doCleanStaleTasks() {
+  if (!healthData.value?.staleTaskCount) return
+  try {
+    await ElMessageBox.confirm(
+      `将把 ${healthData.value.staleTaskCount} 条来源单据已关闭/结清/删除的历史系统任务置为「已作废」，彻底消除假待办与假红灯。确认清理？`,
+      '一键清理孤儿系统任务',
+      { type: 'warning', confirmButtonText: '确认清理' },
+    )
+  } catch {
+    return
+  }
+  healthCleaning.value = true
+  try {
+    const res = await cleanStaleTasks()
+    ElMessage.success(`已清理 ${res.cleanedCount} 条历史无效系统任务`)
+    healthData.value = await fetchDataHealth()
+    load()
+  } finally {
+    healthCleaning.value = false
+  }
+}
+
+function goHealthLink(link: string) {
+  healthDlg.value = false
+  if (link) router.push(link)
+}
+
 onMounted(load)
 defineExpose({ load })
 </script>
 
 <template>
   <div class="wb">
-    <!-- 品牌条（曜石智能 · 标志标准规范 V1.0：深色版标志 + slogan + 愿景 / 使命） -->
+    <!-- 紧凑品牌条（不占用过多首屏高度） -->
     <div class="brand-strip">
-      <div class="bs-left">
-        <BrandLockup variant="inline" :size="18" :en="false" />
-        <span class="bs-slogan">{{ SLOGAN }}</span>
-      </div>
-      <div class="bs-mission">
-        <span v-for="m in MISSION" :key="m.k" class="bs-m"><span class="bs-m-k">{{ m.k }}</span>{{ m.v }}</span>
-      </div>
+      <BrandLockup variant="inline" :size="15" :en="false" />
+      <span class="bs-slogan">{{ SLOGAN }}</span>
+      <span class="bs-mission">愿景：科技赋能云仓 · 使命：为云仓提效降本</span>
     </div>
 
-    <OperationsDashboard :workbench="wb" :charts="charts" :loading="loading" :charts-loading="chartsLoading" :failed="failed"
-      :updated-at="updatedAt" :months="months" @change-months="changeMonths" @refresh="load" />
-
-    <!-- 老板核心视图：项目真实利润总览（采购投入 ↔ 租赁回款 ↔ 税后净利 ↔ 回本进度） -->
-    <el-card v-if="panoramas && panoramas.items.length" shadow="never" class="profit-card">
-      <template #header>
-        <div class="profit-head">
-          <strong>📊 项目真实利润总览（共 {{ panoramas.projectCount }} 个项目）</strong>
-          <div v-if="panoramas.costVisible" class="profit-totals">
-            <span>总采购投入 <b>{{ money(panoramas.totalPurchase) }}</b></span>
-            <span>已付货款 <b>{{ money(panoramas.totalPurchasePaid) }}</b></span>
-            <span>累计实收租金 <b class="ok">{{ money(panoramas.totalReceivedRent) }}</b></span>
-            <span>当前实际净现金流 <b :class="(panoramas.totalActualNetCashflow ?? 0) >= 0 ? 'ok' : 'warn'">{{ money(panoramas.totalActualNetCashflow) }}</b></span>
-            <span>预计全期毛利 <b class="ok">{{ money(panoramas.totalExpectedGrossProfit) }}</b></span>
-            <span>估税后净利 <b class="ok">{{ money(panoramas.totalEstimatedAfterTaxProfit) }}</b></span>
-          </div>
-        </div>
-      </template>
-      <el-table :data="panoramas.items" size="small" border stripe @row-click="(r: any) => openPanorama(r.contractId)" style="cursor: pointer">
-        <el-table-column prop="contractNo" label="合同编号" min-width="155" show-overflow-tooltip />
-        <el-table-column prop="customerName" label="承租客户" min-width="135" show-overflow-tooltip />
-        <el-table-column label="采购投入" align="right" width="120"><template #default="{ row }">{{ money(row.purchaseTotal) }}</template></el-table-column>
-        <el-table-column label="已付/未付" align="right" width="145">
-          <template #default="{ row }">
-            <template v-if="panoramas.costVisible">
-              <div>已付 {{ money(row.purchasePaid) }}</div>
-              <div class="muted">未付 {{ money(row.purchaseUnpaid) }}</div>
-            </template>
-            <span v-else>🔒</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="实收/应收租金" align="right" width="145">
-          <template #default="{ row }">
-            <div class="ok">{{ money(row.receivedRent) }}</div>
-            <div class="muted">/ {{ money(row.plannedCustomerTotal) }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="当前净现金流" align="right" width="125">
-          <template #default="{ row }">
-            <b :class="(row.actualNetCashflow ?? 0) >= 0 ? 'ok' : 'warn'">{{ money(row.actualNetCashflow) }}</b>
-          </template>
-        </el-table-column>
-        <el-table-column label="预计毛利 / 税后净利" align="right" width="150">
-          <template #default="{ row }">
-            <template v-if="panoramas.costVisible">
-              <div class="ok">{{ money(row.expectedGrossProfit) }}</div>
-              <div class="muted">税后 {{ money(row.estimatedAfterTaxProfit) }}</div>
-            </template>
-            <span v-else>🔒</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="回本进度" width="140">
-          <template #default="{ row }">
-            <template v-if="panoramas.costVisible">
-              <el-progress :percentage="Math.round((row.paybackProgress || 0) * 100)" :stroke-width="10" />
-              <div class="muted">预计第 {{ row.paybackPeriodNo || '—' }} 期回本</div>
-            </template>
-            <span v-else>🔒</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="最大垫资峰值" align="right" width="120">
-          <template #default="{ row }">{{ money(row.peakCapitalOutlay) }}</template>
-        </el-table-column>
-        <el-table-column label="详情" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click.stop="openPanorama(row.contractId)">全景 →</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <OperationsDashboard
+      :workbench="wb"
+      :panoramas="panoramas"
+      :waterline="waterline"
+      :charts="charts"
+      :loading="loading"
+      :charts-loading="chartsLoading"
+      :waterline-loading="waterlineLoading"
+      :failed="failed"
+      :updated-at="updatedAt"
+      :months="months"
+      :can-manage-finance="canManageFinance"
+      @change-months="changeMonths"
+      @refresh="load"
+      @open-panorama="openPanorama"
+      @simulate-balance="onSimulateBalance"
+      @save-balance="onSaveBalance"
+      @open-health="openHealth"
+    />
 
     <ProjectPanoramaDrawer v-model="panoramaDrawer" :contract-id="panoramaContractId" />
+
+    <!-- 数据体检弹窗 -->
+    <el-dialog v-model="healthDlg" title="🩺 经营数据体检与清理" width="660px">
+      <div v-loading="healthLoading">
+        <template v-if="healthData">
+          <el-alert
+            :type="healthData.healthy ? 'success' : 'warning'"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 12px"
+            :title="healthData.healthy ? '体检通过：未发现残留孤儿任务、真实逾期或未绑定主合同的采购单据。' : '发现以下待核查/可清理项，请按建议处理：'"
+          />
+          <el-table :data="healthData.items" size="small" border>
+            <el-table-column prop="label" label="检查项" min-width="170" />
+            <el-table-column label="数量" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag
+                  size="small"
+                  :type="row.level === 'critical' ? 'danger' : (row.level === 'warn' ? 'warning' : 'success')"
+                >
+                  {{ row.count }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="suggestion" label="说明与建议" min-width="240" />
+            <el-table-column label="前往" width="75" align="center">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="goHealthLink(row.link)">查看</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="healthDlg = false">关闭</el-button>
+        <el-button
+          v-if="healthData && healthData.staleTaskCount > 0"
+          type="warning"
+          :loading="healthCleaning"
+          @click="doCleanStaleTasks"
+        >
+          一键清理 {{ healthData.staleTaskCount }} 条孤儿系统任务
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.wb { max-width: 1480px; margin: 0 auto; padding: 2px 4px 24px; }
-.profit-card { margin-top: 18px; border-radius: 10px; }
-.profit-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.profit-totals { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #606266; }
-.ok { color: #2f9e44; }
-.warn { color: #e6a23c; }
-.muted { color: #909399; font-size: 11.5px; }
-
-/* 品牌条：曜石黑底 + 金字，与标志标准规范的深色版一致；压成一行，不抢数据的位置 */
+.wb { max-width: 1480px; margin: 0 auto; padding: 0 4px 20px; }
 .brand-strip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px 28px;
+  gap: 14px;
   flex-wrap: wrap;
-  padding: 12px 20px;
-  margin-bottom: 18px;
-  border-radius: 12px;
+  padding: 7px 16px;
+  margin-bottom: 12px;
+  border-radius: 10px;
   background: var(--brand-dark-gradient);
   border: 1px solid var(--brand-gold-line);
 }
-.bs-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .bs-slogan {
   color: var(--brand-gold-dim);
-  font-size: 12px;
-  letter-spacing: 0.22em;
-  padding-left: 18px;
+  font-size: 11.5px;
+  letter-spacing: 0.18em;
+  padding-left: 14px;
   border-left: 1px solid var(--brand-gold-line);
-  white-space: nowrap;
 }
-.bs-mission { display: flex; align-items: center; gap: 22px; }
-.bs-m { display: inline-flex; align-items: baseline; gap: 10px; color: var(--brand-gold-bright); font-size: 14px; font-weight: 600; letter-spacing: 0.12em; white-space: nowrap; }
-.bs-m + .bs-m { padding-left: 22px; border-left: 1px solid var(--brand-gold-line); }
-.bs-m-k { color: var(--brand-gold); font-size: 11.5px; font-weight: 400; letter-spacing: 0.24em; }
+.bs-mission {
+  margin-left: auto;
+  color: var(--brand-gold-bright);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
 @media (max-width: 760px) {
-  .brand-strip { padding: 10px 14px; margin-bottom: 14px; }
   .bs-slogan, .bs-mission { display: none; }
 }
 </style>
