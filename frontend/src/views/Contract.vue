@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  fetchContracts, fetchContractDetail, signContract, voidContract, renewContract, changeContract,
+  fetchContracts, fetchContractDetail, deleteContract, signContract, voidContract, renewContract, changeContract,
   editContract, fetchContractFiles, uploadContractFile, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB,
   saveContractBoq, importContractBoq, exportContractBoq, generateAssetsFromBoq, BOQ_ASSET_CATEGORIES,
   fetchContractPaymentTerms, saveContractPaymentTerms,
@@ -571,6 +571,21 @@ async function submitEarlyBuyout() {
 
 const filterCustomerName = computed(() =>
   filters.customerId ? (customers.value.find((c) => c.id === filters.customerId)?.name || `客户#${filters.customerId}`) : '')
+async function doDeleteContract() {
+  if (!detail.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认安全删除租赁合同「${detail.value.no}」？将自动释放挂载设备回「采购」态并清理未核销租金计划（已有收款核销的合同禁止直接删除）。`,
+      '安全删除合同',
+      { type: 'warning', confirmButtonText: '确认删除' },
+    )
+  } catch { return }
+  await deleteContract(detail.value.id)
+  ElMessage.success('租赁合同已安全删除，挂载设备已释放')
+  drawer.value = false
+  detail.value = null
+  await loadList()
+}
 function clearCustomerFilter() {
   filters.customerId = undefined
   router.replace({ path: '/contract' })
@@ -659,6 +674,7 @@ onMounted(() => {
           <el-button size="small" type="warning" plain :disabled="detail.status !== '生效'" @click="openEarlyBuyout">💰 提前买断</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doChange">提前结清</el-button>
           <el-button size="small" type="danger" :disabled="detail.status === '已作废' || detail.status === '关闭'" @click="doVoid">作废(红冲)</el-button>
+          <el-button size="small" type="danger" plain @click="doDeleteContract">🗑️ 删除合同</el-button>
         </div>
 
         <!-- 要点 -->

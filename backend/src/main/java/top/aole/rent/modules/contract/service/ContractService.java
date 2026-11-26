@@ -803,6 +803,43 @@ public class ContractService {
         log.info("合同提前结清: id={}, 截断{}期, 剩{}期", id, truncated, remaining);
     }
 
+    /**
+     * 安全删除租赁合同（老板/财务 · 限未发生任何收款核销；自动释放挂载设备回「采购」态并清理计划与未收账单）。
+     */
+    @Transactional
+    public void delete(Long id) {
+        Contract c = load(id);
+        List<top.aole.rent.modules.billing.domain.RentBill> bills = rentBillMapper.selectList(
+                new LambdaQueryWrapper<top.aole.rent.modules.billing.domain.RentBill>()
+                        .eq(top.aole.rent.modules.billing.domain.RentBill::getContractId, id));
+        for (top.aole.rent.modules.billing.domain.RentBill b : bills) {
+            boolean paid = "已核销".equals(b.getStatus()) || "部分已收".equals(b.getStatus())
+                    || (b.getReceivedAmount() != null && b.getReceivedAmount().signum() > 0);
+            if (paid && !"红冲".equals(b.getStatus())) {
+                throw new BizException(400, "合同 " + c.getNo() + " 已有已收款收租单(" + b.getBillNo() + ")，禁止直接删除，请先红冲收租单");
+            }
+        }
+        // 清理未核销的收租单、租金计划、押金台账、合同-设备绑定
+        for (top.aole.rent.modules.billing.domain.RentBill b : bills) {
+            rentBillMapper.deleteById(b.getId());
+        }
+        rentScheduleMapper.hardDeleteFrom(id, 1);
+        depositLedgerMapper.delete(new LambdaQueryWrapper<DepositLedger>()
+                .eq(DepositLedger::getContractId, id));
+        List<ContractAsset> links = assetLinks(id);
+        for (ContractAsset ca : links) {
+            assetMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Asset>()
+                    .eq(Asset::getId, ca.getAssetId())
+                    .set(Asset::getStatus, "采购")
+                    .set(Asset::getContractId, null)
+                    .set(Asset::getCurrentHolderCustomerId, null));
+            contractAssetMapper.deleteById(ca.getId());
+        }
+        contractMapper.deleteById(id);
+        auditLogService.record("删除租赁合同", "contract", id, AuditLogService.EXECUTED,
+                "安全删除租赁合同 " + c.getNo() + "，释放 " + links.size() + " 套/台设备");
+    }
+
     // ============ 合同付款方式(V118) ============
 
     /** 付款方式视图:多段条件 + 它覆盖的台账设备 + 各段合计要付多少。 */

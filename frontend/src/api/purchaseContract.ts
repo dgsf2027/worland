@@ -164,6 +164,9 @@ export function fetchPurchaseContract(id: number): Promise<PcDetail> {
 export function createPurchaseContract(body: Record<string, any>): Promise<number> {
   return request.post('/rent/purchase-contracts', body)
 }
+export function deletePurchaseContract(id: number): Promise<void> {
+  return request.delete(`/rent/purchase-contracts/${id}`)
+}
 export function payPurchaseContract(id: number, body: Record<string, any>): Promise<number> {
   return request.post(`/rent/purchase-contracts/${id}/payments`, body)
 }

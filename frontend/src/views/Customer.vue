@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCustomerPool, fetchCustomerDetail, fetchPipeline, addFollowup, runAdmission,
-  createCustomer, updateCustomer, exportCustomers, CUSTOMER_SCOPES,
+  createCustomer, updateCustomer, deleteCustomer, exportCustomers, CUSTOMER_SCOPES,
   updateFollowup, deleteFollowup, updateCredit, updateCustomerValue,
   type CustomerPoolItem, type CustomerDetail, type Pipeline, type FollowupItem,
 } from '@/api/customer'
@@ -22,6 +22,20 @@ const identities = [
   { name: '投资人', role: 'LP' },
 ]
 const curIdentity = ref(localStorage.getItem('rent_user_name') || '老板')
+async function handleDeleteCustomer() {
+  if (!detail.value) return
+  try {
+    await ElMessageBox.confirm(`确认安全删除客户「${detail.value.name}」？（须先删除名下未清理的租赁合同）`, '删除客户', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+    })
+  } catch { return }
+  await deleteCustomer(detail.value.id)
+  ElMessage.success('客户已删除')
+  detail.value = null
+  activeTab.value = 'pool'
+  await Promise.all([loadPool(), loadPipeline()])
+}
 function switchIdentity(name: string) {
   const id = identities.find((i) => i.name === name)!
   localStorage.setItem('rent_user_name', id.name)
@@ -546,6 +560,7 @@ onMounted(() => {
                 <el-button size="small" @click="goContracts">查看合同</el-button>
                 <el-button size="small" @click="goBills">查看收租</el-button>
                 <el-button size="small" type="primary" @click="onAdmission">风控准入结论</el-button>
+                <el-button v-if="!detail.sensitiveMasked" size="small" type="danger" plain @click="handleDeleteCustomer">🗑️ 删除客户</el-button>
               </div>
             </div>
           </div>

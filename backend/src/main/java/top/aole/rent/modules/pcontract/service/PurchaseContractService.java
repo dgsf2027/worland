@@ -300,6 +300,32 @@ public class PurchaseContractService {
                         + " 审核日=" + c.getAuditPassDate());
     }
 
+    /** 安全删除采购合同（老板/财务 · 限无有效付款且无有效进项发票；自动解绑关联采购单）。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void delete(Long pcId) {
+        PurchaseContract c = require(pcId);
+        long validPays = paymentMapper.selectCount(new LambdaQueryWrapper<SupplierPayment>()
+                .eq(SupplierPayment::getPcId, pcId)
+                .eq(SupplierPayment::getStatus, "有效"));
+        if (validPays > 0) {
+            throw new BizException(400, "采购合同 " + c.getContractNo() + " 仍有 " + validPays + " 笔有效付款，请先撤销付款再删除");
+        }
+        long validInvs = invoiceMapper.selectCount(new LambdaQueryWrapper<PurchaseInvoice>()
+                .eq(PurchaseInvoice::getPcId, pcId)
+                .eq(PurchaseInvoice::getStatus, "有效"));
+        if (validInvs > 0) {
+            throw new BizException(400, "采购合同 " + c.getContractNo() + " 仍有 " + validInvs + " 张有效进项发票，请先作废发票再删除");
+        }
+        purchaseInMapper.update(null, new LambdaUpdateWrapper<PurchaseIn>()
+                .eq(PurchaseIn::getPcId, pcId)
+                .set(PurchaseIn::getPcId, null));
+        termMapper.delete(new LambdaQueryWrapper<PurchaseContractTerm>()
+                .eq(PurchaseContractTerm::getPcId, pcId));
+        contractMapper.deleteById(pcId);
+        auditLogService.record("删除采购合同", "purchase_contract", pcId, AuditLogService.EXECUTED,
+                "删除采购合同 " + c.getContractNo());
+    }
+
     private LocalDate resolveTermBaseDate(PurchaseContract c, String triggerPoint) {
         if (triggerPoint == null) {
             return null;

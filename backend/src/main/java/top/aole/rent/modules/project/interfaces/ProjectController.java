@@ -4,6 +4,7 @@ import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,6 +57,14 @@ public class ProjectController {
     @PutMapping("/{id}")
     public R<ProjectDtos.Detail> update(@PathVariable Long id, @Validated @RequestBody ProjectDtos.SaveRequest req) {
         return R.ok(projectService.update(id, req));
+    }
+
+    @ApiOperation("安全删除租赁项目卡片（老板/财务）")
+    @RequireRole(value = {"老板", "财务"}, action = "删除租赁项目", targetType = "project")
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        projectService.delete(id);
+        return R.ok();
     }
 
     @ApiOperation("登记交付与三方验收（自动联动采购合同月结到期日、5年质保与资产台账）")

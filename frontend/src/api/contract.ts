@@ -199,6 +199,9 @@ export function fetchContracts(params: Record<string, any>): Promise<PageResult<
 export function fetchContractDetail(id: number): Promise<ContractDetail> {
   return request.get(`/rent/contracts/${id}`)
 }
+export function deleteContract(id: number): Promise<void> {
+  return request.delete(`/rent/contracts/${id}`)
+}
 export function signContract(body: Record<string, any>): Promise<number> {
   return request.post('/rent/contracts', body)
 }

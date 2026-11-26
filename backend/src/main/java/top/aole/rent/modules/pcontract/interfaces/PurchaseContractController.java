@@ -3,6 +3,7 @@ package top.aole.rent.modules.pcontract.interfaces;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -49,6 +50,14 @@ public class PurchaseContractController {
     @PostMapping
     public R<Long> create(@RequestBody PcDtos.CreateRequest req) {
         return R.ok(service.create(req));
+    }
+
+    @ApiOperation("安全删除采购合同（老板/财务 · 限无有效付款与进项发票）")
+    @RequireRole(value = {"老板", "财务"}, action = "删除采购合同", targetType = "purchase_contract")
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        service.delete(id);
+        return R.ok();
     }
 
     @ApiOperation("补绑/换绑主租赁合同(先采后签场景)")

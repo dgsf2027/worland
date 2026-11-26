@@ -6,6 +6,7 @@ import {
   createProject,
   createProjectKitAsset,
   deleteBizFile,
+  deleteProject,
   downloadBizFile,
   fetchBizFiles,
   fetchProjectDetail,
@@ -315,6 +316,24 @@ async function handleDeleteFile(f: ProjectFileItem) {
   ElMessage.success('已删除')
 }
 
+async function handleDeleteProject(row?: { id: number; projectNo: string; name: string }) {
+  const target = row || detail.value
+  if (!target) return
+  try {
+    await ElMessageBox.confirm(`确认安全删除项目「${target.projectNo} · ${target.name}」？（不影响已生效财务单据，可随时重新同步）`, '删除项目', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+    })
+  } catch { return }
+  await deleteProject(target.id)
+  ElMessage.success('项目已删除')
+  if (detail.value?.id === target.id) {
+    drawerVisible.value = false
+    detail.value = null
+  }
+  await loadList()
+}
+
 function fmtMoney(v?: number | null) {
   if (v == null) return '—'
   return '¥' + Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -420,9 +439,10 @@ onMounted(async () => {
           <div v-if="row.paybackPeriodNo" class="sub-line">第{{ row.paybackPeriodNo }}期回本</div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click.stop="openDetail(row.id)">详情</el-button>
+          <el-button v-if="canWrite" link type="danger" size="small" @click.stop="handleDeleteProject(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -561,6 +581,7 @@ onMounted(async () => {
             📑 采购合同 {{ detail.purchaseContractNo }}
           </el-button>
           <el-button size="small" @click="router.push('/rent')">🧾 收租开票</el-button>
+          <el-button v-if="canWrite" size="small" type="danger" plain @click="handleDeleteProject()">🗑️ 删除项目</el-button>
         </div>
 
         <!-- 7步全生命周期可视化进度条 -->

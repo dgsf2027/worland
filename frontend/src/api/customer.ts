@@ -169,6 +169,9 @@ export function createCustomer(body: Record<string, any>): Promise<number> {
 export function updateCustomer(id: number, body: Record<string, any>): Promise<void> {
   return request.put(`/rent/customers/${id}`, body)
 }
+export function deleteCustomer(id: number): Promise<void> {
+  return request.delete(`/rent/customers/${id}`)
+}
 
 /** 客户信息一键导出(筛选条件同客户池),触发浏览器保存 xlsx。 */
 export async function exportCustomers(params: Record<string, any>) {

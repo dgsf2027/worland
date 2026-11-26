@@ -334,7 +334,21 @@ public class CustomerService {
         return r;
     }
 
-    // ============ 新增 / 编辑 ============
+    // ============ 新增 / 编辑 / 删除 ============
+
+    /** 安全删除客户（老板/财务）：该客户下存在未删除的租赁合同时禁止删除，须先删除合同。 */
+    @Transactional
+    public void delete(Long id) {
+        Customer c = load(id);
+        long ctCount = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
+                .eq(Contract::getCustomerId, id));
+        if (ctCount > 0) {
+            throw new BizException(400, "客户「" + c.getName() + "」名下仍有 " + ctCount + " 份租赁合同，请先删除合同再删除客户");
+        }
+        customerMapper.deleteById(id);
+        auditLogService.record("删除客户", "customer", id, AuditLogService.EXECUTED,
+                "删除客户 " + c.getName());
+    }
 
     @Transactional
     public Long create(CustomerSaveRequest req) {

@@ -6,7 +6,7 @@ import { fetchSupplierPool } from '@/api/supplier'
 import { fetchPurchases, type PurchaseListItem } from '@/api/purchase'
 import { fetchContracts, type ContractListItem } from '@/api/contract'
 import {
-  addPcInvoice, bindPcRentContract, createPurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
+  addPcInvoice, bindPcRentContract, createPurchaseContract, deletePurchaseContract, fetchPurchaseContract, fetchPurchaseContracts,
   fetchRecognizeStatus, linkPcPurchases, payPurchaseContractBatch, recordPcAcceptance, unlinkPcPurchase,
   voidPcInvoice, voidPcPayment,
   type PcContract, type PcDetail, type RecognizedContract, type RecognizedInvoice,
@@ -252,6 +252,21 @@ async function handleDeletePcDeliveryFile(f: ProjectFileItem) {
   await loadPcDeliveryFiles(detail.value.contract.id)
   ElMessage.success('已删除')
 }
+async function handleDeletePurchaseContract() {
+  if (!detail.value) return
+  const c = detail.value.contract
+  try {
+    await ElMessageBox.confirm(`确认安全删除采购合同「${c.contractNo}」？（限无有效付款和进项发票）`, '删除采购合同', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+    })
+  } catch { return }
+  await deletePurchaseContract(c.id)
+  ElMessage.success('采购合同已删除')
+  drawer.value = false
+  detail.value = undefined
+  await load()
+}
 function termName(id: number) { return detail.value?.terms.find((t) => t.id === id)?.stageName ?? '' }
 
 // ---- 关联采购入库单 ----
@@ -491,7 +506,10 @@ async function undoInvoice(id: number) {
 
         <div class="sec">
           <h4>主合同（客户租赁合同）</h4>
-          <el-button size="small" @click="openBindRent">{{ detail.contract.rentContractNo ? '变更主合同' : '补绑主合同' }}</el-button>
+          <div>
+            <el-button size="small" @click="openBindRent">{{ detail.contract.rentContractNo ? '变更主合同' : '补绑主合同' }}</el-button>
+            <el-button size="small" type="danger" plain @click="handleDeletePurchaseContract">🗑️ 删除采购合同</el-button>
+          </div>
         </div>
         <el-descriptions v-if="detail.contract.rentContractNo" :column="3" border size="small">
           <el-descriptions-item label="主合同号">{{ detail.contract.rentContractNo }}</el-descriptions-item>

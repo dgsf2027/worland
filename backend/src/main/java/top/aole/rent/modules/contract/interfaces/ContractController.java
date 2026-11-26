@@ -104,6 +104,14 @@ public class ContractController {
         return R.ok();
     }
 
+    @ApiOperation("安全删除租赁合同（老板/财务 · 限未收款；自动释放挂载设备并清理计划）")
+    @RequireRole(value = {"财务", "老板"}, action = "删除租赁合同", targetType = "contract")
+    @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        contractService.delete(id);
+        return R.ok();
+    }
+
     @ApiOperation("续租:追加期数,重算租金计划")
     @PostMapping("/{id}/renew")
     public R<Void> renew(@PathVariable Long id, @RequestBody ContractChangeRequest req) {

@@ -144,6 +144,15 @@ public class ProjectService {
         return detail(id);
     }
 
+    /** 安全删除租赁项目卡片（逻辑删除；不影响已关联的正式财务流水，便于清理测试/误建项目）。 */
+    @Transactional
+    public void delete(Long id) {
+        Project p = load(id);
+        projectMapper.deleteById(id);
+        auditLogService.record("删除租赁项目", "project", id, AuditLogService.EXECUTED,
+                "删除项目 " + p.getProjectNo() + " · " + p.getName());
+    }
+
     /**
      * 登记/更新现场交付进度、过磅吨数、三方竣工验收日与结算审核通过日。
      * <p>一旦录入验收日/审核通过日，自动联动：

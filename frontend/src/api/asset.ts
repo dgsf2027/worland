@@ -235,6 +235,9 @@ export function createAsset(body: Record<string, any>): Promise<number> {
 export function updateAsset(id: number, body: Record<string, any>): Promise<void> {
   return request.put(`/rent/assets/${id}`, body)
 }
+export function deleteAsset(id: number): Promise<void> {
+  return request.delete(`/rent/assets/${id}`)
+}
 export function changeAssetStatus(id: number, body: Record<string, any>): Promise<void> {
   return request.post(`/rent/assets/${id}/status`, body)
 }

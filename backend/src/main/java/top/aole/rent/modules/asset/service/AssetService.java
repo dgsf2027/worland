@@ -345,6 +345,24 @@ public class AssetService {
         }
     }
 
+    /** 安全删除设备/工程套装台账（老板/财务）：在租设备须先删/作废关联合同；已付应付设备禁止直接删除。 */
+    @Transactional
+    public void delete(Long id) {
+        Asset a = load(id);
+        if ("在租".equals(a.getStatus())) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 当前处于「在租」状态，请先删除或作废关联的租赁合同");
+        }
+        long paidCount = payableMapper.selectCount(new LambdaQueryWrapper<top.aole.rent.modules.purchase.domain.Payable>()
+                .eq(top.aole.rent.modules.purchase.domain.Payable::getAssetId, id)
+                .eq(top.aole.rent.modules.purchase.domain.Payable::getStatus, "已付"));
+        if (paidCount > 0) {
+            throw new BizException(400, "设备 " + a.getSerialNo() + " 已有已付采购应付款，请先撤销付款再删除");
+        }
+        assetMapper.deleteById(id);
+        auditLogService.record("删除设备资产", "asset", id, AuditLogService.EXECUTED,
+                "删除设备 " + a.getSerialNo() + "（" + a.getCategory() + "）");
+    }
+
     /**
      * 合同付款方式变更后,按设备 id 重算该设备的待付应付(合同服务调用;已付阶段锁定不动)。
      */

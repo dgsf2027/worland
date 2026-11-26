@@ -117,6 +117,10 @@ export function updateProject(id: number, body: Record<string, any>): Promise<Pr
   return request.put(`/rent/projects/${id}`, body)
 }
 
+export function deleteProject(id: number): Promise<void> {
+  return request.delete(`/rent/projects/${id}`)
+}
+
 export function updateProjectDelivery(id: number, body: Record<string, any>): Promise<ProjectDetail> {
   return request.put(`/rent/projects/${id}/delivery`, body)
 }

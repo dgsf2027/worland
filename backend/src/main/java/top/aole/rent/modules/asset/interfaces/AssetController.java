@@ -107,6 +107,14 @@ public class AssetController {
         return R.ok();
     }
 
+    @ApiOperation("安全删除设备/工程套装（老板/财务 · 限非在租且无已付应付）")
+    @RequireRole(value = {"老板", "财务"}, action = "删除设备资产", targetType = "asset")
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        assetService.delete(id);
+        return R.ok();
+    }
+
     @ApiOperation("状态流转(走事件流 + 状态机校验;流转到「投放」需老板)")
     @PostMapping("/{id}/status")
     public R<Void> changeStatus(@PathVariable Long id, @Validated @RequestBody StatusChangeRequest req) {

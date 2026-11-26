@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import {
-  fetchAssets, fetchAssetDetail, createAsset, updateAsset, changeAssetStatus,
+  fetchAssets, fetchAssetDetail, createAsset, updateAsset, deleteAsset, changeAssetStatus,
   addBom, updateBom, deleteBom, updateBomPricing, updateBomFault,
   updateSingleUnitReturn, updateIntendedCustomer,
   uploadBomAttachment, fetchBomAttachments, saveFile, checkUploadFile, importBom, exportBom,
@@ -291,6 +291,21 @@ async function submitAsset() {
   }
   assetDialogVisible.value = false
   await loadList()
+}
+
+async function handleDeleteAsset() {
+  if (!detail.value) return
+  try {
+    await ElMessageBox.confirm(`确认安全删除设备/工程套装「${detail.value.serialNo}」？（限非在租且无已付应付）`, '删除设备', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+    })
+  } catch { return }
+  await deleteAsset(detail.value.id)
+  ElMessage.success('设备已删除')
+  drawer.value = false
+  detail.value = null
+  await Promise.all([loadList(), loadTotalValue()])
 }
 
 // ---- BOM 拆解维护 ----
@@ -902,6 +917,7 @@ onMounted(async () => {
           title="投资人视角:集采价/账面价/成本/回报率等敏感财务字段已打码 🔒" style="margin-bottom:12px" />
         <div class="detail-actions">
           <el-button v-if="!detail.sensitiveMasked" type="primary" size="small" @click="openEditAsset">修改设备</el-button>
+          <el-button v-if="!detail.sensitiveMasked" type="danger" plain size="small" @click="handleDeleteAsset">🗑️ 删除设备</el-button>
         </div>
 
         <!-- 要点 -->

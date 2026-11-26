@@ -101,6 +101,14 @@ public class CustomerController {
         return R.ok();
     }
 
+    @ApiOperation("安全删除客户（老板/财务 · 须先清理名下合同）")
+    @top.aole.rent.common.auth.RequireRole(value = {"老板", "财务"}, action = "删除客户", targetType = "customer")
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        customerService.delete(id);
+        return R.ok();
+    }
+
     @ApiOperation("记一次跟进(同步下次跟进日)")
     @PostMapping("/{id}/followup")
     public R<Long> followup(@PathVariable Long id, @Validated @RequestBody FollowupRequest req) {
