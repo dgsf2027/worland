@@ -122,7 +122,7 @@ export function deleteProject(id: number): Promise<void> {
 }
 
 export function updateProjectDelivery(id: number, body: Record<string, any>): Promise<ProjectDetail> {
-  return request.put(`/rent/projects/${id}/delivery`, body)
+  return request.post(`/rent/projects/${id}/delivery`, body)
 }
 
 export function createProjectKitAsset(id: number, body?: Record<string, any>): Promise<number> {

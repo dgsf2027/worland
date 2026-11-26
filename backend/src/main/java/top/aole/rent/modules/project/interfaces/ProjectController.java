@@ -69,7 +69,7 @@ public class ProjectController {
 
     @ApiOperation("登记交付与三方验收（自动联动采购合同月结到期日、5年质保与资产台账）")
     @RequireRole(value = {"老板", "财务", "供应链"}, action = "项目交付验收", targetType = "project")
-    @PostMapping("/{id}/delivery")
+    @RequestMapping(value = "/{id}/delivery", method = {org.springframework.web.bind.annotation.RequestMethod.POST, org.springframework.web.bind.annotation.RequestMethod.PUT})
     public R<ProjectDtos.Detail> updateDelivery(@PathVariable Long id, @RequestBody ProjectDtos.DeliveryRequest req) {
         return R.ok(projectService.updateDelivery(id, req));
     }

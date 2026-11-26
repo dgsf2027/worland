@@ -492,6 +492,18 @@ onMounted(async () => {
               </el-select>
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="绑定工程套装/资产">
+              <el-select v-model="form.primaryAssetId" filterable clearable style="width: 100%" placeholder="可选，绑定已有工程套装/主设备台账">
+                <el-option
+                  v-for="a in assets"
+                  :key="a.id"
+                  :label="`${a.serialNo} · ${a.assetMode || '单机设备'} · ${a.model || a.category}`"
+                  :value="a.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
           <el-col :span="8">
             <el-form-item label="规划货位数">
               <el-input-number v-model="form.palletSlots" :min="0" :precision="0" style="width: 100%" placeholder="如 2279" />
