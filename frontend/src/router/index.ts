@@ -9,6 +9,7 @@ const router = createRouter({
     // 平台门户 SSO 落地页(后端 /api/v1/sso/callback 302 过来,token 在 hash 里);public 放行,页内整页强刷 '/'
     { path: '/sso/callback', name: 'sso-callback', meta: { title: '平台门户登录', public: true }, component: () => import('@/views/SsoCallback.vue') },
     { path: '/workbench', name: 'workbench', meta: { title: '工作台 · 各角色驾驶舱首页' }, component: () => import('@/views/Workbench.vue') },
+    { path: '/project', name: 'project', meta: { title: '项目中心 · 货架采购与出租一单到底' }, component: () => import('@/views/Project.vue') },
     { path: '/purchase', name: 'purchase', meta: { title: '采购入库 · 应付' }, component: () => import('@/views/Purchase.vue') },
     { path: '/purchase-contract', name: 'purchase-contract', meta: { title: '采购合同 · 付款 · 进项发票' }, component: () => import('@/views/PurchaseContract.vue') },
     { path: '/task', name: 'task', meta: { title: '任务 · 审批' }, component: () => import('@/views/Task.vue') },

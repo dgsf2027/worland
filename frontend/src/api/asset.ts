@@ -9,7 +9,13 @@ export interface AssetListItem {
   contractNo?: string
   contractId?: number
   category: string
+  /** 资产形态：单机设备 / 工程套装 */
+  assetMode?: string
   model?: string
+  /** 工程套装货位数 */
+  palletSlots?: number
+  /** 安装库区/楼层 */
+  warehouseZone?: string
   status: string
   marketPrice?: number
   purchasePrice?: number
@@ -157,7 +163,13 @@ export interface AssetDetail {
   /** 所属合同编号(来自关联合同,只读) */
   contractNo?: string
   category: string
+  /** 资产形态：单机设备 / 工程套装 */
+  assetMode?: string
   model?: string
+  /** 工程套装货位数 */
+  palletSlots?: number
+  /** 安装库区/楼层 */
+  warehouseZone?: string
   status: string
   marketPrice?: number
   purchasePrice?: number
@@ -199,6 +211,16 @@ export interface AssetDetail {
   timeline: { eventType: string; bizTime: string; refDocType?: string; refDocId?: number; operatorName?: string; remark?: string }[]
   /** 转让/处置记录（按业务时间倒序；无记录时后端返回 undefined） */
   disposals?: DisposalLine[]
+  /** 资产跨多任租客全生命周期累计收益（V131） */
+  lifecycleReturn?: {
+    contractCount: number
+    contractNos: string[]
+    totalCollectedRent: number
+    totalDisposalProceeds: number
+    purchaseCost?: number
+    lifetimeNetProfit?: number
+    lifetimeRoi?: number
+  }
 }
 
 export function fetchAssets(params: Record<string, any>): Promise<PageResult<AssetListItem>> {

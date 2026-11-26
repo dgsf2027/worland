@@ -19,6 +19,7 @@ public class AssetDetailResponse {
     /** 所属合同编号(来自关联合同,只读) */
     private String contractNo;
     private String category;
+    private String assetMode;
     private String model;
     private String status;
     private BigDecimal marketPrice;
@@ -40,6 +41,8 @@ public class AssetDetailResponse {
     private String deliveryAddress;
     private String deliveryContact;
     private BigDecimal weighTons;
+    private Integer palletSlots;
+    private String warehouseZone;
     private String remark;
     private Boolean sensitiveMasked;
     /** 由哪一行合同清单生成(空=非清单生成) */
@@ -69,6 +72,19 @@ public class AssetDetailResponse {
 
     /** 转让/处置记录(按业务时间倒序;来自转让模块的反向关联) */
     private List<top.aole.rent.modules.transfer.dto.TransferDtos.DisposalLine> disposals;
+    /** 全生命周期收益（跨多任租客复投累计租金 + 处置回款 − 原始采购成本） */
+    private LifecycleReturn lifecycleReturn;
+
+    @Data
+    public static class LifecycleReturn {
+        private int contractCount;
+        private BigDecimal totalCollectedRent;
+        private BigDecimal totalDisposalProceeds;
+        private BigDecimal purchaseCost;
+        private BigDecimal lifetimeNetProfit;
+        private BigDecimal lifetimeRoi;
+        private List<String> contractNos = new java.util.ArrayList<>();
+    }
 
     @Data
     public static class BomNode {

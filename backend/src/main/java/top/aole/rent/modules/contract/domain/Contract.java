@@ -57,6 +57,12 @@ public class Contract {
     /** 逾期日违约金率(默认 0.0005) */
     private BigDecimal overdueDailyRate;
 
+    /** 提前买断违约金率(占剩余本金比例,默认 0.03) */
+    private BigDecimal earlyBuyoutPenaltyRate;
+
+    /** 实际提前买断成交额(元) */
+    private BigDecimal earlyBuyoutAmount;
+
     /** 设备总价(含税)= 合同清单原价合计扣除整单优惠后的最终成交价 */
     private BigDecimal equipmentTotal;
 

@@ -16,6 +16,9 @@ import ProofViewer from '@/components/payproof/ProofViewer.vue'
 import SnapRecognize from '@/components/payproof/SnapRecognize.vue'
 import ReceiptPaymentEditor from '@/components/payproof/ReceiptPaymentEditor.vue'
 import { receiptPaymentBody, receiptPaymentError, type ReceiptPaymentDraft } from '@/utils/receiptPayments'
+import {
+  deleteBizFile, downloadBizFile, fetchBizFiles, uploadBizFile, type ProjectFileItem,
+} from '@/api/project'
 
 /** 采购合同:合同(含付款节点)→ 付款(银行流水+回单,可跨节点)→ 进项发票,三者互相对账。 */
 const list = ref<PcContract[]>([])
@@ -211,13 +214,43 @@ async function submitCreate() {
 // ---- 详情 ----
 const drawer = ref(false)
 const detail = ref<PcDetail>()
+const pcDeliveryFiles = ref<ProjectFileItem[]>([])
+const pcDeliveryUploading = ref(false)
+async function loadPcDeliveryFiles(id: number) {
+  pcDeliveryFiles.value = await fetchBizFiles('pc_delivery', id).catch(() => [])
+}
 async function openDetail(id: number) {
   detail.value = await fetchPurchaseContract(id)
   drawer.value = true
+  await loadPcDeliveryFiles(id)
 }
 async function reloadDetail() {
-  if (detail.value) detail.value = await fetchPurchaseContract(detail.value.contract.id)
+  if (detail.value) {
+    detail.value = await fetchPurchaseContract(detail.value.contract.id)
+    await loadPcDeliveryFiles(detail.value.contract.id)
+  }
   await load()
+}
+async function handlePcDeliveryUpload(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !detail.value) return
+  pcDeliveryUploading.value = true
+  try {
+    await uploadBizFile('pc_delivery', detail.value.contract.id, file)
+    ElMessage.success(`已上传交付验收资料「${file.name}」`)
+    await loadPcDeliveryFiles(detail.value.contract.id)
+  } finally {
+    pcDeliveryUploading.value = false
+    input.value = ''
+  }
+}
+async function handleDeletePcDeliveryFile(f: ProjectFileItem) {
+  if (!detail.value) return
+  await ElMessageBox.confirm(`确认删除附件「${f.fileName}」？`, '删除附件', { type: 'warning' })
+  await deleteBizFile(f.id)
+  await loadPcDeliveryFiles(detail.value.contract.id)
+  ElMessage.success('已删除')
 }
 function termName(id: number) { return detail.value?.terms.find((t) => t.id === id)?.stageName ?? '' }
 
@@ -268,13 +301,35 @@ async function submitBindRent() {
   } finally { bindRentSaving.value = false }
 }
 
-// ---- 登记验收与审核通过日（自动推算各付款节点到期日） ----
+// ---- 登记直发交付、过磅、安装与三方验收/审核通过日（自动推算各付款节点到期日） ----
 const pcAccDlg = ref(false)
 const pcAccSaving = ref(false)
-const pcAccForm = reactive({ acceptanceDate: '', auditPassDate: '' })
+const pcAccForm = reactive<{
+  shippedDate: string
+  installDoneDate: string
+  loadTestDate: string
+  weighTons: number | undefined
+  palletSlots: number | undefined
+  acceptanceDate: string
+  auditPassDate: string
+}>({
+  shippedDate: '',
+  installDoneDate: '',
+  loadTestDate: '',
+  weighTons: undefined,
+  palletSlots: undefined,
+  acceptanceDate: '',
+  auditPassDate: '',
+})
 function openPcAcc() {
-  pcAccForm.acceptanceDate = detail.value?.contract.acceptanceDate || new Date().toISOString().slice(0, 10)
-  pcAccForm.auditPassDate = detail.value?.contract.auditPassDate || ''
+  const c = detail.value?.contract
+  pcAccForm.shippedDate = c?.shippedDate || ''
+  pcAccForm.installDoneDate = c?.installDoneDate || ''
+  pcAccForm.loadTestDate = c?.loadTestDate || ''
+  pcAccForm.weighTons = c?.weighTons
+  pcAccForm.palletSlots = c?.palletSlots
+  pcAccForm.acceptanceDate = c?.acceptanceDate || new Date().toISOString().slice(0, 10)
+  pcAccForm.auditPassDate = c?.auditPassDate || ''
   pcAccDlg.value = true
 }
 async function submitPcAcc() {
@@ -282,11 +337,16 @@ async function submitPcAcc() {
   pcAccSaving.value = true
   try {
     await recordPcAcceptance(detail.value.contract.id, {
+      shippedDate: pcAccForm.shippedDate || undefined,
+      installDoneDate: pcAccForm.installDoneDate || undefined,
+      loadTestDate: pcAccForm.loadTestDate || undefined,
+      weighTons: pcAccForm.weighTons ?? null,
+      palletSlots: pcAccForm.palletSlots ?? null,
       acceptanceDate: pcAccForm.acceptanceDate || undefined,
       auditPassDate: pcAccForm.auditPassDate || undefined,
     })
     pcAccDlg.value = false
-    ElMessage.success('已登记验收/审核日期，各节点到期日已按月结规则重算')
+    ElMessage.success('已登记直发交付与验收日期，各节点到期日已按月结规则重算')
     await reloadDetail()
   } finally { pcAccSaving.value = false }
 }
@@ -443,7 +503,37 @@ async function undoInvoice(id: number) {
         </el-descriptions>
         <el-empty v-else :image-size="40" description="未关联主合同（先采后签，可点右上「补绑主合同」）" />
 
-        <div class="sec"><h4>关联采购单</h4><el-button size="small" @click="openLink">关联采购单</el-button></div>
+        <div class="sec">
+          <h4>直发交付与现场验收（货架直发客户仓，无需另录采购入库单）</h4>
+          <el-button size="small" type="primary" plain @click="openPcAcc">登记交付 / 过磅 / 验收</el-button>
+        </div>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="工厂发货日">{{ detail.contract.shippedDate || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="安装完工日">{{ detail.contract.installDoneDate || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="载荷检测日">{{ detail.contract.loadTestDate || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="实际过磅吨数">{{ detail.contract.weighTons != null ? `${detail.contract.weighTons} 吨` : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="实装货位数">{{ detail.contract.palletSlots != null ? `${detail.contract.palletSlots} 货位` : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="验收 / 审核日">{{ detail.contract.acceptanceDate || '—' }} / {{ detail.contract.auditPassDate || '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div style="margin: 8px 0; display: flex; align-items: center; gap: 10px">
+          <label class="pc-upload-btn">
+            <span>{{ pcDeliveryUploading ? '上传中...' : '📎 上传交付资料（过磅单/送货单/安装照/三方验收单）' }}</span>
+            <input type="file" style="display: none" :disabled="pcDeliveryUploading" @change="handlePcDeliveryUpload" />
+          </label>
+          <span class="sum">已传 {{ pcDeliveryFiles.length }} 份</span>
+        </div>
+        <el-table v-if="pcDeliveryFiles.length" :data="pcDeliveryFiles" size="small" border style="margin-bottom: 8px">
+          <el-table-column prop="fileName" label="交付验收资料" min-width="220" />
+          <el-table-column prop="uploaderName" label="上传人" width="90" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="downloadBizFile(row.id, row.fileName)">下载</el-button>
+              <el-button link type="danger" size="small" @click="handleDeletePcDeliveryFile(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="sec"><h4>关联采购单（可选 · 传统入库模式）</h4><el-button size="small" @click="openLink">关联采购单</el-button></div>
         <el-table :data="detail.purchases" size="small" border empty-text="尚未关联采购入库单">
           <el-table-column prop="no" label="采购单号" min-width="140" />
           <el-table-column prop="status" label="状态" width="90" />
@@ -667,14 +757,46 @@ async function undoInvoice(id: number) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="pcAccDlg" title="登记验收合格 / 审核通过日期" width="480px">
-      <el-form label-width="110px">
-        <el-form-item label="验收合格日">
-          <el-date-picker v-model="pcAccForm.acceptanceDate" type="date" value-format="YYYY-MM-DD" style="width: 200px" />
-        </el-form-item>
-        <el-form-item label="资料审核通过日">
-          <el-date-picker v-model="pcAccForm.auditPassDate" type="date" value-format="YYYY-MM-DD" style="width: 200px" />
-        </el-form-item>
+    <el-dialog v-model="pcAccDlg" title="登记直发交付、过磅、安装与三方验收" width="560px">
+      <el-form label-width="115px" size="small">
+        <el-row :gutter="10">
+          <el-col :span="12">
+            <el-form-item label="工厂发货日">
+              <el-date-picker v-model="pcAccForm.shippedDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="安装完工日">
+              <el-date-picker v-model="pcAccForm.installDoneDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="载荷检测日">
+              <el-date-picker v-model="pcAccForm.loadTestDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实际过磅(吨)">
+              <el-input-number v-model="pcAccForm.weighTons" :min="0" :precision="2" :controls="false" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实装货位数">
+              <el-input-number v-model="pcAccForm.palletSlots" :min="0" :precision="0" :controls="false" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12" />
+          <el-col :span="12">
+            <el-form-item label="三方验收合格日">
+              <el-date-picker v-model="pcAccForm.acceptanceDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="资料审核通过日">
+              <el-date-picker v-model="pcAccForm.auditPassDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
       <div class="sum">登记后，系统按各付款节点的「月底+N天 / 次月 / 次次月」规则自动算出具体到期日。</div>
       <template #footer>
@@ -699,5 +821,10 @@ h4 { margin: 16px 0 8px; }
 .snap-row { display: flex; gap: 10px; align-items: center; margin: 4px 0 12px; }
 .sum { font-size: 12px; color: #909399; }
 .sum.bad { color: #f56c6c; }
+.pc-upload-btn {
+  display: inline-block; padding: 5px 10px; background: #eff6ff; color: #1d4ed8;
+  border: 1px dashed #93c5fd; border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.pc-upload-btn:hover { background: #dbeafe; }
 :deep(.el-table__row) { cursor: pointer; }
 </style>

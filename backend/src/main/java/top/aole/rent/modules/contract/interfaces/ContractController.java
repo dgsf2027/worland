@@ -29,10 +29,12 @@ import top.aole.rent.modules.contract.dto.ContractSignRequest;
 import top.aole.rent.modules.contract.domain.Contract;
 import top.aole.rent.modules.asset.dto.PaymentTermDtos;
 import top.aole.rent.modules.contract.dto.BoqDtos;
+import top.aole.rent.modules.contract.dto.ContractBuyoutDtos;
 import top.aole.rent.modules.contract.dto.ContractPaymentDtos;
 import top.aole.rent.modules.contract.dto.ProjectPanoramaDtos;
 import top.aole.rent.modules.contract.service.ContractBoqExcelService;
 import top.aole.rent.modules.contract.service.ContractBoqService;
+import top.aole.rent.modules.contract.service.ContractBuyoutService;
 import top.aole.rent.modules.contract.service.ContractService;
 import top.aole.rent.modules.contract.service.ProjectPanoramaService;
 
@@ -55,6 +57,7 @@ public class ContractController {
     private final ContractBoqService boqService;
     private final ContractBoqExcelService boqExcelService;
     private final ProjectPanoramaService projectPanoramaService;
+    private final ContractBuyoutService buyoutService;
 
     @ApiOperation("合同列表:按状态/客户/编号筛选 + 分页")
     @GetMapping
@@ -113,6 +116,25 @@ public class ContractController {
     public R<Void> change(@PathVariable Long id, @RequestBody(required = false) ContractChangeRequest req) {
         contractService.change(id, req);
         return R.ok();
+    }
+
+    @ApiOperation("提前买断试算:按剩余本金+逾期未收+违约金+留购价−押金算出应补净额与毛利对比")
+    @GetMapping("/{id}/early-buyout-preview")
+    public R<ContractBuyoutDtos.Preview> earlyBuyoutPreview(
+            @PathVariable Long id,
+            @RequestParam(required = false) String buyoutDate,
+            @RequestParam(required = false) java.math.BigDecimal penaltyRate) {
+        LocalDate dt = buyoutDate == null || buyoutDate.isEmpty() ? null : LocalDate.parse(buyoutDate);
+        return R.ok(buyoutService.preview(id, dt, penaltyRate));
+    }
+
+    @ApiOperation("正式办理提前买断(敏感·财务+老板):截断剩余期次+押金抵扣+设备转已转让+写变更留痕")
+    @RequireRole(value = {"财务", "老板"}, action = "合同提前买断", targetType = "contract")
+    @PostMapping("/{id}/early-buyout")
+    public R<ContractBuyoutDtos.ExecuteResult> executeEarlyBuyout(
+            @PathVariable Long id,
+            @RequestBody(required = false) ContractBuyoutDtos.ExecuteRequest req) {
+        return R.ok(buyoutService.execute(id, req));
     }
 
     // ============ 合同付款方式(V118:唯一真相源,设备与采购单继承) ============

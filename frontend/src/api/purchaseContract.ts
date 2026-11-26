@@ -31,6 +31,11 @@ export interface PcContract {
   warrantyYears?: number
   deliveryAddress?: string
   deliveryContact?: string
+  shippedDate?: string
+  installDoneDate?: string
+  loadTestDate?: string
+  weighTons?: number
+  palletSlots?: number
   acceptanceDate?: string
   auditPassDate?: string
   status: string
@@ -183,6 +188,20 @@ export function voidPcInvoice(invoiceId: number, reason?: string): Promise<void>
 export function bindPcRentContract(id: number, rentContractId: number | null): Promise<void> {
   return request.put(`/rent/purchase-contracts/${id}/bind-rent-contract`, { rentContractId })
 }
-export function recordPcAcceptance(id: number, body: { acceptanceDate?: string; auditPassDate?: string }): Promise<void> {
+export function recordPcAcceptance(
+  id: number,
+  body: {
+    shippedDate?: string
+    installDoneDate?: string
+    loadTestDate?: string
+    weighTons?: number | null
+    palletSlots?: number | null
+    acceptanceDate?: string
+    auditPassDate?: string
+    warrantyYears?: number | null
+    deliveryAddress?: string
+    deliveryContact?: string
+  },
+): Promise<void> {
   return request.post(`/rent/purchase-contracts/${id}/acceptance`, body)
 }

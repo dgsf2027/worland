@@ -44,6 +44,11 @@ public final class PcDtos {
         private Integer warrantyYears;
         private String deliveryAddress;
         private String deliveryContact;
+        private LocalDate shippedDate;
+        private LocalDate installDoneDate;
+        private LocalDate loadTestDate;
+        private BigDecimal weighTons;
+        private Integer palletSlots;
         private LocalDate acceptanceDate;
         private LocalDate auditPassDate;
         private String remark;
@@ -59,6 +64,11 @@ public final class PcDtos {
 
     @Data
     public static class AcceptanceRequest {
+        private LocalDate shippedDate;
+        private LocalDate installDoneDate;
+        private LocalDate loadTestDate;
+        private BigDecimal weighTons;
+        private Integer palletSlots;
         private LocalDate acceptanceDate;
         private LocalDate auditPassDate;
         private Integer warrantyYears;
@@ -162,6 +172,11 @@ public final class PcDtos {
         private Integer warrantyYears;
         private String deliveryAddress;
         private String deliveryContact;
+        private LocalDate shippedDate;
+        private LocalDate installDoneDate;
+        private LocalDate loadTestDate;
+        private BigDecimal weighTons;
+        private Integer palletSlots;
         private LocalDate acceptanceDate;
         private LocalDate auditPassDate;
         private String status;

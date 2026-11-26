@@ -29,6 +29,11 @@ public class PurchaseContract {
     private Integer warrantyYears;
     private String deliveryAddress;
     private String deliveryContact;
+    private LocalDate shippedDate;
+    private LocalDate installDoneDate;
+    private LocalDate loadTestDate;
+    private BigDecimal weighTons;
+    private Integer palletSlots;
     private LocalDate acceptanceDate;
     private LocalDate auditPassDate;
     /** 执行中/已结清/作废 */

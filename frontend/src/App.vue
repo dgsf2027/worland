@@ -77,6 +77,7 @@ const buildTip = `分支 ${build.branch} · 构建于 ${fmtTime(build.buildTime)
         <template v-else>
           <el-sub-menu index="deal">
             <template #title><span>📌 租赁业务主线</span></template>
+            <el-menu-item index="/project">🎯 项目中心（一单到底）</el-menu-item>
             <el-menu-item index="/quote">🧮 ① 报价与收益测算</el-menu-item>
             <el-menu-item index="/customer">🤝 ② 客户管理 (CRM)</el-menu-item>
             <el-menu-item index="/contract">📄 ③ 租赁合同与计划</el-menu-item>

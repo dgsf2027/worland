@@ -93,6 +93,8 @@ public class AssetService {
     private final top.aole.rent.modules.transfer.service.TransferQueryService transferQueryService;
     private final top.aole.rent.modules.purchase.mapper.PayableMapper payableMapper;
     private final AssetPaymentService paymentService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private top.aole.rent.modules.billing.mapper.RentBillMapper rentBillMapper;
 
     /** 设备状态集合。状态可直接改(不限先后顺序),改为「在租」须带承租客户与合同。 */
     private static final Set<String> VALID_STATUS = new LinkedHashSet<>(Arrays.asList(
@@ -154,7 +156,10 @@ public class AssetService {
             it.setContractId(a.getContractId());
             it.setContractNo(contractNo(a.getContractId()));
             it.setCategory(a.getCategory());
+            it.setAssetMode(a.getAssetMode() != null ? a.getAssetMode() : "单机设备");
             it.setModel(a.getModel());
+            it.setPalletSlots(a.getPalletSlots());
+            it.setWarehouseZone(a.getWarehouseZone());
             it.setStatus(a.getStatus());
             it.setMarketPrice(a.getMarketPrice());
             it.setPurchasePrice(seeCost ? a.getPurchasePrice() : null);
@@ -192,6 +197,7 @@ public class AssetService {
         r.setSerialNo(a.getSerialNo());
         r.setBoqLineId(a.getBoqLineId());
         r.setCategory(a.getCategory());
+        r.setAssetMode(a.getAssetMode() != null ? a.getAssetMode() : "单机设备");
         r.setModel(a.getModel());
         r.setStatus(a.getStatus());
         r.setMarketPrice(a.getMarketPrice());
@@ -213,6 +219,8 @@ public class AssetService {
         r.setDeliveryAddress(a.getDeliveryAddress());
         r.setDeliveryContact(a.getDeliveryContact());
         r.setWeighTons(a.getWeighTons());
+        r.setPalletSlots(a.getPalletSlots());
+        r.setWarehouseZone(a.getWarehouseZone());
         r.setRemark(a.getRemark());
         r.setSensitiveMasked(!seeCost);
         r.setBookValue(seeCost ? bookValue(a) : null);
@@ -231,7 +239,63 @@ public class AssetService {
         r.setTimeline(timeline(id));
         r.setDisposals(transferQueryService.disposalsByAsset(
                 java.util.Collections.singletonList(id)).get(id));
+        r.setLifecycleReturn(computeLifecycleReturn(a, r.getDisposals(), seeCost));
         return r;
+    }
+
+    /** 资产全生命周期跨多任租客复投累计收益（Step 3：含一任+二任租金 + 处置回款 − 原始采购成本）。 */
+    private AssetDetailResponse.LifecycleReturn computeLifecycleReturn(
+            Asset a, List<top.aole.rent.modules.transfer.dto.TransferDtos.DisposalLine> disposals, boolean seeCost) {
+        AssetDetailResponse.LifecycleReturn lr = new AssetDetailResponse.LifecycleReturn();
+        List<ContractAsset> links = contractAssetMapper.selectList(new LambdaQueryWrapper<ContractAsset>()
+                .eq(ContractAsset::getAssetId, a.getId())
+                .eq(ContractAsset::getIsDeleted, 0));
+        BigDecimal rentSum = BigDecimal.ZERO;
+        Set<Long> seenContracts = new LinkedHashSet<>();
+        for (ContractAsset ca : links) {
+            if (ca.getContractId() == null || !seenContracts.add(ca.getContractId())) {
+                continue;
+            }
+            Contract c = contractMapper.selectById(ca.getContractId());
+            if (c == null || "已作废".equals(c.getStatus())) {
+                continue;
+            }
+            lr.getContractNos().add(c.getNo());
+            if (rentBillMapper != null) {
+                List<top.aole.rent.modules.billing.domain.RentBill> bills = rentBillMapper.selectList(
+                        new LambdaQueryWrapper<top.aole.rent.modules.billing.domain.RentBill>()
+                                .eq(top.aole.rent.modules.billing.domain.RentBill::getContractId, c.getId())
+                                .eq(top.aole.rent.modules.billing.domain.RentBill::getIsDeleted, 0));
+                BigDecimal contractReceived = top.aole.rent.modules.contract.service.ContractReceipts
+                        .totals(bills).getOrDefault(c.getId(), BigDecimal.ZERO);
+                if (contractReceived.signum() > 0) {
+                    BigDecimal share = (c.getMonthRent() != null && c.getMonthRent().signum() > 0 && ca.getAllocRent() != null)
+                            ? ca.getAllocRent().divide(c.getMonthRent(), 6, RoundingMode.HALF_UP).min(BigDecimal.ONE)
+                            : BigDecimal.ONE;
+                    rentSum = rentSum.add(contractReceived.multiply(share));
+                }
+            }
+        }
+        BigDecimal disposalSum = BigDecimal.ZERO;
+        if (disposals != null) {
+            for (top.aole.rent.modules.transfer.dto.TransferDtos.DisposalLine d : disposals) {
+                if ("已完成".equals(d.getStatus()) && d.getTransferPrice() != null) {
+                    disposalSum = disposalSum.add(d.getTransferPrice());
+                }
+            }
+        }
+        lr.setContractCount(lr.getContractNos().size());
+        lr.setTotalCollectedRent(rentSum.setScale(2, RoundingMode.HALF_UP));
+        lr.setTotalDisposalProceeds(disposalSum.setScale(2, RoundingMode.HALF_UP));
+        if (seeCost) {
+            BigDecimal cost = a.getDealPriceOverride() != null ? a.getDealPriceOverride()
+                    : (a.getPurchasePrice() != null ? a.getPurchasePrice() : BigDecimal.ZERO);
+            BigDecimal net = rentSum.add(disposalSum).subtract(cost).setScale(2, RoundingMode.HALF_UP);
+            lr.setPurchaseCost(cost.setScale(2, RoundingMode.HALF_UP));
+            lr.setLifetimeNetProfit(net);
+            lr.setLifetimeRoi(cost.signum() > 0 ? net.divide(cost, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        }
+        return lr;
     }
 
     // ============ CRUD ============
@@ -308,6 +372,9 @@ public class AssetService {
     private void applySave(Asset a, AssetSaveRequest req) {
         a.setSerialNo(trimToNull(req.getSerialNo()));
         a.setCategory(req.getCategory().trim());
+        a.setAssetMode(req.getAssetMode() == null || req.getAssetMode().trim().isEmpty()
+                ? ("货架".equals(a.getCategory()) || "阁楼".equals(a.getCategory()) ? "工程套装" : "单机设备")
+                : req.getAssetMode().trim());
         a.setModel(req.getModel());
         a.setMarketPrice(req.getMarketPrice());
         BigDecimal effectivePrice = req.getDealPriceOverride() != null ? req.getDealPriceOverride() : req.getPurchasePrice();
@@ -324,6 +391,8 @@ public class AssetService {
         a.setDeliveryAddress(req.getDeliveryAddress());
         a.setDeliveryContact(req.getDeliveryContact());
         a.setWeighTons(req.getWeighTons());
+        a.setPalletSlots(req.getPalletSlots());
+        a.setWarehouseZone(req.getWarehouseZone());
         a.setRemark(req.getRemark());
     }
 

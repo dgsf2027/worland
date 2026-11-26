@@ -209,20 +209,22 @@ async function confirmRented() {
 const assetDialogVisible = ref(false)
 const assetDialogMode = ref<'create' | 'edit'>('create')
 const assetForm = reactive<Record<string, any>>({
-  category: '播种墙', model: '', marketPrice: undefined,
+  category: '播种墙', assetMode: '单机设备', model: '', marketPrice: undefined,
   purchasePrice: undefined, dealPriceOverride: undefined, supplierId: undefined,
   monthlyLaborValue: undefined, replaceHeadcount: undefined,
   warrantyYears: undefined, warrantyStartDate: '', warrantyEndDate: '',
-  deliveryAddress: '', deliveryContact: '', weighTons: undefined, remark: '',
+  deliveryAddress: '', deliveryContact: '', weighTons: undefined,
+  palletSlots: undefined, warehouseZone: '', remark: '',
 })
 
 function resetAssetForm() {
   Object.assign(assetForm, {
-    category: '播种墙', model: '', marketPrice: undefined,
+    category: '播种墙', assetMode: '单机设备', model: '', marketPrice: undefined,
     purchasePrice: undefined, dealPriceOverride: undefined, supplierId: undefined,
     monthlyLaborValue: undefined, replaceHeadcount: undefined,
     warrantyYears: undefined, warrantyStartDate: '', warrantyEndDate: '',
-    deliveryAddress: '', deliveryContact: '', weighTons: undefined, remark: '',
+    deliveryAddress: '', deliveryContact: '', weighTons: undefined,
+    palletSlots: undefined, warehouseZone: '', remark: '',
   })
 }
 
@@ -237,6 +239,7 @@ function openEditAsset() {
   assetDialogMode.value = 'edit'
   Object.assign(assetForm, {
     category: detail.value.category,
+    assetMode: detail.value.assetMode || (detail.value.category === '货架' || detail.value.category === '阁楼' ? '工程套装' : '单机设备'),
     model: detail.value.model || '',
     marketPrice: detail.value.marketPrice,
     purchasePrice: detail.value.purchasePrice,
@@ -250,6 +253,8 @@ function openEditAsset() {
     deliveryAddress: detail.value.deliveryAddress || '',
     deliveryContact: detail.value.deliveryContact || '',
     weighTons: detail.value.weighTons,
+    palletSlots: detail.value.palletSlots,
+    warehouseZone: detail.value.warehouseZone || '',
     remark: detail.value.remark || '',
   })
   assetDialogVisible.value = true
@@ -845,8 +850,24 @@ onMounted(async () => {
           <div class="upload-tip">{{ row.serialNo }}</div>
         </template>
       </el-table-column>
-      <el-table-column prop="category" label="品类" width="90" />
-      <el-table-column prop="model" label="型号" min-width="150" show-overflow-tooltip />
+      <el-table-column label="品类 / 形态" width="125">
+        <template #default="{ row }">
+          <div>{{ row.category }}</div>
+          <el-tag size="small" :type="row.assetMode === '工程套装' ? 'warning' : 'info'" effect="plain">
+            {{ row.assetMode || '单机设备' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="型号 / 货位库区" min-width="170" show-overflow-tooltip>
+        <template #default="{ row }">
+          <div>{{ row.model || '—' }}</div>
+          <div v-if="row.palletSlots || row.warehouseZone" class="upload-tip">
+            <span v-if="row.palletSlots">{{ row.palletSlots }} 货位</span>
+            <span v-if="row.palletSlots && row.warehouseZone"> · </span>
+            <span v-if="row.warehouseZone">{{ row.warehouseZone }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }"><el-tag :type="statusType[row.status] || 'info'" size="small">{{ row.status }}</el-tag></template>
       </el-table-column>
@@ -885,8 +906,17 @@ onMounted(async () => {
 
         <!-- 要点 -->
         <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="品类">{{ detail.category }}</el-descriptions-item>
+          <el-descriptions-item label="品类 / 形态">
+            {{ detail.category }}
+            <el-tag size="small" :type="detail.assetMode === '工程套装' ? 'warning' : 'info'" effect="plain" style="margin-left:4px">
+              {{ detail.assetMode || '单机设备' }}
+            </el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="型号">{{ detail.model || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="货位数 / 库区">
+            {{ detail.palletSlots != null ? `${detail.palletSlots} 货位` : '—' }}
+            <span v-if="detail.warehouseZone"> · {{ detail.warehouseZone }}</span>
+          </el-descriptions-item>
           <el-descriptions-item label="供应商">{{ detail.supplierName || '—' }}</el-descriptions-item>
           <el-descriptions-item label="市场价">{{ money(detail.marketPrice) }}</el-descriptions-item>
           <el-descriptions-item label="所属合同">
@@ -1090,6 +1120,30 @@ onMounted(async () => {
         <el-empty v-else :description="detail.sensitiveMasked ? '当前角色不可见' : '所属合同还没设置付款方式，点右上「到合同里修改」'" :image-size="50" />
         <div v-if="detail.paymentPlan.note" class="upload-tip">{{ detail.paymentPlan.note }}</div>
 
+        <!-- 全生命周期跨租客复投收益（V131） -->
+        <template v-if="detail.lifecycleReturn">
+          <div class="block-title">全生命周期收益（跨多任租客复投累计）</div>
+          <el-descriptions :column="3" border size="small" style="margin-bottom:12px">
+            <el-descriptions-item label="累计服务合同">
+              {{ detail.lifecycleReturn.contractCount }} 份
+              <span v-if="detail.lifecycleReturn.contractNos?.length" class="upload-tip">
+                （{{ detail.lifecycleReturn.contractNos.join(' / ') }}）
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="跨任累计实收租金">{{ money(detail.lifecycleReturn.totalCollectedRent) }}</el-descriptions-item>
+            <el-descriptions-item label="处置/留购回款">{{ money(detail.lifecycleReturn.totalDisposalProceeds) }}</el-descriptions-item>
+            <el-descriptions-item v-if="!detail.sensitiveMasked" label="原始采购成本🔒">{{ money(detail.lifecycleReturn.purchaseCost) }}</el-descriptions-item>
+            <el-descriptions-item v-if="!detail.sensitiveMasked" label="全生命周期净收益🔒">
+              <b :style="{ color: (detail.lifecycleReturn.lifetimeNetProfit ?? 0) >= 0 ? '#16a34a' : '#d97706' }">
+                {{ money(detail.lifecycleReturn.lifetimeNetProfit) }}
+              </b>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="!detail.sensitiveMasked" label="累计投资回报率(ROI)🔒">
+              {{ detail.lifecycleReturn.lifetimeRoi != null ? (detail.lifecycleReturn.lifetimeRoi * 100).toFixed(1) + '%' : '—' }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </template>
+
         <!-- 转让/处置记录(转让模块反向关联) -->
         <div class="block-title">转让 / 处置记录</div>
         <el-table v-if="detail.disposals && detail.disposals.length" :data="detail.disposals" size="small" border>
@@ -1210,7 +1264,25 @@ onMounted(async () => {
             <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
+        <el-form-item label="建档形态">
+          <el-radio-group v-model="assetForm.assetMode">
+            <el-radio-button value="工程套装">工程套装（货架整套）</el-radio-button>
+            <el-radio-button value="单机设备">单机设备</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="型号"><el-input v-model="assetForm.model" /></el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="货位数">
+              <el-input-number v-model="assetForm.palletSlots" :min="0" :precision="0" :controls="false" style="width:100%" placeholder="如 2279" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="安装库区/楼层">
+              <el-input v-model="assetForm.warehouseZone" placeholder="如 B栋二楼东区" />
+            </el-form-item>
+          </el-col>
+        </el-row>
         <el-form-item label="市场价(元)">
           <el-input-number v-model="assetForm.marketPrice" :min="0" :step="1000" style="width:100%" />
         </el-form-item>

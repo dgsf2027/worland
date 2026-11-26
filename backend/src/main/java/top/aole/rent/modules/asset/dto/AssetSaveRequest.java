@@ -22,6 +22,9 @@ public class AssetSaveRequest {
     @NotBlank(message = "品类必填")
     private String category;
 
+    /** 资产形态:单机设备/工程套装 */
+    private String assetMode;
+
     private String model;
     private BigDecimal marketPrice;
     private BigDecimal purchasePrice;
@@ -35,5 +38,7 @@ public class AssetSaveRequest {
     private String deliveryAddress;
     private String deliveryContact;
     private BigDecimal weighTons;
+    private Integer palletSlots;
+    private String warehouseZone;
     private String remark;
 }

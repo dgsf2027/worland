@@ -98,6 +98,12 @@ public class FileStorageService {
         // 资金回单:银行回单截图或 PDF(10-07 纪要,登记付款/核销前必传)
         MAX_BYTES.put(PayProofService.FILE_BIZ_TYPE, 10 * MB);
         ALLOWED_EXT.put(PayProofService.FILE_BIZ_TYPE, new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "pdf")));
+        // 项目/采购交付验收资料:过磅单/送货单/安装现场照/载荷检测报告/三方验收单(V131)
+        for (String del : Arrays.asList("project_delivery", "pc_delivery")) {
+            MAX_BYTES.put(del, 20 * MB);
+            ALLOWED_EXT.put(del, new HashSet<>(Arrays.asList(
+                    "jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "pdf", "doc", "docx", "xls", "xlsx")));
+        }
     }
 
 
@@ -178,6 +184,10 @@ public class FileStorageService {
         if (PayProofService.FILE_BIZ_TYPE.equals(bizType)
                 && !PayProofService.UPLOAD_ROLES.contains(u.getRole())) {
             throw new BizException(403, "当前角色无权上传回单(需 老板/财务/供应链)");
+        }
+        if (("project_delivery".equals(bizType) || "pc_delivery".equals(bizType))
+                && !DataScope.canSeeCost(u.getRole())) {
+            throw new BizException(403, "当前角色无权上传项目或采购交付验收附件");
         }
         checkFormatAndSize(file, bizType);
         String key = UUID.randomUUID().toString().replace("-", "");

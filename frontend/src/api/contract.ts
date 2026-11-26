@@ -423,3 +423,48 @@ export function fetchProjectPanorama(id: number): Promise<ProjectPanorama> {
 export function fetchWorkbenchProjectPanoramas(): Promise<ProjectPanoramaOverview> {
   return request.get('/rent/workbench/project-panoramas')
 }
+
+export interface EarlyBuyoutPreview {
+  contractId: number
+  contractNo: string
+  customerName?: string
+  buyoutDate: string
+  totalPeriods: number
+  settledPeriods: number
+  remainingPeriods: number
+  remainingPrincipal: number
+  overdueUnpaidRent: number
+  penaltyRate: number
+  penaltyAmount: number
+  endTransferPrice: number
+  depositHeld: number
+  netBuyoutPayable: number
+  collectedRent: number
+  totalRecoveryIfBuyout: number
+  purchaseCost?: number
+  buyoutGrossProfit?: number
+  fullTermGrossProfit?: number
+}
+
+export interface EarlyBuyoutExecuteResult {
+  contractId: number
+  contractNo: string
+  finalBuyoutAmount: number
+  truncatedPeriods: number
+  transferredAssets: number
+  contractStatus: string
+}
+
+export function fetchEarlyBuyoutPreview(
+  id: number,
+  params?: { buyoutDate?: string; penaltyRate?: number },
+): Promise<EarlyBuyoutPreview> {
+  return request.get(`/rent/contracts/${id}/early-buyout-preview`, { params })
+}
+
+export function executeEarlyBuyout(
+  id: number,
+  body: { buyoutDate?: string; penaltyRate?: number; negotiatedAmount?: number | null; remark?: string },
+): Promise<EarlyBuyoutExecuteResult> {
+  return request.post(`/rent/contracts/${id}/early-buyout`, body)
+}

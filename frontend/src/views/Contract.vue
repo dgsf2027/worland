@@ -7,8 +7,9 @@ import {
   editContract, fetchContractFiles, uploadContractFile, CONTRACT_ATTACHMENT_EXTS, CONTRACT_ATTACHMENT_MAX_MB,
   saveContractBoq, importContractBoq, exportContractBoq, generateAssetsFromBoq, BOQ_ASSET_CATEGORIES,
   fetchContractPaymentTerms, saveContractPaymentTerms,
+  fetchEarlyBuyoutPreview, executeEarlyBuyout,
   type ContractListItem, type ContractDetail, type ContractFile, type BoqLine, type BoqImportResult,
-  type ContractPaymentTermView,
+  type ContractPaymentTermView, type EarlyBuyoutPreview,
 } from '@/api/contract'
 import { fetchCustomerPool, type CustomerPoolItem } from '@/api/customer'
 import { fetchAssets, checkUploadFile, saveFile, toTermRows, toTermInputs, checkTermRows,
@@ -509,6 +510,65 @@ async function doChange() {
   openDetail(detail.value.id); loadList()
 }
 
+// ---- 租中提前买断试算与办理（V131） ----
+const buyoutVisible = ref(false)
+const buyoutLoading = ref(false)
+const buyoutExecuting = ref(false)
+const buyoutPreview = ref<EarlyBuyoutPreview | null>(null)
+const buyoutForm = reactive({
+  buyoutDate: new Date().toISOString().slice(0, 10),
+  penaltyPct: 3,
+  negotiatedAmount: undefined as number | undefined,
+  remark: '',
+})
+async function loadBuyoutPreview() {
+  if (!detail.value) return
+  buyoutLoading.value = true
+  try {
+    buyoutPreview.value = await fetchEarlyBuyoutPreview(detail.value.id, {
+      buyoutDate: buyoutForm.buyoutDate || undefined,
+      penaltyRate: Number(buyoutForm.penaltyPct ?? 3) / 100,
+    })
+  } finally {
+    buyoutLoading.value = false
+  }
+}
+async function openEarlyBuyout() {
+  if (!detail.value) return
+  buyoutForm.buyoutDate = new Date().toISOString().slice(0, 10)
+  buyoutForm.penaltyPct = 3
+  buyoutForm.negotiatedAmount = undefined
+  buyoutForm.remark = ''
+  buyoutVisible.value = true
+  await loadBuyoutPreview()
+}
+async function submitEarlyBuyout() {
+  if (!detail.value || !buyoutPreview.value) return
+  const amt = buyoutForm.negotiatedAmount ?? buyoutPreview.value.netBuyoutPayable
+  try {
+    await ElMessageBox.confirm(
+      `确认对合同 ${detail.value.no} 办理提前买断？\n实付买断额：${money(amt)}；将截断未来未到期租金计划、押金期末抵扣并将挂账设备过户给客户。`,
+      '确认提前买断',
+      { type: 'warning', confirmButtonText: '确认办理' },
+    )
+  } catch { return }
+  buyoutExecuting.value = true
+  try {
+    const res = await executeEarlyBuyout(detail.value.id, {
+      buyoutDate: buyoutForm.buyoutDate || undefined,
+      penaltyRate: Number(buyoutForm.penaltyPct ?? 3) / 100,
+      negotiatedAmount: buyoutForm.negotiatedAmount ?? null,
+      remark: buyoutForm.remark || undefined,
+    })
+    ElMessage.success(`提前买断已办结：实付 ${money(res.finalBuyoutAmount)}，截断 ${res.truncatedPeriods} 期，过户 ${res.transferredAssets} 套/台`)
+    buyoutVisible.value = false
+    await openDetail(detail.value.id)
+    await loadList()
+  } finally {
+    buyoutExecuting.value = false
+  }
+}
+
 const filterCustomerName = computed(() =>
   filters.customerId ? (customers.value.find((c) => c.id === filters.customerId)?.name || `客户#${filters.customerId}`) : '')
 function clearCustomerFilter() {
@@ -596,6 +656,7 @@ onMounted(() => {
           <el-button size="small" type="success" @click="openPanorama(detail.id)">📊 项目真实利润全景</el-button>
           <el-button size="small" type="primary" :disabled="!canEdit" @click="openEdit">编辑合同</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doRenew">续租</el-button>
+          <el-button size="small" type="warning" plain :disabled="detail.status !== '生效'" @click="openEarlyBuyout">💰 提前买断</el-button>
           <el-button size="small" :disabled="detail.status !== '生效'" @click="doChange">提前结清</el-button>
           <el-button size="small" type="danger" :disabled="detail.status === '已作废' || detail.status === '关闭'" @click="doVoid">作废(红冲)</el-button>
         </div>
@@ -993,6 +1054,59 @@ onMounted(() => {
         <div class="sub edit-tip">月租变化时，挂载设备的单台分摊按原比例重新分配。需要财务或老板角色。</div>
       </el-form>
       <template #footer><el-button :disabled="editSaving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="editSaving" @click="submitEdit">保存</el-button></template>
+    </el-dialog>
+
+    <!-- 租中提前买断试算与办理弹窗 -->
+    <el-dialog v-model="buyoutVisible" title="租中提前买断试算与办理" width="640px">
+      <div v-loading="buyoutLoading">
+        <el-form :model="buyoutForm" label-width="115px" size="small">
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="买断结算日">
+                <el-date-picker v-model="buyoutForm.buyoutDate" type="date" value-format="YYYY-MM-DD" style="width:100%" @change="loadBuyoutPreview" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="违约金比例(%)">
+                <el-input-number v-model="buyoutForm.penaltyPct" :min="0" :max="50" :precision="2" style="width:100%" @change="loadBuyoutPreview" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+        <template v-if="buyoutPreview">
+          <el-descriptions :column="2" border size="small" style="margin-bottom:12px">
+            <el-descriptions-item label="已结 / 剩余期数">{{ buyoutPreview.settledPeriods }} / {{ buyoutPreview.remainingPeriods }} 期（共 {{ buyoutPreview.totalPeriods }} 期）</el-descriptions-item>
+            <el-descriptions-item label="剩余未还本金"><b>{{ money(buyoutPreview.remainingPrincipal) }}</b></el-descriptions-item>
+            <el-descriptions-item label="逾期未收租金">{{ money(buyoutPreview.overdueUnpaidRent) }}</el-descriptions-item>
+            <el-descriptions-item label="提前买断违约金">{{ money(buyoutPreview.penaltyAmount) }}（{{ (buyoutPreview.penaltyRate * 100).toFixed(2) }}%）</el-descriptions-item>
+            <el-descriptions-item label="约定期末留购价">{{ money(buyoutPreview.endTransferPrice) }}</el-descriptions-item>
+            <el-descriptions-item label="在手押金抵扣">− {{ money(buyoutPreview.depositHeld) }}</el-descriptions-item>
+            <el-descriptions-item label="公式应补买断净额" :span="2">
+              <b style="font-size:16px;color:#d97706">{{ money(buyoutPreview.netBuyoutPayable) }}</b>
+              <span class="mini-note">（= 剩余本金 + 逾期租金 + 违约金 + 留购价 − 在手押金）</span>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="buyoutPreview.buyoutGrossProfit != null" label="提前买断毛利">
+              <b style="color:#16a34a">{{ money(buyoutPreview.buyoutGrossProfit) }}</b>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="buyoutPreview.fullTermGrossProfit != null" label="原持有到期毛利">
+              {{ money(buyoutPreview.fullTermGrossProfit) }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-form :model="buyoutForm" label-width="115px" size="small">
+            <el-form-item label="协商实付金额">
+              <el-input-number v-model="buyoutForm.negotiatedAmount" :min="0" :precision="2" :controls="false" style="width:220px" placeholder="留空按公式净额" />
+              <span class="mini-note">如有商务折让可手工覆盖</span>
+            </el-form-item>
+            <el-form-item label="办理说明">
+              <el-input v-model="buyoutForm.remark" maxlength="200" placeholder="如：客户提前一次性买断结清" />
+            </el-form-item>
+          </el-form>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="buyoutVisible = false">取消</el-button>
+        <el-button type="primary" :loading="buyoutExecuting" :disabled="!buyoutPreview" @click="submitEarlyBuyout">确认办理提前买断</el-button>
+      </template>
     </el-dialog>
 
     <ProjectPanoramaDrawer v-model="panoramaDrawer" :contract-id="panoramaContractId" />

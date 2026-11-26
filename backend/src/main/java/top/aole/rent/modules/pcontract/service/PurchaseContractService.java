@@ -268,10 +268,15 @@ public class PurchaseContractService {
                 c.getContractNo() + " → 主租赁合同#" + rentContractId);
     }
 
-    /** 登记采购合同验收/资料审核通过日,自动按月结/次月/次次月规则重算各付款节点到期日。 */
+    /** 登记采购合同交付/过磅/安装/验收/资料审核通过日,自动按月结/次月/次次月规则重算各付款节点到期日。 */
     @Transactional(rollbackFor = Exception.class)
     public void recordAcceptance(Long pcId, PcDtos.AcceptanceRequest req) {
         PurchaseContract c = requireActive(pcId);
+        if (req.getShippedDate() != null) c.setShippedDate(req.getShippedDate());
+        if (req.getInstallDoneDate() != null) c.setInstallDoneDate(req.getInstallDoneDate());
+        if (req.getLoadTestDate() != null) c.setLoadTestDate(req.getLoadTestDate());
+        if (req.getWeighTons() != null) c.setWeighTons(req.getWeighTons());
+        if (req.getPalletSlots() != null) c.setPalletSlots(req.getPalletSlots());
         if (req.getAcceptanceDate() != null) c.setAcceptanceDate(req.getAcceptanceDate());
         if (req.getAuditPassDate() != null) c.setAuditPassDate(req.getAuditPassDate());
         if (req.getWarrantyYears() != null) c.setWarrantyYears(req.getWarrantyYears());
@@ -291,7 +296,8 @@ public class PurchaseContractService {
             }
         }
         auditLogService.record("采购合同验收审核", "purchase_contract", pcId, AuditLogService.EXECUTED,
-                c.getContractNo() + " 验收日=" + c.getAcceptanceDate() + " 审核日=" + c.getAuditPassDate());
+                c.getContractNo() + " 过磅=" + c.getWeighTons() + "吨 验收日=" + c.getAcceptanceDate()
+                        + " 审核日=" + c.getAuditPassDate());
     }
 
     private LocalDate resolveTermBaseDate(PurchaseContract c, String triggerPoint) {
@@ -726,6 +732,11 @@ public class PurchaseContractService {
         v.setWarrantyYears(c.getWarrantyYears());
         v.setDeliveryAddress(c.getDeliveryAddress());
         v.setDeliveryContact(c.getDeliveryContact());
+        v.setShippedDate(c.getShippedDate());
+        v.setInstallDoneDate(c.getInstallDoneDate());
+        v.setLoadTestDate(c.getLoadTestDate());
+        v.setWeighTons(c.getWeighTons());
+        v.setPalletSlots(c.getPalletSlots());
         v.setAcceptanceDate(c.getAcceptanceDate());
         v.setAuditPassDate(c.getAuditPassDate());
         v.setStatus(c.getStatus());

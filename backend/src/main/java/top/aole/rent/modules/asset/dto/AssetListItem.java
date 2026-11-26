@@ -16,7 +16,10 @@ public class AssetListItem {
     private String contractNo;
     private Long contractId;
     private String category;
+    private String assetMode;
     private String model;
+    private Integer palletSlots;
+    private String warehouseZone;
     private String status;
     private BigDecimal marketPrice;
     /** 【敏感】集采价;GP/LP 置 null */

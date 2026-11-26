@@ -31,6 +31,9 @@ public class Asset {
     /** 品类:播种墙/货架/阁楼/配件 */
     private String category;
 
+    /** 资产形态:单机设备/工程套装(货架按套建档,不强拆单台) */
+    private String assetMode;
+
     private String model;
 
     /** 市场价(元);残值=市场价×品类转让率 */
@@ -84,6 +87,10 @@ public class Asset {
     private String deliveryAddress;
     private String deliveryContact;
     private BigDecimal weighTons;
+    /** 工程套装总货位数(如 2279) */
+    private Integer palletSlots;
+    /** 安装库区/楼层(如 茶塘园区B区1楼) */
+    private String warehouseZone;
 
     private LocalDateTime createTime;
 
