@@ -188,10 +188,10 @@ public class AutomationEngineService {
             skipped.setSummary("规则已关闭，跳过定时执行");
             return skipped;
         }
-        // Cron 后台线程无登录用户，临时注入系统老板上下文以便复用水位线等权限口径
+        // Cron 后台线程无登录用户，临时注入系统老板上下文以便复用水位线等权限口径（userId 须非 0）
         boolean injected = false;
         if (UserContext.get() == null) {
-            UserContext.set(new CurrentUser(0L, "系统自动化", "老板", 1L));
+            UserContext.set(new CurrentUser(-1L, "系统自动化", "老板", 1L));
             injected = true;
         }
         try {

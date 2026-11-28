@@ -19,7 +19,7 @@ export interface AutomationRule {
 export interface NotifyChannel {
   id: number
   name: string
-  channelType: 'wecom' | 'dingtalk' | 'feishu' | 'generic'
+  channelType: 'wecom' | 'wecom_app' | 'dingtalk' | 'feishu' | 'generic'
   webhookUrl: string
   secret?: string
   targetRole: string

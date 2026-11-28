@@ -131,6 +131,52 @@ class AutomationPhase1And2Test {
         lpReq.setWebhookUrl("https://example.com/hook");
         lpReq.setTargetRole("LP");
         assertThrows(Exception.class, () -> engineService.saveChannel(lpReq));
+
+        // 校验企微/飞书业务返回码：errcode!=0 必须报错（杜绝 HTTP 200 假绿灯）
+        assertThrows(IllegalStateException.class, () ->
+                realWebhook.validatePlatformResponse("wecom", "{\"errcode\":93000,\"errmsg\":\"invalid webhook url\"}"));
+        assertThrows(IllegalStateException.class, () ->
+                realWebhook.validatePlatformResponse("feishu", "{\"code\":19021,\"msg\":\"sign match fail\"}"));
+        assertDoesNotThrow(() ->
+                realWebhook.validatePlatformResponse("wecom", "{\"errcode\":0,\"errmsg\":\"ok\"}"));
+
+        // 企微自建应用（直达个人微信）：解析 spec 并生成个人微信兼容的 text 载荷（去除 markdown 星号）
+        String[] spec = realWebhook.parseWecomAppSpec("wecom-app://ww123456/1000002/LaobanId");
+        assertEquals("ww123456", spec[0]);
+        assertEquals("1000002", spec[1]);
+        assertEquals("LaobanId", spec[2]);
+        String appPayload = realWebhook.buildWecomAppPayload(1000002, "LaobanId", "晨报", "- 昨日实收：**¥100.00**");
+        assertTrue(appPayload.contains("\"msgtype\":\"text\""));
+        assertTrue(appPayload.contains("\"agentid\":1000002"));
+        assertTrue(appPayload.contains("\"touser\":\"LaobanId\""));
+        assertFalse(appPayload.contains("**"));
+    }
+
+    @Test
+    void cronRunInjectsValidSystemBossContextWithoutAuthError() {
+        UserContext.clear();
+        AutomationRule rule = new AutomationRule();
+        rule.setId(6L);
+        rule.setRuleKey("cash_waterline_alert");
+        rule.setRuleName("银行资金水位安全垫预警");
+        rule.setEnabled(1);
+        rule.setThresholdAmount(new BigDecimal("50000.00"));
+        rule.setTargetRole("老板");
+
+        WorkbenchWaterlineDtos.CashWaterline wl = new WorkbenchWaterlineDtos.CashWaterline();
+        wl.setSavedCashBalance(new BigDecimal("100000.00"));
+        wl.setMinBalance(new BigDecimal("80000.00"));
+        wl.setMinBalanceMonth("2026-12");
+
+        when(ruleMapper.selectOne(any())).thenReturn(rule);
+        when(waterlineService.cashWaterline(6, null)).thenAnswer(inv -> {
+            assertEquals("老板", UserContext.getRole());
+            return wl;
+        });
+
+        AutomationDtos.RunResult res = engineService.runRule("cash_waterline_alert", "CRON", false);
+        assertEquals("SUCCESS", res.getStatus());
+        assertNull(UserContext.get());
     }
 
     @Test

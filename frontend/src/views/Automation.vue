@@ -279,11 +279,14 @@ const testingChannelId = ref<number | null>(null)
 const channelForm = reactive<Record<string, any>>({
   id: undefined,
   name: '',
-  channelType: 'wecom',
+  channelType: 'wecom_app',
   webhookUrl: '',
   secret: '',
   targetRole: '老板',
   enabled: true,
+  corpId: '',
+  agentId: '',
+  toUser: '@all',
 })
 
 async function loadChannels() {
@@ -299,16 +302,29 @@ function openCreateChannel() {
   Object.assign(channelForm, {
     id: undefined,
     name: '',
-    channelType: 'wecom',
+    channelType: 'wecom_app',
     webhookUrl: '',
     secret: '',
     targetRole: '老板',
     enabled: true,
+    corpId: '',
+    agentId: '',
+    toUser: '@all',
   })
   channelDlg.value = true
 }
 
 function openEditChannel(ch: NotifyChannel) {
+  let corpId = ''
+  let agentId = ''
+  let toUser = '@all'
+  if (ch.channelType === 'wecom_app' && ch.webhookUrl) {
+    const raw = ch.webhookUrl.replace(/^wecom-app:\/\//, '')
+    const parts = raw.split('/')
+    corpId = parts[0] || ''
+    agentId = parts[1] || ''
+    toUser = parts[2] || '@all'
+  }
   Object.assign(channelForm, {
     id: ch.id,
     name: ch.name,
@@ -317,18 +333,40 @@ function openEditChannel(ch: NotifyChannel) {
     secret: ch.secret || '',
     targetRole: ch.targetRole,
     enabled: ch.enabled === 1,
+    corpId,
+    agentId,
+    toUser,
   })
   channelDlg.value = true
 }
 
 async function submitChannel() {
-  if (!channelForm.name?.trim() || !channelForm.webhookUrl?.trim()) {
-    ElMessage.warning('通道名称与 Webhook 地址必填')
+  if (!channelForm.name?.trim()) {
+    ElMessage.warning('通道名称必填')
+    return
+  }
+  let webhookUrl = channelForm.webhookUrl?.trim() || ''
+  if (channelForm.channelType === 'wecom_app') {
+    if (!channelForm.corpId?.trim() || !channelForm.agentId?.trim() || !channelForm.secret?.trim() || !channelForm.toUser?.trim()) {
+      ElMessage.warning('企微自建应用需完整填写 CorpID、AgentId、Secret 与接收人账号')
+      return
+    }
+    webhookUrl = `wecom-app://${channelForm.corpId.trim()}/${channelForm.agentId.trim()}/${channelForm.toUser.trim()}`
+  } else if (!webhookUrl) {
+    ElMessage.warning('Webhook 地址必填')
     return
   }
   channelSaving.value = true
   try {
-    await saveNotifyChannel(channelForm)
+    await saveNotifyChannel({
+      id: channelForm.id,
+      name: channelForm.name.trim(),
+      channelType: channelForm.channelType,
+      webhookUrl,
+      secret: channelForm.secret?.trim() || '',
+      targetRole: channelForm.targetRole,
+      enabled: channelForm.enabled,
+    })
     channelDlg.value = false
     ElMessage.success('外推通道已保存')
     await loadChannels()
@@ -372,7 +410,13 @@ function matchTag(status: string) {
   return 'info'
 }
 function channelLabel(t: string) {
-  return ({ wecom: '企业微信机器人', dingtalk: '钉钉机器人', feishu: '飞书机器人', generic: '通用Webhook' } as any)[t] || t
+  return ({
+    wecom_app: '企微应用(直达微信)',
+    wecom: '企业微信群机器人',
+    dingtalk: '钉钉机器人',
+    feishu: '飞书机器人',
+    generic: '通用Webhook',
+  } as any)[t] || t
 }
 
 onMounted(async () => {
@@ -682,14 +726,15 @@ onMounted(async () => {
     </el-dialog>
 
     <!-- 新增/编辑外推通道弹窗 -->
-    <el-dialog v-model="channelDlg" :title="channelForm.id ? '编辑推送通道' : '新增外推消息通道'" width="540px">
-      <el-form :model="channelForm" label-width="110px" size="small">
+    <el-dialog v-model="channelDlg" :title="channelForm.id ? '编辑推送通道' : '新增外推消息通道'" width="580px">
+      <el-form :model="channelForm" label-width="115px" size="small">
         <el-form-item label="通道名称" required>
-          <el-input v-model="channelForm.name" placeholder="如：老板企微群 / 财务钉钉提醒群" />
+          <el-input v-model="channelForm.name" placeholder="如：老板个人微信晨报 / 财务企微提醒群" />
         </el-form-item>
         <el-form-item label="平台类型" required>
           <el-radio-group v-model="channelForm.channelType">
-            <el-radio-button value="wecom">企业微信</el-radio-button>
+            <el-radio-button value="wecom_app">企微应用(直达微信)</el-radio-button>
+            <el-radio-button value="wecom">企微群机器人</el-radio-button>
             <el-radio-button value="dingtalk">钉钉</el-radio-button>
             <el-radio-button value="feishu">飞书</el-radio-button>
             <el-radio-button value="generic">通用Webhook</el-radio-button>
@@ -703,12 +748,34 @@ onMounted(async () => {
             <el-option label="全员（接收全部角色通知）" value="全员" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Webhook 地址" required>
-          <el-input v-model="channelForm.webhookUrl" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
-        </el-form-item>
-        <el-form-item label="加签 Secret">
-          <el-input v-model="channelForm.secret" placeholder="钉钉/飞书开启加签校验时填写，企微留空" />
-        </el-form-item>
+        <template v-if="channelForm.channelType === 'wecom_app'">
+          <el-alert
+            type="info"
+            :closable="false"
+            style="margin-bottom: 12px"
+            title="企微后台创建自建应用后填入下方 4 项；老板用个人微信扫一次「微信插件」二维码即可直接在微信收晨报（无需装企微）。首次测试若提示 IP 未授权，将报错中的 IP 填入自建应用「企业可信IP」即可。"
+          />
+          <el-form-item label="企业 ID (CorpID)" required>
+            <el-input v-model="channelForm.corpId" placeholder="企微管理后台 → 我的企业 → 企业信息底部（ww开头）" />
+          </el-form-item>
+          <el-form-item label="应用 AgentId" required>
+            <el-input v-model="channelForm.agentId" placeholder="自建应用详情页的纯数字 AgentId，如 1000002" />
+          </el-form-item>
+          <el-form-item label="应用 Secret" required>
+            <el-input v-model="channelForm.secret" type="password" show-password placeholder="自建应用详情页查看并复制 Secret" />
+          </el-form-item>
+          <el-form-item label="接收人账号" required>
+            <el-input v-model="channelForm.toUser" placeholder="通讯录成员「账号」UserId（多人用 | 分隔，全部可见成员填 @all）" />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="Webhook 地址" required>
+            <el-input v-model="channelForm.webhookUrl" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+          </el-form-item>
+          <el-form-item label="加签 Secret">
+            <el-input v-model="channelForm.secret" placeholder="钉钉/飞书开启加签校验时填写，企微群机器人留空" />
+          </el-form-item>
+        </template>
         <el-form-item label="启用状态">
           <el-switch v-model="channelForm.enabled" />
         </el-form-item>
